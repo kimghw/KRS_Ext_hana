@@ -123,3 +123,4 @@ argument-hint: "[check|install [<ID>]|ping|test|log [N]|browser|chrome|edge|rest
   을 먼저 세운다(`logs.mjs`·`test/host.test.mjs` 가 그렇게 한다). 브라우저가 띄울 때는 이 변수가 없다.
 - **"등록 완료" 는 성공이 아니다.** 3·6번은 등록 시점에 확인되지 않는다. 그래서 `install` 이
   끝나자마자 `ping` 을 돌리고, 의심되면 `test` 까지 간다.
+ 

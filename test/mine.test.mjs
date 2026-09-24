@@ -133,6 +133,9 @@ console.log('훑기가 기대는 전제 (실제 차량 페이지)');
   t('여러 날 건수가 읽힌다', () => assert.ok(counts.size >= 28));
   t('0건인 날이 있으면 건너뛸 수 있다', () =>
     assert.ok([...counts.values()].every((n) => Number.isInteger(n) && n >= 0)));
+  // 이웃 달 칸(9월 화면의 10/1)에는 건수가 없다. 0건으로 읽으면 옮겨 보지도 않고 "예약 없음" 이 된다.
+  t('이웃 달 칸(10/1)은 0건이 아니라 모름 — 지름길을 타면 안 된다', () =>
+    assert.equal(counts.has('2026-10-01'), false));
 }
 
 console.log(`\n통과 ${pass}건`);

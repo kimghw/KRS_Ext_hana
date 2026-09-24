@@ -14,6 +14,7 @@ import { siteFetch } from './net.js';
 import { parseHtml, postback, formState } from './aspnet.js';
 import {
   parseDate, parseDayCounts, buildGrid, fmtTime, parseTime, rowDeleteHandle, rowDeleteSubmit,
+  dateMoveCandidates,
 } from './parse.js';
 import { detectCarForm, buildCarFields, readAlert, readFormWho } from './carform.js';
 
@@ -193,14 +194,10 @@ export function extractCars(doc, dateStr) {
 let dateMoveWinner = null;
 
 async function gotoDate(pageUrl, doc, dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const sd = `[[${y},${m},${d}]]`;
-  const cands = [
-    { argument: `${y}_${m}_${d}`, extra: { [CALENDAR.selectedField]: sd } },
-    { argument: `${y}_${m}_${d}`, extra: {} },
-    { argument: '', extra: { [CALENDAR.selectedField]: sd } },
-  ];
-  const order = dateMoveWinner == null
+  // 회의실과 같은 후보다. 달력이 펼칠 달(CAL_MAIN_AD 초점일)까지 같이 보내는 쪽이 앞에 온다 —
+  // 차량 달력도 이웃 달 칸에는 건수가 없어서, 달을 안 옮기면 다음 달 이용 건수를 대조할 수 없다.
+  const cands = dateMoveCandidates(doc, dateStr);
+  const order = dateMoveWinner == null || dateMoveWinner >= cands.length
     ? cands.map((_, i) => i)
     : [dateMoveWinner, ...cands.map((_, i) => i).filter((i) => i !== dateMoveWinner)];
 

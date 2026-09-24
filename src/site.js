@@ -4,7 +4,7 @@ import { parseHtml, postback } from './aspnet.js';
 import {
   extractSchedule, parseRooms, parseRegions, parseSelectedRegion,
   parseShownDate, parseDayCounts, buildGrid, fmtTime, parseTime, findOverlap,
-  parseFormDate, telerikDateFields,
+  parseFormDate, telerikDateFields, dateMoveCandidates,
 } from './parse.js';
 import { sortRooms } from './roomorder.js';
 
@@ -23,17 +23,11 @@ import { sortRooms } from './roomorder.js';
 let dateMoveWinner = null;
 
 async function gotoDate(pageUrl, doc, dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const sd = `[[${y},${m},${d}]]`;
+  // 달력이 펼칠 달(CAL_MAIN_AD 초점일)까지 같이 보내는 후보가 앞에 온다. 그래야 다음 달 날짜도
+  // 그 달 달력과 함께 내려와 건수를 대조할 수 있다(parse.js 의 dateMoveCandidates 참고).
+  const candidates = dateMoveCandidates(doc, dateStr);
 
-  const candidates = [
-    { argument: `${y}_${m}_${d}`, extra: { [CALENDAR.selectedField]: sd } },
-    { argument: `${y}_${m}_${d}`, extra: {} },
-    { argument: '', extra: { [CALENDAR.selectedField]: sd } },
-    { argument: `${y}-${m}-${d}`, extra: { [CALENDAR.selectedField]: sd } },
-  ];
-
-  const order = dateMoveWinner == null
+  const order = dateMoveWinner == null || dateMoveWinner >= candidates.length
     ? candidates.map((_, i) => i)
     : [dateMoveWinner, ...candidates.map((_, i) => i).filter((i) => i !== dateMoveWinner)];
 

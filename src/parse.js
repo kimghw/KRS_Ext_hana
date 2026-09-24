@@ -67,22 +67,55 @@ export function parseShownDate(doc) {
   return el ? parseDate(el.textContent) : null;
 }
 
+/** 달력 칸의 title("수요일, 9월 02, 2026")에서 날짜를 읽는다. */
+function calendarCellDate(td) {
+  const md = (td.getAttribute('title') || '').match(/(\d{1,2})월\s*(\d{1,2}),\s*(\d{4})/);
+  return md ? ymd(+md[3], +md[1], +md[2]) : null;
+}
+
+/**
+ * 달력이 지금 펼쳐 놓은 달. 제목 칸 "2026년 9월" → "2026-09".
+ * 제목이 없으면 이웃 달 표시가 없는 칸들의 달로 본다. 그것도 없으면 null.
+ */
+export function parseCalendarMonth(doc) {
+  const title = doc.getElementById(CALENDAR.titleId);
+  const m = clean(title?.textContent).match(/(\d{4})\s*년\s*(\d{1,2})\s*월/);
+  if (m) return `${m[1]}-${String(+m[2]).padStart(2, '0')}`;
+
+  const cal = doc.getElementById(CALENDAR.id);
+  if (!cal) return null;
+  const own = [...cal.querySelectorAll('td[title]')]
+    .filter((td) => !td.classList.contains(CALENDAR.otherMonthClass))
+    .map(calendarCellDate)
+    .filter(Boolean);
+  return own.length ? own[0].slice(0, 7) : null;
+}
+
 /**
  * 월 달력에 찍힌 날짜별 예약 건수.
  * 셀 모양: <td title="수요일, 9월 02, 2026">2<br><font>17건</font></td>
  * 표를 제대로 읽었는지 대조하는 독립적인 근거로 쓴다.
+ *
+ * **이웃 달 칸은 뺀다.** 달력은 앞뒤 줄을 채우려고 이웃 달 며칠을 같이 그리는데
+ * (9월 화면에 8/30~31, 10/1~10) 그 칸(`rcOtherMonth`)에는 건수를 찍지 않는다. 이걸 0건으로 읽으면
+ * 10월 1일에 예약이 10건 있어도 "달력은 0건" 이 되어 확인 불가로 빠지고, 한 달 훑기는 그 날을
+ * 옮겨 보지도 않고 "예약 없음(확신)" 으로 담는다 — 2026-09-24 실제로 그랬다.
+ *
+ * 그래서 **건수를 모르는 날은 Map 에 없다.** 부르는 쪽은 `has()`/`undefined` 로 "0건" 과 구분한다.
  * @returns {Map<string, number>}
  */
 export function parseDayCounts(doc) {
   const counts = new Map();
   const cal = doc.getElementById(CALENDAR.id);
   if (!cal) return counts;
+  const month = parseCalendarMonth(doc);
 
   for (const td of cal.querySelectorAll('td[title]')) {
-    const title = td.getAttribute('title') || '';
-    const md = title.match(/(\d{1,2})월\s*(\d{1,2}),\s*(\d{4})/);
-    if (!md) continue;
-    const key = ymd(+md[3], +md[1], +md[2]);
+    const key = calendarCellDate(td);
+    if (!key) continue;
+    // 이웃 달 칸. 스킨 클래스가 빠져 있어도 펼친 달과 다른 달이면 같은 뜻이다.
+    if (td.classList.contains(CALENDAR.otherMonthClass)) continue;
+    if (month && !key.startsWith(month)) continue;
 
     // 셀 텍스트는 날짜와 건수가 붙어 있다("16" + "10건" → "1610건").
     // 건수는 별도 자식 요소에만 들어 있으므로 거기서 읽는다.
@@ -90,6 +123,65 @@ export function parseDayCounts(doc) {
     counts.set(key, tag ? +tag.textContent.match(/(\d+)/)[1] : 0);
   }
   return counts;
+}
+
+/**
+ * 달력이 펼칠 달을 옮기는 데 필요한 필드. 날짜를 옮기는 포스트백에 얹어 보낸다.
+ *
+ * Telerik RadCalendar 는 어느 달을 펼칠지를 숨은 칸 `CAL_MAIN_AD` = `[[최소일],[최대일],[초점일]]`
+ * 의 **초점일**로 기억한다. 선택일(`CAL_MAIN_SD`)만 바꾸면 목록은 그 날짜로 가지만 달력은
+ * 원래 달에 머물고, 그러면 다음 달 날짜의 건수는 어디에도 없다 — 표를 대조할 근거가 사라진다.
+ *
+ * 최소일·최대일은 지금 값을 그대로 지킨다. 칸이 아예 없으면 빈 객체다 — 없는 칸을 지어내 보내면
+ * 그게 또 다른 어긋남이 된다.
+ *
+ * @param {Document} doc 지금 화면
+ * @param {string} dateStr 'YYYY-MM-DD'
+ * @param {string} [field] 칸 이름. 없으면 회의실·차량이 같이 쓰는 CAL_MAIN_AD.
+ */
+export function telerikFocusFields(doc, dateStr, field = CALENDAR.focusField) {
+  const el = doc.getElementsByName(field)[0];
+  if (!el) return {};
+  const [y, m, d] = dateStr.split('-').map(Number);
+
+  let range = null;
+  try {
+    const cur = JSON.parse(el.getAttribute('value') || '');
+    if (Array.isArray(cur) && cur.length >= 2 && Array.isArray(cur[0]) && Array.isArray(cur[1])) {
+      range = [cur[0], cur[1]];
+    }
+  } catch {
+    // 모양이 다르면 아래 기본 범위를 쓴다
+  }
+  const [min, max] = range || [[1980, 1, 1], [2099, 12, 30]];
+  return { [field]: JSON.stringify([min, max, [y, m, d]]) };
+}
+
+/**
+ * 목록 날짜를 옮기는 달력 포스트백 후보(회의실·차량 공용). 부르는 쪽이 차례로 보내 보고
+ * **화면에 찍힌 날짜로 성공을 판정한다.** 포스트백 인자 형식이 Telerik 내부 규칙이라 추측이고,
+ * 매번 확인하므로 실패하면 실패했다고 말할 수 있다.
+ *
+ * **달력이 펼칠 달(초점일)까지 같이 보내는 쪽을 앞에 둔다.** 선택일만 보내면 목록은 그 날짜로 가지만
+ * 달력은 원래 달에 머문다. 그러면 다음 달 날짜는 달력의 이웃 달 칸(건수 없음)이거나 아예 없어서
+ * 표를 대조할 근거가 없다 — 10월 1일 예약 10건이 "달력은 0건" 으로 확인 불가가 됐다(2026-09-24).
+ * 초점일을 얹으면 서버가 그 달 달력을 내려준다(2026-09-25 실제 사이트에서 확인). 받아 주지 않는
+ * 화면을 만나면 뒤쪽의 예전 후보로 내려간다.
+ *
+ * @returns {Array<{argument: string, extra: object}>}
+ */
+export function dateMoveCandidates(doc, dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const sd = `[[${y},${m},${d}]]`;
+  const base = [
+    { argument: `${y}_${m}_${d}`, extra: { [CALENDAR.selectedField]: sd } },
+    { argument: `${y}_${m}_${d}`, extra: {} },
+    { argument: '', extra: { [CALENDAR.selectedField]: sd } },
+    { argument: `${y}-${m}-${d}`, extra: { [CALENDAR.selectedField]: sd } },
+  ];
+  const focus = telerikFocusFields(doc, dateStr);
+  if (!Object.keys(focus).length) return base;  // 초점 칸이 없는 화면이면 얹을 것도 없다
+  return [...base.map((c) => ({ ...c, extra: { ...c.extra, ...focus } })), ...base];
 }
 
 /** 예약 폼(숨은 div_write)이 현재 들고 있는 날짜. 저장 전에 이게 맞는지 봐야 한다. */
@@ -372,7 +464,12 @@ export function extractSchedule(doc, dateStr) {
     );
   }
   if (expected == null && reservations.length === 0) {
-    return unsure('예약이 하나도 안 읽혔고 달력에서 건수도 확인하지 못했습니다.');
+    // 달력이 다른 달을 펼치고 있으면 그 날 건수가 어디에도 없다. 왜 대조하지 못했는지 밝힌다.
+    const month = parseCalendarMonth(doc);
+    const why = dateStr && month && !dateStr.startsWith(month)
+      ? `달력이 ${+month.slice(0, 4)}년 ${+month.slice(5)}월을 펼치고 있어 ${dateStr} 건수를 대조하지 못했습니다.`
+      : '달력에서 건수도 확인하지 못했습니다.';
+    return unsure(`예약이 하나도 안 읽혔고 ${why}`);
   }
 
   return { reservations, confident: true, reason: '', expected };

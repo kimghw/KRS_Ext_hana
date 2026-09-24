@@ -38,8 +38,23 @@ export const CAR_GRID = {
   detail: { purpose: 0, time: 1, owner: 2 },
 };
 
-/** 월 달력. 날짜별 예약 건수가 찍혀 있어 파싱 결과 대조에 쓴다. */
-export const CALENDAR = { id: 'CAL_MAIN', selectedField: 'CAL_MAIN_SD' };
+/**
+ * 월 달력(Telerik RadCalendar). 날짜별 예약 건수가 찍혀 있어 파싱 결과 대조에 쓴다.
+ *
+ * 건수는 **펼쳐 놓은 달의 칸에만** 찍힌다. 달력은 앞뒤 줄을 채우려고 이웃 달 며칠을 같이 그리는데
+ * (9월 화면에 8/30~31, 10/1~10) 그 칸은 `rcOtherMonth` 이고 건수가 없다.
+ *
+ * 어느 달을 펼칠지는 숨은 칸 `CAL_MAIN_AD` = `[[최소일],[최대일],[초점일]]` 의 초점일로 정한다
+ * (2026-09-16 캡처: `[[1980,1,1],[2099,12,30],[2026,9,16]]`). 날짜를 옮길 때 이걸 같이 보내야
+ * 다음 달 날짜도 그 달 달력과 함께 내려와 건수를 대조할 수 있다.
+ */
+export const CALENDAR = {
+  id: 'CAL_MAIN',
+  selectedField: 'CAL_MAIN_SD',
+  focusField: 'CAL_MAIN_AD',
+  titleId: 'CAL_MAIN_Title',
+  otherMonthClass: 'rcOtherMonth',
+};
 
 /** 예약 폼(같은 페이지 안의 숨겨진 div_write). */
 export const FORM = {

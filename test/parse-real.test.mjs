@@ -10,6 +10,7 @@ const { JSDOM } = require('jsdom');
 import {
   extractSchedule, parseRooms, parseRegions, parseSelectedRegion,
   parseShownDate, parseDayCounts, parseRoomName, buildGrid, fmtTime,
+  parseCalendarMonth, telerikFocusFields, dateMoveCandidates,
 } from '../src/parse.js';
 
 const html = fs.readFileSync(new URL('./fixtures/list-2026-09-16.html', import.meta.url), 'utf8');
@@ -29,6 +30,42 @@ const counts = parseDayCounts(doc);
 t('9/16 은 10건', () => assert.equal(counts.get('2026-09-16'), 10));
 t('9/02 는 17건', () => assert.equal(counts.get('2026-09-02'), 17));
 t('여러 날 읽힘', () => assert.ok(counts.size >= 28));
+
+// 달력은 앞뒤 줄을 채우려고 이웃 달 며칠(8/30~31, 10/1~10)을 같이 그리는데 그 칸에는 건수가 없다.
+// 이걸 0건으로 읽어서 10월 1일 예약 10건이 "달력은 0건" 으로 확인 불가가 됐다(2026-09-24).
+t('펼친 달은 2026-09', () => assert.equal(parseCalendarMonth(doc), '2026-09'));
+t('이웃 달 칸(10/1)은 건수가 없으니 Map 에 없다 — 0건이 아니다', () =>
+  assert.equal(counts.has('2026-10-01'), false));
+t('앞 달 칸(8/31)도 마찬가지', () => assert.equal(counts.has('2026-08-31'), false));
+t('9월 30일치는 전부 있다', () => assert.equal(counts.size, 30));
+t('10/1 을 9월 달력과 대조하면 "0건" 이라 하지 않는다', () => {
+  const s = extractSchedule(doc, '2026-10-01');
+  assert.equal(s.expected, null);
+  assert.equal(s.reservations.length, 10);
+  assert.equal(s.confident, true, s.reason);
+});
+t('예약이 없는 10월 날에 달력이 9월에 머물면 확신하지 않고 왜인지 말한다', () => {
+  const bare = new JSDOM(html).window.document;
+  const table = bare.getElementById('RG_MAIN_ctl00');
+  for (const r of [...table.rows]) if (r.cells.length >= 6 && !r.querySelector('th')) r.remove();
+  const s = extractSchedule(bare, '2026-10-01');
+  assert.equal(s.confident, false);
+  assert.match(s.reason, /달력이 2026년 9월을 펼치고 있어 2026-10-01/);
+});
+
+console.log('달력 달 옮기기');
+t('초점일 칸(CAL_MAIN_AD)은 최소·최대일을 지키고 초점일만 바꾼다', () =>
+  assert.deepEqual(telerikFocusFields(doc, '2026-10-01'),
+    { CAL_MAIN_AD: '[[1980,1,1],[2099,12,30],[2026,10,1]]' }));
+t('칸이 없는 화면이면 지어내지 않는다', () =>
+  assert.deepEqual(telerikFocusFields(new JSDOM('<form></form>').window.document, '2026-10-01'), {}));
+t('날짜 이동 후보는 초점일을 얹은 쪽이 먼저, 예전 모양이 뒤에', () => {
+  const c = dateMoveCandidates(doc, '2026-10-01');
+  assert.equal(c.length, 8);
+  assert.ok(c.slice(0, 4).every((x) => x.extra.CAL_MAIN_AD === '[[1980,1,1],[2099,12,30],[2026,10,1]]'));
+  assert.ok(c.slice(4).every((x) => !('CAL_MAIN_AD' in x.extra)));
+  assert.equal(c[0].extra.CAL_MAIN_SD, '[[2026,10,1]]');
+});
 
 console.log('회의실 목록 (부산)');
 const { rooms, source } = parseRooms(doc);
