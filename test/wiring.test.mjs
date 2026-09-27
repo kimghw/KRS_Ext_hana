@@ -14,8 +14,11 @@ const js = fs.readFileSync(new URL('sidepanel.js', root), 'utf8');
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
 
-/** 저장된 설정을 주고 init 을 돌린 뒤, 어떤 요소에 리스너가 붙었는지 본다. */
-async function boot(saved) {
+/**
+ * 저장된 설정을 주고 init 을 돌린 뒤, 어떤 요소에 리스너가 붙었는지 본다.
+ * fetchImpl 을 주면 네트워크를 그것으로 흉내 낸다(기본은 막힌 네트워크). (url, init, calls) 로 부른다.
+ */
+async function boot(saved, { fetchImpl = null } = {}) {
   const dom = new JSDOM(html, { url: 'https://example.org/', runScripts: 'outside-only' });
   const { window } = dom;
   const wired = new Map();
@@ -29,7 +32,7 @@ async function boot(saved) {
     return orig.call(this, type, fn, opts);
   };
 
-  const calls = { load: 0, urls: [], downloads: [], clipboard: [], intervals: [] };
+  const calls = { load: 0, urls: [], downloads: [], clipboard: [], intervals: [], tabs: [], tabListeners: [] };
   // 자동 갱신은 스위치 없이 늘 돈다. 어떤 간격으로 타이머를 거는지만 적어 둔다.
   const realSetInterval = globalThis.setInterval;
   globalThis.setInterval = (fn, ms, ...rest) => { calls.intervals.push(ms); return realSetInterval(fn, ms, ...rest); };
@@ -48,7 +51,12 @@ async function boot(saved) {
       sendNativeMessage: async () => { throw new Error('no host'); },
       getManifest: () => ({ version: '9.9.9' }),
     },
-    tabs: { query: async () => [], create: async () => {} },
+    tabs: {
+      query: async () => [],
+      create: async (opts) => { calls.tabs.push(opts); },
+      // 로그인 복귀 신호. 테스트가 리스너를 직접 불러 "eclass 탭이 다 읽혔다" 를 흉내 낸다.
+      onUpdated: { addListener: (fn) => { calls.tabListeners.push(fn); } },
+    },
     downloads: { download: async (opts) => { calls.downloads.push(opts); } },
     scripting: { executeScript: async () => [{ result: null }] },
   };
@@ -58,7 +66,9 @@ async function boot(saved) {
   });
   // 네트워크는 막는다. load() 가 실패해도 배선은 이미 끝나 있어야 한다.
   // 어느 화면을 두드렸는지는 남긴다 — 시작하자마자 한 달을 훑는지 여기서 본다.
-  window.fetch = async (url) => { calls.load++; calls.urls.push(String(url)); throw new Error('offline'); };
+  window.fetch = fetchImpl
+    ? (url, init) => { calls.load++; calls.urls.push(String(url)); return fetchImpl(url, init, calls); }
+    : async (url) => { calls.load++; calls.urls.push(String(url)); throw new Error('offline'); };
 
   // 타이머는 Node 것을 그대로 쓴다. jsdom 의 setTimeout 을 전역에 덮으면 서로를 불러 무한 재귀가 된다.
   const globals = ['document', 'chrome', 'fetch', 'DOMParser', 'Option', 'Blob', 'URL', 'Element', 'HTMLElement'];
@@ -274,8 +284,10 @@ console.log('활동 로그 — 남기고, 보여주고, 복사한다');
   const log = () => store.activityLog || [];
   t('패널을 연 것이 남는다 (버전 포함)', () =>
     assert.ok(log().some((e) => e.kind === 'open' && /v9\.9\.9/.test(e.text))));
-  t('로그인이 없어 조회 실패가 남는다', () =>
-    assert.ok(log().some((e) => e.kind === 'load' && !e.ok && /조회 실패/.test(e.text) && e.data?.auth)));
+  // 여기서는 네트워크가 막혀 있다. 그것은 로그인 문제가 아니므로 auth 로 적히면 안 된다
+  // — 예전에는 "열려 있는 eclass 탭이 없습니다" 라는 로그인 안내로 둔갑했다.
+  t('조회 실패가 남고, 막힌 네트워크를 로그인 문제로 적지 않는다', () =>
+    assert.ok(log().some((e) => e.kind === 'load' && !e.ok && /조회 실패/.test(e.text) && !e.data?.auth)));
   t('한 달 훑기 실패도 한 번 남는다', () =>
     assert.equal(log().filter((e) => e.kind === 'scan').length, 1));
   t('다리가 없다는 것도 남는다', () =>
@@ -384,6 +396,66 @@ console.log('내 예약 탭으로 열려도 미리 훑기와 겹치지 않는다
       '두드린 곳: ' + calls.urls.join(', ')));
   t('훑는 기간이 한 달로 찍힌다', () =>
     assert.match(doc.getElementById('scheduleDate').textContent, /^\d+\/\d+ ~ \d+\/\d+$/));
+}
+
+console.log('로그인이 풀렸을 때 — 만료라고 말하고, 홈 링크를 달고, 로그인이 돌아오면 스스로 다시 조회한다');
+{
+  const SIGN_IN = '<script>alert("You must sign in.");</script>';
+  const page = (html) => ({
+    ok: true, status: 200, type: 'basic', url: 'https://eclass.krs.co.kr/x',
+    headers: { get: () => 'text/html; charset=utf-8' },
+    arrayBuffer: async () => new TextEncoder().encode(html).buffer,
+  });
+  const redirect = () => ({
+    ok: false, status: 0, type: 'opaqueredirect', headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0),
+  });
+  const isHome = (u) => /eClassVer4\/Home\/Index/.test(String(u));
+  const homeCalls = [];
+  const { window, calls, store } = await boot({ mode: 'room' }, {
+    fetchImpl: async (url, init = {}) => {
+      if (isHome(url)) { homeCalls.push(init.redirect); return redirect(); }
+      return page(SIGN_IN);
+    },
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  const doc = window.document;
+  const status = doc.getElementById('status');
+
+  t('안내가 만료라고 말한다', () => assert.match(status.textContent, /만료/));
+  t('다시 로그인 링크가 붙는다', () =>
+    assert.match(doc.getElementById('openLogin')?.textContent || '', /다시 로그인/));
+  t('포털 홈은 manual 로만 확인했다 (따라가면 남은 쿠키가 지워진다)', () => {
+    assert.ok(homeCalls.length >= 1);
+    assert.ok(homeCalls.every((r) => r === 'manual'), JSON.stringify(homeCalls));
+  });
+  t('기록에 로그인 문제와 포털 상태가 남는다', () =>
+    assert.ok((store.activityLog || []).some((e) => e.kind === 'load' && e.data?.auth && e.data?.portal === 'expired')));
+
+  doc.getElementById('openLogin').click();
+  t('링크는 껍데기가 아니라 포털 홈을 연다', () => {
+    assert.equal(calls.tabs.length, 1);
+    assert.match(calls.tabs[0].url, /eClassVer4\/Home\/Index/);
+    assert.doesNotMatch(calls.tabs[0].url, /GAPSU/);
+  });
+
+  t('eclass 탭 로딩을 듣고 있다', () => assert.equal(calls.tabListeners.length, 1));
+  const before = calls.urls.filter((u) => /MeetingRoom\/List\.aspx/.test(u)).length;
+  // 다른 사이트 탭이 다 읽힌 것은 신호가 아니다.
+  calls.tabListeners[0](1, { status: 'complete' }, { url: 'https://www.example.com/' });
+  await new Promise((r) => setTimeout(r, 1100));
+  t('eclass 가 아닌 탭에는 반응하지 않는다', () =>
+    assert.equal(calls.urls.filter((u) => /MeetingRoom\/List\.aspx/.test(u)).length, before));
+  // 로그인 폼을 거쳐 홈으로 돌아왔다.
+  calls.tabListeners[0](2, { status: 'complete' }, { url: 'https://eclass.krs.co.kr/eClassVer4/Home/Index' });
+  calls.tabListeners[0](2, { status: 'complete' }, { url: 'https://eclass.krs.co.kr/eClassVer4/Home/Index' });
+  await new Promise((r) => setTimeout(r, 1100));
+  t('eclass 탭이 다 읽히면 ↻ 없이 다시 조회한다 (몰려온 신호는 한 번으로)', () => {
+    const after = calls.urls.filter((u) => /MeetingRoom\/List\.aspx/.test(u)).length;
+    // 다시 조회 한 번 = 직접 요청 + (sign in 이라) 없는 탭 확인 뒤 포털 확인. 목록 주소는 한 번 늘어야 한다.
+    assert.equal(after, before + 1, `목록 요청 ${before} → ${after}`);
+  });
+  t('복귀 신호가 기록에 남는다', () =>
+    assert.ok((store.activityLog || []).some((e) => e.kind === 'auth' && /다시 조회/.test(e.text))));
 }
 
 console.log(`\n통과 ${pass}건`);

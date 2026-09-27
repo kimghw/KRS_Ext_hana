@@ -314,6 +314,15 @@ await ta('한 날도 못 읽었고 로그인이 끊긴 것이면 그 사실을 �
   assert.match(m.text('warn'), /로그인이 필요합니다/);
   assert.equal(m.storage.data[CACHE_KEY], undefined);
   assert.equal(m.items().length, 0);
+  assert.equal(m.root.querySelector('[data-role="warn"] a'), null, '포털 상태를 모르면 다시 로그인 링크를 달지 않는다');
+});
+await ta('포털 로그인이 풀린 것이면 홈으로 가는 다시 로그인 링크를 단다', async () => {
+  const err = new AuthError('로그인이 필요합니다. eclass 로그인이 만료됐습니다.', { portal: 'expired' });
+  const m = await mount({ rooms: fakeScan('room', {}, { fail: err }), cars: fakeScan('car', {}, { fail: err }) });
+  const a = m.root.querySelector('[data-role="warn"] a');
+  assert.ok(a, '링크가 없다');
+  assert.match(a.href, /eClassVer4\/Home\/Index/);
+  assert.match(a.textContent, /다시 로그인/);
 });
 await ta('한 날도 못 읽었지만 담긴 것이 있으면 그것을 보여주고 언제 것인지 말한다', async () => {
   const err = new Error('응답이 20초 안에 오지 않았습니다.');

@@ -7,6 +7,11 @@ export const LIST_URL = `${ORIGIN}/intra/intranet/VSDotnet/MeetingRoom/List.aspx
 // 사용자가 로그인할 때 여는 바깥 페이지.
 export const SHELL_URL = `${ORIGIN}/GAPSU/GeneralAffairs/MeetingRoom/MeetingRoom_New.aspx?s_code=0103010100`;
 
+// 포털 홈. 로그인이 살아 있는지 확인하는 자리이자, 로그아웃 상태에서 탭으로 열면 로그인 폼을 거쳐
+// 다시 여기로 돌아오는 주소다. 로그아웃 상태의 껍데기(SHELL_URL)는 로그인 폼이 아니라 gate 로 튕겨 버려
+// 로그인 안내 링크로는 못 쓴다(2026-09-27 확인).
+export const PORTAL_HOME_URL = `${ORIGIN}/eClassVer4/Home/Index`;
+
 export const DEFAULT_HOURS = { start: 8, end: 20 };
 export const SLOT_MINUTES = 60;
 

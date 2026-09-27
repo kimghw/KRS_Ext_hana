@@ -1,4 +1,4 @@
-import { DEFAULT_HOURS, SHELL_URL, LIST_URL } from './src/config.js';
+import { DEFAULT_HOURS, SHELL_URL, LIST_URL, ORIGIN, PORTAL_HOME_URL } from './src/config.js';
 import { AuthError } from './src/net.js';
 import { loadDay, scanDays, captureRaw, reserve, cancelReservation } from './src/site.js';
 import {
@@ -47,7 +47,9 @@ const el = {
 const state = { day: null, picks: [], drag: null, loadedAt: 0, timer: null,
   region: null, regions: [], apiKey: '', found: [], cli: false, mode: 'room', extendTarget: null,
   justBooked: [], myName: '', mine: [], editTarget: null, carWho: null,
-  foldOpen: false, foundKind: 'room', asking: false };
+  foldOpen: false, foundKind: 'room', asking: false,
+  // 마지막 조회가 로그인 문제로 끝났다. 로그인이 돌아온 신호(eclass 탭 로딩 끝·패널 다시 보임)에 다시 조회한다.
+  authFailed: false };
 
 /* ------------------------------------------------------------- 활동 기록 */
 
@@ -148,11 +150,39 @@ function setStatusHtml(html, kind = '') {
   el.status.innerHTML = html;
 }
 
+/**
+ * 로그인 안내의 링크. 회의실 껍데기가 아니라 **포털 홈**을 연다 — 로그아웃 상태의 껍데기는 로그인 폼이
+ * 아니라 gate 로 튕겨 버린다. 홈은 로그인 폼을 거쳐 다시 홈으로 돌아오고, 그 탭이 다 읽히면 이 패널이
+ * 그것을 보고(tabs.onUpdated) 스스로 다시 조회한다.
+ */
 function openSiteOn(linkId) {
   $(linkId)?.addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: isCar() ? CAR_SHELL_URL : SHELL_URL });
+    chrome.tabs.create({ url: PORTAL_HOME_URL });
   });
+}
+
+/** 로그인 안내 한 줄. 포털이 풀린 것이면 "다시 로그인", 그 외엔 "eclass 열기". */
+function loginHtml(err, extra = '') {
+  const label = err.portal === 'expired' ? 'eclass 다시 로그인' : 'eclass 열기';
+  return `${escapeHtml(err.message)}${extra} <a href="#" id="openLogin">${label}</a>`;
+}
+
+/**
+ * 로그인이 돌아온 것 같을 때 다시 조회한다. 실패하면 load 가 authFailed 를 다시 켜 두므로 다음
+ * 신호에 또 시도한다. 몰려오는 신호(탭 로딩은 complete 가 여러 번 온다)는 하나로 모은다.
+ * 조회가 되면 한 달 훑기도 이어서 한다 — 로그인이 풀린 채 열렸으면 그것도 비어 있다.
+ */
+let recoverTimer = null;
+function recoverAfterLogin() {
+  clearTimeout(recoverTimer);
+  recoverTimer = setTimeout(async () => {
+    if (!state.authFailed) return;
+    state.authFailed = false;
+    logEvent('auth', true, 'eclass 로그인이 돌아온 신호 — 다시 조회');
+    await load().catch(() => {});
+    if (!state.authFailed) prefetchMonth();
+  }, 800);
 }
 
 function shiftDate(days) {
@@ -779,9 +809,12 @@ async function ensureDays(dates, { force = false } = {}) {
 /** 패널이 열리면 곧바로 한 달을 훑어 둔다. 세 탭이 이 한 벌을 나눠 쓴다. */
 async function prefetchMonth({ force = false } = {}) {
   const got = await ensureDays(monthDates(), { force });
-  if (got.authError && !el.status.textContent) {
-    setStatusHtml(`${got.authError.message} <a href="#" id="openLogin">eclass 열기</a>`, 'error');
-    openSiteOn('openLogin');
+  if (got.authError) {
+    state.authFailed = true;
+    if (!el.status.textContent) {
+      setStatusHtml(loginHtml(got.authError), 'error');
+      openSiteOn('openLogin');
+    }
   }
 }
 
@@ -911,6 +944,7 @@ async function load({ force = false } = {}) {
       ? await loadCarDay(date, h)
       : await loadDay(date, h, state.region);
     if (sequence !== loadSequence) return;
+    state.authFailed = false;
     // 담는 게 먼저다. markMine 은 화면용 표시를 예약 줄에 입히는데, 그게 캐시로 새면
     // 다음번에 이름으로 맞춘 건을 "사이트가 본인 것에만 붙인 버튼"으로 읽게 된다.
     cacheLiveDay(day);
@@ -944,9 +978,10 @@ async function load({ force = false } = {}) {
     }
     const stale = preview ? ` — 화면은 ${agoText(preview.readAt)} 미리 훑어 둔 것입니다.` : '';
     logEvent('load', false, `${isCar() ? '차량' : '회의실'} ${date} 조회 실패: ${err.message}`,
-      { mode: state.mode, region: state.region, hours: h, auth: err instanceof AuthError, preview: !!preview });
+      { mode: state.mode, region: state.region, hours: h, auth: err instanceof AuthError, portal: err.portal, preview: !!preview });
     if (err instanceof AuthError) {
-      setStatusHtml(`${err.message}${escapeHtml(stale)} <a href="#" id="openLogin">eclass 열기</a>`, 'error');
+      state.authFailed = true;
+      setStatusHtml(loginHtml(err, escapeHtml(stale)), 'error');
       openSiteOn('openLogin');
     } else {
       setStatus(`조회 실패: ${err.message}${stale}`, 'error');
@@ -1774,11 +1809,12 @@ async function loadMine(sequence, { force = false } = {}) {
 
   // 한 날도 못 읽었는데 로그인이 끊긴 것이면, 목록이 아니라 그 사실을 보여줘야 한다.
   const read = store.list(dates);
+  state.authFailed = !!scan.authError;
   if (scan.authError && !read.length) {
     el.mineList.innerHTML = '';
     el.mineEmpty.classList.add('hidden');
     el.roomCount.textContent = '';
-    setStatusHtml(`${scan.authError.message} <a href="#" id="openLogin">eclass 열기</a>`, 'error');
+    setStatusHtml(loginHtml(scan.authError), 'error');
     openSiteOn('openLogin');
     return;
   }
@@ -2285,6 +2321,18 @@ async function init() {
     if (HOME_ENABLE_KEY in changes) el.homeCard.checked = homeEnabled(changes[HOME_ENABLE_KEY].newValue);
     if (!changes[HOME_JUMP_KEY]?.newValue) return;
     takeHomeJump().then((j) => { if (j) applyHomeJump(j); });
+  });
+
+  // eclass 에 다시 로그인하고 돌아오면 ↻ 없이 이어받는다. 로그인 폼은 끝나면 홈으로 돌아오므로
+  // eclass 탭이 다 읽힌 순간이 신호다. 로그인이 풀린 상태일 때만 움직인다(평소 탭 로딩에는 조용히).
+  chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
+    if (info.status !== 'complete' || !state.authFailed) return;
+    if (!(tab?.url || '').startsWith(ORIGIN)) return;
+    recoverAfterLogin();
+  });
+  // 패널이 가려져 있는 사이에 로그인했을 수도 있다. 다시 보이면 한 번 확인한다.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.authFailed) recoverAfterLogin();
   });
 
   // 보고 있는 탭을 먼저 띄운 다음, 오늘부터 한 달을 미리 훑는다.

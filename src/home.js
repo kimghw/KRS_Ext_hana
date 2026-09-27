@@ -17,6 +17,7 @@ import { collectMine, datesFrom } from './mine.js';
 import { MONTH_DAYS, STALE_MS } from './monthcache.js';
 import { fmtTime, todayStr } from './parse.js';
 import { AuthError } from './net.js';
+import { PORTAL_HOME_URL } from './config.js';
 
 /** 훑은 결과를 담는 storage 키. 패널은 예약·취소 뒤 이 키를 지워 카드에게 알린다. */
 export const CACHE_KEY = 'homeMine';
@@ -189,6 +190,7 @@ const STYLE = `
 .krs-mine .krs-mine-list:not(:empty) + .krs-mine-empty:not(:empty),
 .krs-mine .krs-mine-list:not(:empty) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
 .krs-mine .krs-mine-empty:empty, .krs-mine .krs-mine-warn:empty { display: none; }
+.krs-mine .krs-mine-login { margin-left: 4px; color: #1f6fd0; text-decoration: underline; }
 `;
 
 /** 사이트 카드 markup 을 빌려 겉을 만들고, 안쪽은 우리 것으로 채운다. */
@@ -439,6 +441,15 @@ export function createHomeCard(doc, deps = {}) {
           else { ui.bar.hidden = true; ui.note.textContent = range; }
           const why = res.authError ? res.authError.message : res.failed.join(' · ');
           ui.warn.textContent = `${why}${usable ? ` (아래는 ${agoText(cache.at, now())} 읽어 둔 것입니다)` : ''}`;
+          // 포털 로그인이 풀린 것이면 지금 보이는 홈도 껍데기만 남은 것이다(밤새 열어 둔 탭).
+          // 홈을 다시 열면 로그인 폼을 거쳐 돌아오고, 그러면 카드도 새로 붙어 훑는다.
+          if (res.authError?.portal === 'expired') {
+            const a = doc.createElement('a');
+            a.href = PORTAL_HOME_URL;
+            a.className = 'krs-mine-login';
+            a.textContent = 'eclass 다시 로그인';
+            ui.warn.append(' ', a);
+          }
           return;
         }
 
