@@ -160,3 +160,12 @@ export const CAR_DELETE = {
   updateFlag: 'HF_UPDATE_YN',
   eventTarget: 'RG_MAIN$ctl00$ctl04$BTN_DEL',
 };
+
+/**
+ * 사내 메일 도메인. 인명 검색 카드에는 이메일이 없고 사용자 ID 만 있어 `<id>@krs.co.kr` 로 만든다
+ * (KR Directory 의 실제 E-mail 열과 표본 9/9 일치 — 2026-08-02 확인).
+ */
+export const MAIL_DOMAIN = 'krs.co.kr';
+
+/** Teams 1:1 채팅 딥링크. `?users=<메일>` 을 붙이면 앱·웹이 그 사람과의 채팅을 연다. 설치·인증 없이 URL 만으로 된다. */
+export const TEAMS_CHAT_URL = 'https://teams.microsoft.com/l/chat/0/0';

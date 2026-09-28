@@ -83,7 +83,7 @@ let extId = null;
   const manifestLoads = async (id) => {
     await cli.goto(`chrome-extension://${id}/manifest.json`, 8000);
     return cli
-      .evaluate('document.body ? document.body.innerText.includes("KRS 회의실 예약") : false')
+      .evaluate('document.body ? document.body.innerText.includes("KRS WORKSPACE") : false')
       .catch(() => false);
   };
 

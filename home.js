@@ -11,5 +11,5 @@
 
   import(chrome.runtime.getURL('src/home.js'))
     .then(({ startHome }) => startHome(document))
-    .catch((err) => console.warn('[KRS 회의실 예약] 홈 내 예약 카드를 붙이지 못했습니다:', err));
+    .catch((err) => console.warn('[KRS WORKSPACE] 홈 내 예약 카드를 붙이지 못했습니다:', err));
 })();

@@ -1,6 +1,6 @@
 ---
 name: bridge
-description: KRS 회의실 예약 확장의 로컬 Claude CLI 다리(네이티브 메시징) 설정·진단. 크롬·엣지 둘 다 다룬다. 인자 없으면 여섯 항목 점검표를 출력하고 다음 할 일을 짚어준다. 등록(install)·왕복 확인(ping)·claude 호출까지 확인(test)·다리 호출 기록 보기(log)·해제(uninstall)·확장 ID 계산(id)·브라우저 실행 상태와 재시작 명령(browser|chrome|edge). 등록·점검·브라우저 실행 확인은 bridge_ops.ps1 로 위임한다. TRIGGER when 사용자가 /bridge 호출, 말로 찾기 칸이 잠김, 배지가 '없음', 'claude가 연결되지 않았습니다' 문구, 다리 등록·재등록, 새 PC 에 설치, 엣지에서 쓰고 싶다. DO NOT TRIGGER when eclass 로그인 문제, 예약 실패 진단, 포트·서비스 관리.
+description: KRS WORKSPACE 확장의 로컬 Claude CLI 다리(네이티브 메시징) 설정·진단. 크롬·엣지 둘 다 다룬다. 인자 없으면 여섯 항목 점검표를 출력하고 다음 할 일을 짚어준다. 등록(install)·왕복 확인(ping)·claude 호출까지 확인(test)·다리 호출 기록 보기(log)·해제(uninstall)·확장 ID 계산(id)·브라우저 실행 상태와 재시작 명령(browser|chrome|edge). 등록·점검·브라우저 실행 확인은 bridge_ops.ps1 로 위임한다. TRIGGER when 사용자가 /bridge 호출, 말로 찾기 칸이 잠김, 배지가 '없음', 'claude가 연결되지 않았습니다' 문구, 다리 등록·재등록, 새 PC 에 설치, 엣지에서 쓰고 싶다. DO NOT TRIGGER when eclass 로그인 문제, 예약 실패 진단, 포트·서비스 관리.
 allowed-tools: Bash PowerShell AskUserQuestion Read
 argument-hint: "[check|install [<ID>]|ping|test|log [N]|browser|chrome|edge|restart [chrome|edge]|shortcut [<폴더>]|id|uninstall|help]"
 ---

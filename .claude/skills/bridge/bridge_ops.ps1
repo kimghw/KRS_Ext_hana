@@ -1,5 +1,5 @@
 ﻿<#
-  KRS 회의실 예약 확장 — 로컬 Claude CLI 다리(네이티브 메시징) 설정·진단.
+  KRS WORKSPACE 확장 — 로컬 Claude CLI 다리(네이티브 메시징) 설정·진단.
 
   크롬과 엣지를 같이 본다. 둘은 크로미엄이라 확장 ID 계산, origin 스킴(chrome-extension://),
   매니페스트 형식이 같고, 레지스트리 키·프로필 폴더·프로세스 이름만 다르다. 그 차이는
@@ -344,7 +344,7 @@ function Invoke-Shortcut([string]$Dir) {
   $root = Get-ProjectRoot
   $outDir = if ($Dir) { $Dir } else { [Environment]::GetFolderPath('Desktop') }
   if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Force $outDir | Out-Null }
-  $lnk = Join-Path $outDir 'KRS 회의실 예약 (엣지).lnk'
+  $lnk = Join-Path $outDir 'KRS WORKSPACE (엣지).lnk'
   $arguments = "--user-data-dir=`"$DedicatedProfile`" --load-extension=`"$root`""
   # WScript.Shell 은 경로를 ANSI 로 바꿔 쓰므로 시스템 로캘이 영어면 한글 파일명에서 실패한다. IShellLinkW 는 유니코드다.
   Add-Type -TypeDefinition @'
@@ -397,7 +397,7 @@ public static class KrsShortcut {
   }
 }
 '@
-  [KrsShortcut]::Create($lnk, $exe, $arguments, (Split-Path $exe), $exe, 'KRS 회의실 예약 확장을 전용 프로필로 띄운다')
+  [KrsShortcut]::Create($lnk, $exe, $arguments, (Split-Path $exe), $exe, 'KRS WORKSPACE 확장을 전용 프로필로 띄운다')
   $back = [KrsShortcut]::Read($lnk)
   Write-Output "바로가기: $lnk"
   Write-Output "  대상  : $($back[0])"

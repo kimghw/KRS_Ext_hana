@@ -155,7 +155,7 @@ export function buildLogReport({ entries, bridge, meta = {}, now = Date.now() })
     .join(' · ');
 
   const out = [
-    'KRS 회의실 예약 — 활동 로그',
+    'KRS WORKSPACE — 활동 로그',
     `복사한 때: ${stamp(now)} · 확장 기록 ${list.length}건 (실패 ${fails})`,
   ];
   if (env) out.push(`환경: ${env}`);

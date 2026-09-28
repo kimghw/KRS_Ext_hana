@@ -1,4 +1,4 @@
-# KRS 회의실 예약 (크롬·엣지 확장)
+# KRS WORKSPACE (크롬·엣지 확장)
 
 eclass 회의실 현황을 사이드 패널에서 **시간 단위**로 보고, 빈 칸을 끌어서 범위를 고른 뒤 바로 예약합니다.
 
@@ -160,6 +160,27 @@ e-Class 홈(`eClassVer4/Home/Index`)을 열면 **맨 위, Popup Notice 카드 �
 대신 "찾지 못했습니다"라고 하는 것도 같은 이유입니다. 홈 화면 markup(`#divPopupInfo`)을 못 알아보면
 카드를 붙이지 않습니다 — 엉뚱한 자리에 띄우느니 안 띄웁니다.
 
+### 인명 검색 카드의 Teams 버튼
+
+상단 검색창에서 사람을 찾으면(`eClassVer4/searchmember/MemberList`) 인명 카드의 **Ext · Mobile · Task 줄 끝에
+`Teams` 버튼**이 하나 더 붙습니다(줄이 좁아 버튼 넷이 두 줄로 나뉩니다). 누르면 그 사람과의 **Teams 1:1 채팅이 새 탭**으로 열립니다 — Teams 앱이
+있으면 앱이, 없으면 웹 Teams 가 받습니다. 쓸지 말지는 패널의 `설정 및 연결 → 인명 검색 카드에 Teams 버튼`
+으로 정합니다(기본 켬). 끄면 열려 있는 검색 화면에서도 곧바로 사라지고, 켜면 새로고침 없이 돌아옵니다.
+
+이 버튼은 **딥링크**(`https://teams.microsoft.com/l/chat/0/0?users=<메일>`)일 뿐입니다. 서버·앱 설치·인증이
+없고, 채팅 내용을 읽거나 보내지 않습니다. 대화 이력을 확장 안에서 보고 보내는 것(Graph API)은 로컬에
+MS365 인증이 있는 PC 에서만 되는 일이라 넣지 않았습니다.
+
+카드에 이메일은 없지만 **사용자 ID** 가 있습니다 — 프로필 사진(`/intra/intranet/member/pic/<id>.gif` 과 툴팁),
+사진의 `copyToClipboard('<id>')`, Task 버튼의 `titleMouseOver(event, this, '<id>', …)`. 사내 메일은
+`<id>@krs.co.kr` 이라(KR Directory 의 실제 이메일과 표본 9/9 일치) 그것으로 링크를 만듭니다. 사진이 없어
+자리표시자(`00000.gif`)로 바뀐 카드는 다른 자리에서 ID 를 찾고, **어디서도 못 찾으면 버튼을 붙이지 않습니다**
+— 엉뚱한 사람에게 이어지는 버튼보다 없는 것이 낫습니다.
+
+콘텐츠 스크립트(`people.js` → `src/people.js`)는 경로가 아니라 **카드가 있는지**(`.search_info_btn`)로 붙일
+화면을 고릅니다. 검색 결과 말고도 같은 카드가 뜨는 화면(부서 페이지 등)을 한 번에 덮고, 켜져 있는 동안
+나중에 나타난 카드(`메인 / 파견·겸무` 전환)에도 붙입니다.
+
 ### 한 달 미리 훑기
 
 패널이 열리면 보고 있는 탭을 먼저 띄운 다음, **오늘부터 30일을 회의실·차량 두 벌로 한 번
@@ -301,11 +322,13 @@ ID 는 **불러온 폴더 경로에서 나옵니다.** 폴더를 옮기면 ID �
 
 | 파일 | 역할 |
 |---|---|
-| `manifest.json` | MV3 매니페스트 (사이드 패널, `eclass.krs.co.kr` 호스트 권한, 홈 콘텐츠 스크립트) |
+| `manifest.json` | MV3 매니페스트 (사이드 패널, `eclass.krs.co.kr` 호스트 권한, 홈·인명 검색 콘텐츠 스크립트) |
 | `background.js` | 아이콘 클릭 시 사이드 패널 열기, 홈 카드의 "패널 열어 달라" 부탁 처리 |
 | `sidepanel.html/css/js` | 화면과 상호작용(격자 렌더, 드래그 선택, 예약 폼) |
 | `home.js` | e-Class 홈에 붙는 콘텐츠 스크립트의 시동부 — `src/home.js` 를 동적으로 불러온다 |
 | `src/home.js` | 홈 맨 위 "내 예약" 카드: 자리 찾기, 훑기, `chrome.storage` 캐시(읽은 시각·신선도), 패널과의 신호 |
+| `people.js` | 인명 검색 카드가 있는 화면에 붙는 콘텐츠 스크립트의 시동부 — `src/people.js` 를 동적으로 불러온다 |
+| `src/people.js` | 인명 카드의 Teams 버튼: 사용자 ID 찾기 → `<id>@krs.co.kr` 딥링크, 설정(`teamsButton`)에 따라 붙이고 떼기 |
 | `src/config.js` | 주소·업무시간·표 헤더 별칭 등 **사이트 의존 설정** |
 | `src/net.js` | 세션 유지 요청. 직접 요청 → 로그인된 탭 경유 → "sign in" 이면 포털 상태 확인(만료/살아 있음)으로 안내를 가림 |
 | `src/aspnet.js` | WebForms `__VIEWSTATE` 포스트백 처리 |
@@ -347,6 +370,7 @@ node test/carform-real.test.mjs # 실제 신청 폼 캡처로 감지기·필수�
 node test/modify.test.mjs       # 수정: 취소→재예약→되돌리기 분기 전부
 node test/wiring.test.mjs       # init() 이 리스너를 다 붙이는지 (회귀 방지), 홈 카드가 남긴 날짜로 열리는지
 node test/home.test.mjs         # 홈 내 예약 카드: 자리·캐시 신선도·못 읽은 날 경고·패널과의 신호·매니페스트 배선
+node test/people.test.mjs       # 인명 카드 Teams 버튼: ID 찾기 순서·못 찾으면 안 붙임·설정 켜고 끄기·매니페스트 배선
 node test/net.test.mjs          # 탭 경유가 없는 문맥(콘텐츠 스크립트)에서 미인증·실패가 바르게 끝나는지
 node test/roomorder.test.mjs    # 화면 줄 차례와 접기 (실제 회의실 목록으로)
 node test/logbook.test.mjs      # 활동 기록: 합치기·버리기·동시 기록, 복사 보고서 모양

@@ -16,6 +16,7 @@ import {
   CACHE_KEY as HOME_CACHE_KEY, JUMP_KEY as HOME_JUMP_KEY, JUMP_TTL_MS as HOME_JUMP_TTL_MS,
   ENABLE_KEY as HOME_ENABLE_KEY, homeEnabled,
 } from './src/home.js';
+import { ENABLE_KEY as TEAMS_ENABLE_KEY, teamsEnabled } from './src/people.js';
 import { fmtTime, todayStr, buildGrid, canDelete } from './src/parse.js';
 import { isFoldedRoom, foldLabels } from './src/roomorder.js';
 
@@ -38,7 +39,7 @@ const el = {
   spanDays: $('spanDays'), spanControl: document.querySelector('.span-control'),
   mineWrap: $('mineWrap'), mineList: $('mineList'), mineEmpty: $('mineEmpty'), myName: $('myName'),
   scanBar: $('scanBar'), scanNote: $('scanNote'), scanFill: $('scanFill'),
-  homeCard: $('homeCard'),
+  homeCard: $('homeCard'), teamsButton: $('teamsButton'),
   logBox: $('logBox'), logCount: $('logCount'), logOut: $('logOut'),
   logCopy: $('logCopy'), logSave: $('logSave'), logClear: $('logClear'),
 };
@@ -2178,7 +2179,7 @@ async function init() {
 
   const saved = await chrome.storage.local.get(
     ['hourStart', 'hourEnd', 'region', 'apiKey', 'mode', 'justBooked', 'myName', 'spanDays',
-      'foldOpen', HOME_ENABLE_KEY]);
+      'foldOpen', HOME_ENABLE_KEY, TEAMS_ENABLE_KEY]);
   if (saved.hourStart != null) el.hourStart.value = saved.hourStart;
   if (saved.hourEnd != null) el.hourEnd.value = saved.hourEnd;
   if (saved.spanDays != null) el.spanDays.value = saved.spanDays;
@@ -2190,6 +2191,7 @@ async function init() {
   el.apiKey.value = state.apiKey;
   el.myName.value = state.myName;
   el.homeCard.checked = homeEnabled(saved[HOME_ENABLE_KEY]);
+  el.teamsButton.checked = teamsEnabled(saved[TEAMS_ENABLE_KEY]);
   // 패널을 연 것도 남긴다. 기록을 읽을 때 어디서 한 판이 시작됐는지가 보인다.
   logEvent('open', true, `패널 열림 · v${chrome.runtime.getManifest?.()?.version ?? '?'}`,
     { mode: saved.mode || 'room' });
@@ -2264,6 +2266,12 @@ async function init() {
     chrome.storage.local.set({ [HOME_ENABLE_KEY]: on });
     logEvent('setting', true, `e-Class 홈 내 예약 카드 ${on ? '켬' : '끔'}`);
   });
+  // 인명 검색 카드의 Teams 버튼. 열려 있는 검색 화면은 저장소 변화를 듣고 곧바로 버튼을 떼거나 붙인다.
+  el.teamsButton.addEventListener('change', () => {
+    const on = el.teamsButton.checked;
+    chrome.storage.local.set({ [TEAMS_ENABLE_KEY]: on });
+    logEvent('setting', true, `인명 검색 카드 Teams 버튼 ${on ? '켬' : '끔'}`);
+  });
   el.myName.addEventListener('change', () => {
     state.myName = el.myName.value.trim();
     chrome.storage.local.set({ myName: state.myName });
@@ -2319,6 +2327,7 @@ async function init() {
     if (area !== 'local') return;
     // 다른 창의 패널에서 바꿨으면 이 창의 체크박스도 따라간다.
     if (HOME_ENABLE_KEY in changes) el.homeCard.checked = homeEnabled(changes[HOME_ENABLE_KEY].newValue);
+    if (TEAMS_ENABLE_KEY in changes) el.teamsButton.checked = teamsEnabled(changes[TEAMS_ENABLE_KEY].newValue);
     if (!changes[HOME_JUMP_KEY]?.newValue) return;
     takeHomeJump().then((j) => { if (j) applyHomeJump(j); });
   });

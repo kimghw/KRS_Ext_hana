@@ -175,6 +175,38 @@ console.log('패널 머리의 홈 카드 체크박스');
     assert.equal(window.document.getElementById('homeCard').checked, false));
 }
 
+console.log('설정 및 연결의 Teams 버튼 체크박스');
+{
+  const { wired, window, store } = await boot({ mode: 'room' });
+  const doc = window.document;
+  const box = doc.getElementById('teamsButton');
+  t('설정 및 연결 안에 있다', () => {
+    assert.ok(box, '체크박스가 없다');
+    assert.equal(box.type, 'checkbox');
+    assert.match(box.closest('details.diag')?.querySelector('summary')?.textContent || '', /설정 및 연결/);
+  });
+  t('설정이 없으면 켜진 채로 뜬다', () => assert.equal(box.checked, true));
+  t('change 리스너', () => assert.ok(wired.get('teamsButton')?.has('change')));
+  t('무엇을 켜고 끄는지 적혀 있다', () => assert.match(box.closest('label').textContent, /Teams/));
+
+  box.checked = false;
+  box.dispatchEvent(new window.Event('change'));
+  await new Promise((r) => setTimeout(r, 40));
+  t('끄면 저장된다', () => assert.equal(store.teamsButton, false));
+  t('끈 것이 활동 기록에 남는다', () =>
+    assert.ok((store.activityLog || []).some((e) => e.kind === 'setting' && /Teams.*끔/.test(e.text))));
+
+  box.checked = true;
+  box.dispatchEvent(new window.Event('change'));
+  await new Promise((r) => setTimeout(r, 40));
+  t('다시 켜면 저장된다', () => assert.equal(store.teamsButton, true));
+}
+{
+  const { window } = await boot({ mode: 'room', teamsButton: false });
+  t('꺼 둔 설정이면 꺼진 채로 뜬다', () =>
+    assert.equal(window.document.getElementById('teamsButton').checked, false));
+}
+
 console.log('차량 모드로 시작 (조기 return 회귀 방지)');
 {
   const { wired, window, calls } = await boot({ mode: 'car' });
@@ -312,7 +344,7 @@ console.log('활동 로그 — 남기고, 보여주고, 복사한다');
   await settle();
   const copied = calls.clipboard.at(-1) || '';
   t('복사하면 보고서가 클립보드로', () => {
-    assert.match(copied, /^KRS 회의실 예약 — 활동 로그/);
+    assert.match(copied, /^KRS WORKSPACE — 활동 로그/);
     assert.match(copied, /== 확장 기록/);
     assert.match(copied, /\[조회\]/);
   });

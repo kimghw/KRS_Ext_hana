@@ -25,7 +25,7 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { throw 'claude CLI
 
 $manifest = [ordered]@{
   name           = $hostName
-  description    = 'KRS 회의실 예약 - 로컬 Claude CLI 다리'
+  description    = 'KRS WORKSPACE - 로컬 Claude CLI 다리'
   path           = $batPath
   type           = 'stdio'
   allowed_origins = @("chrome-extension://$ExtensionId/")

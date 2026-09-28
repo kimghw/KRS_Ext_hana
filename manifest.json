@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "KRS 회의실 예약",
+  "name": "KRS WORKSPACE",
   "version": "0.3.0",
   "description": "KRS eclass 회의실의 빈 시간을 시간 단위로 조회하고 사이드 패널에서 바로 예약합니다.",
   "permissions": [
@@ -25,7 +25,7 @@
   "content_scripts": [
     {
       "matches": ["https://eclass.krs.co.kr/*"],
-      "js": ["home.js"],
+      "js": ["home.js", "people.js"],
       "run_at": "document_idle"
     }
   ],
@@ -36,6 +36,6 @@
     }
   ],
   "action": {
-    "default_title": "회의실 예약 패널 열기"
+    "default_title": "KRS WORKSPACE 패널 열기"
   }
 }
