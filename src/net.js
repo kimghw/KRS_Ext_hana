@@ -67,7 +67,7 @@ async function decodeResponse(res) {
 /** 응답이 안 오면 영원히 기다리게 된다. 화면이 "...중"에서 멈춰 버리므로 끊는다. */
 export const REQUEST_TIMEOUT_MS = 20000;
 
-async function directFetch(url, init) {
+export async function directFetch(url, init) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS);
   try {

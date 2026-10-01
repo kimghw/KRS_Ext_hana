@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import {
-  mountHome, startHome, findAnchor, summarize, spanOf, cacheUsable, cacheFresh, agoText, dayLabel,
-  homeEnabled, CACHE_KEY, JUMP_KEY, ENABLE_KEY, ROOT_ID, PARTIAL_STALE_MS,
+  mountHome, startHome, findAnchor, summarize, spanOf, cacheUsable, agoText, dayLabel,
+  homeEnabled, CACHE_KEY, JUMP_KEY, ENABLE_KEY, ROOT_ID,
 } from '../src/home.js';
 import { AuthError } from '../src/net.js';
-import { MONTH_DAYS, STALE_MS } from '../src/monthcache.js';
+import { MONTH_DAYS } from '../src/monthcache.js';
 import { datesFrom } from '../src/mine.js';
 import { scanDays } from '../src/site.js';
 import { scanCarDays } from '../src/rentcar.js';
@@ -143,15 +143,8 @@ t('시작일·기간·이름이 같아야 쓴다', () => {
   assert.ok(!cacheUsable(null, { start: TODAY, days: 30 }));
   assert.ok(!cacheUsable({ ...base, items: null }, { start: TODAY, days: 30 }));
 });
-t('10분이 지나면 묵는다', () => {
-  assert.ok(cacheFresh({ ...base, at: NOW - STALE_MS + 1000 }, NOW));
-  assert.ok(!cacheFresh({ ...base, at: NOW - STALE_MS }, NOW));
-});
-t('일부를 못 읽은 결과는 2분만 믿는다', () => {
-  const partial = { ...base, failed: ['차량 훑기 실패: x'] };
-  assert.ok(cacheFresh({ ...partial, at: NOW - PARTIAL_STALE_MS + 1000 }, NOW));
-  assert.ok(!cacheFresh({ ...partial, at: NOW - PARTIAL_STALE_MS - 1000 }, NOW));
-});
+t('오늘 읽은 것이면 얼마나 지났든 쓴다(하루에 한 번)', () =>
+  assert.ok(cacheUsable({ ...base, at: NOW - 8 * 3600_000 }, { start: TODAY, days: 30, name: '' })));
 t('기간 설정은 패널 것을 그대로, 이상하면 한 달', () => {
   assert.equal(spanOf('7'), 7);
   assert.equal(spanOf(14), 14);
@@ -237,7 +230,7 @@ const cached = {
   items: [{ kind: 'room', why: 'button', from: { date: TODAY, minutes: 600 }, to: { date: TODAY, minutes: 660 }, room: '제3회의실', title: '담긴 것', status: '' }],
   skippedDates: [], unread: [], failed: [],
 };
-await ta('신선하면 훑지 않고 그대로 그린다', async () => {
+await ta('오늘 읽은 것이 있으면 훑지 않고 그대로 그린다', async () => {
   const rooms = fakeScan('room');
   const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached }), rooms });
   assert.equal(rooms.calls.length, 0);
@@ -245,22 +238,32 @@ await ta('신선하면 훑지 않고 그대로 그린다', async () => {
   assert.match(m.items()[0].textContent, /담긴 것/);
   assert.match(m.text('note'), /1분 전 읽음/);
 });
-await ta('묵었으면 먼저 그려 놓고 다시 훑어 바꿔 끼운다', async () => {
-  const doc = homeDoc();
-  let seen = null;
-  const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true, title: '새로 읽은 것' })]) }, {
-    onCall: () => {
-      seen = {
-        items: doc.querySelectorAll('li.krs-mine-item').length,
-        note: doc.querySelector('[data-role="note"]').textContent,
-      };
-    },
+await ta('오늘 읽은 것이면 몇 시간이 지나도 다시 훑지 않는다', async () => {
+  const rooms = fakeScan('room');
+  const cars = fakeScan('car');
+  const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: { ...cached, at: NOW - 8 * 3600_000 } }), rooms, cars });
+  assert.equal(rooms.calls.length, 0);
+  assert.equal(cars.calls.length, 0);
+  assert.equal(m.items().length, 1);
+  assert.match(m.text('note'), /8시간 전 읽음/);
+});
+await ta('일부를 못 읽은 결과도 오늘 것이면 다시 훑지 않고 경고만 보여준다', async () => {
+  const rooms = fakeScan('room');
+  const m = await mount({
+    storage: fakeStorage({ [CACHE_KEY]: { ...cached, failed: ['차량 훑기 실패: HTTP 500'] } }), rooms,
   });
-  const m = await mount({ doc, storage: fakeStorage({ [CACHE_KEY]: { ...cached, at: NOW - STALE_MS - 1 } }), rooms });
-  assert.equal(seen.items, 1, '훑기 시작 전에 담긴 것이 먼저 보여야 한다');
-  assert.match(seen.note, /훑는 중/);
+  assert.equal(rooms.calls.length, 0);
+  assert.match(m.text('warn'), /차량 훑기 실패: HTTP 500/);
+});
+await ta('어제 읽은 것은 버리고 다시 훑는다(하루에 한 번)', async () => {
+  const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true, title: '새로 읽은 것' })]) });
+  const m = await mount({
+    storage: fakeStorage({ [CACHE_KEY]: { ...cached, at: NOW - 20 * 3600_000, start: '2026-09-16' } }), rooms,
+  });
   assert.equal(rooms.calls.length, 1);
+  assert.equal(rooms.calls[0][0], TODAY);
   assert.match(m.items()[0].textContent, /새로 읽은 것/);
+  assert.equal(m.storage.data[CACHE_KEY].start, TODAY);
   assert.equal(m.storage.data[CACHE_KEY].at, NOW);
 });
 await ta('이름이 바뀌면 담긴 것을 믿지 않는다', async () => {
@@ -274,13 +277,42 @@ await ta('기간 설정이 바뀌면 그 기간을 훑는다', async () => {
   assert.equal(rooms.calls.length, 1);
   assert.equal(rooms.calls[0].length, 7);
 });
-await ta('새로고침 버튼은 담긴 것을 버리고 다시 훑는다', async () => {
-  const rooms = fakeScan('room');
-  const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached }), rooms });
+await ta('새로고침 버튼은 담긴 것을 먼저 그려 둔 채 다시 훑어 바꿔 끼운다', async () => {
+  const doc = homeDoc();
+  let seen = null;
+  const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true, title: '새로 읽은 것' })]) }, {
+    onCall: () => {
+      seen = {
+        items: doc.querySelectorAll('li.krs-mine-item').length,
+        note: doc.querySelector('[data-role="note"]').textContent,
+      };
+    },
+  });
+  const m = await mount({ doc, storage: fakeStorage({ [CACHE_KEY]: cached }), rooms });
   assert.equal(rooms.calls.length, 0);
   m.root.querySelector('[data-act="refresh"]').click();
   await tick();
   assert.equal(rooms.calls.length, 1);
+  assert.equal(seen.items, 1, '훑기 시작 전에 담긴 것이 먼저 보여야 한다');
+  assert.match(seen.note, /훑는 중/);
+  assert.match(m.items()[0].textContent, /새로 읽은 것/);
+  assert.equal(m.storage.data[CACHE_KEY].at, NOW);
+});
+
+console.log('예약이 없으면 머리 한 줄');
+await ta('없다는 말은 머리 줄에 적고 본문에는 아무것도 두지 않는다', async () => {
+  const m = await mount({ storage: fakeStorage({ myName: '홍길동' }) });
+  const head = m.root.querySelector('.krs-mine-head');
+  const body = m.root.querySelector('.krs-mine-body');
+  assert.match(head.querySelector('[data-role="empty"]').textContent, /찾지 못했습니다/);
+  assert.match(head.querySelector('[data-role="note"]').textContent, /9\/17~10\/16 · 방금 읽음/);
+  assert.equal(body.querySelectorAll('li').length, 0);
+  assert.equal(body.textContent.trim(), '', '본문에 글이 남으면 한 줄로 접히지 않는다');
+});
+await ta('예약이 있으면 없다는 말은 지우고 본문에 목록을 둔다', async () => {
+  const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached, myName: '' }) });
+  assert.equal(m.text('empty'), '');
+  assert.equal(m.root.querySelectorAll('.krs-mine-body li.krs-mine-item').length, 1);
 });
 
 console.log('못 읽은 날은 빼고 말한다');
@@ -292,7 +324,7 @@ await ta('확신 없는 날은 제외하고 몇 일인지 적는다', async () =
   assert.match(m.text('empty'), /찾지 못했습니다/);
   assert.doesNotMatch(m.text('empty'), /없습니다/);
 });
-await ta('한쪽 훑기가 죽으면 실패 이유와 못 읽은 날 수를 적고, 결과는 짧게만 믿는다', async () => {
+await ta('한쪽 훑기가 죽으면 실패 이유와 못 읽은 날 수를 적고, 그 사실을 같이 담는다', async () => {
   const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true })]) });
   const cars = fakeScan('car', {}, { fail: new Error('HTTP 500') });
   const m = await mount({ rooms, cars });
@@ -301,8 +333,7 @@ await ta('한쪽 훑기가 죽으면 실패 이유와 못 읽은 날 수를 적�
   assert.match(m.text('warn'), /30일은 아예 읽지 못했습니다/);
   const saved = m.storage.data[CACHE_KEY];
   assert.equal(saved.failed.length, 1);
-  assert.ok(cacheFresh(saved, NOW + PARTIAL_STALE_MS - 1000));
-  assert.ok(!cacheFresh(saved, NOW + PARTIAL_STALE_MS + 1000));
+  assert.equal(saved.unread.length, 30);
 });
 await ta('이름이 없으면 넣으라고 한다', async () => {
   const m = await mount();
@@ -327,9 +358,12 @@ await ta('포털 로그인이 풀린 것이면 홈으로 가는 다시 로그인
 await ta('한 날도 못 읽었지만 담긴 것이 있으면 그것을 보여주고 언제 것인지 말한다', async () => {
   const err = new Error('응답이 20초 안에 오지 않았습니다.');
   const m = await mount({
-    storage: fakeStorage({ [CACHE_KEY]: { ...cached, at: NOW - STALE_MS - 1 } }),
+    storage: fakeStorage({ [CACHE_KEY]: cached }),
     rooms: fakeScan('room', {}, { fail: err }), cars: fakeScan('car', {}, { fail: err }),
   });
+  m.root.querySelector('[data-act="refresh"]').click();
+  await tick();
+  assert.equal(m.rooms.calls.length, 1);
   assert.equal(m.items().length, 1);
   assert.match(m.text('warn'), /읽어 둔 것입니다/);
   assert.match(m.text('warn'), /응답이 20초/);

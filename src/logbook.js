@@ -25,6 +25,7 @@ export const KIND_LABEL = {
   ask: '말로찾기',
   capture: '캡처',
   setting: '설정',
+  circulate: '회람',
 };
 
 const pad = (n) => String(n).padStart(2, '0');

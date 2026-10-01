@@ -5,16 +5,19 @@
 //
 //   1) 콘텐츠 스크립트라 페이지와 같은 출처에서 요청한다. 쿠키가 그냥 실리고, 탭 경유 폴백은 없다.
 //   2) 훑은 결과를 chrome.storage 에 담아 둔다. 홈은 하루에도 여러 번 여는 화면이라 그때마다
-//      서른 날을 다시 두드릴 수 없다. 담긴 것은 **언제 읽었는지**와 함께 보여주고, 묵으면 다시 읽는다.
-//      패널에서 예약·취소하면 패널이 이 캐시를 지우고, 카드는 그것을 보고 다시 훑는다.
+//      서른 날을 다시 두드릴 수 없다. 담긴 것은 **언제 읽었는지**와 함께 보여주고, 다시 훑는 때는 셋뿐이다.
+//        - 하루에 한 번: 오늘 읽어 둔 것이 없을 때
+//        - 이 확장으로 예약·취소·수정했을 때: 패널이 이 캐시를 지우고, 카드는 그것을 보고 다시 훑는다
+//        - 새로고침 버튼을 눌렀을 때
 //
 // 겉모습은 사이트의 카드(Popup Notice 와 같은 markup)를 빌려 홈의 다른 카드와 같아 보이게 한다.
 // 안쪽 목록은 krs-mine-* 접두어의 자체 스타일만 쓴다 — 사이트 CSS 가 바뀌어도 목록은 읽힌다.
+// 예약도 경고도 없으면 본문을 접어 머리 한 줄만 남긴다.
 
 import { scanDays } from './site.js';
 import { scanCarDays } from './rentcar.js';
 import { collectMine, datesFrom } from './mine.js';
-import { MONTH_DAYS, STALE_MS } from './monthcache.js';
+import { MONTH_DAYS } from './monthcache.js';
 import { fmtTime, todayStr } from './parse.js';
 import { AuthError } from './net.js';
 import { PORTAL_HOME_URL } from './config.js';
@@ -30,8 +33,6 @@ export const JUMP_KEY = 'homeJump';
 export const JUMP_TTL_MS = 60_000;
 /** 카드의 루트 요소 id. CDP 검사가 이걸로 찾는다. */
 export const ROOT_ID = 'krsMine';
-/** 일부를 못 읽은 결과는 이만큼만 믿는다. 사이트가 잠깐 앓은 것일 수 있어 곧 다시 본다. */
-export const PARTIAL_STALE_MS = 2 * 60_000;
 /** 패널이 예약·취소를 연달아 하면 알림이 몰려온다. 이만큼 모아서 한 번만 훑는다. */
 export const RESCAN_DEBOUNCE_MS = 1500;
 
@@ -90,17 +91,11 @@ export function spanOf(saved) {
 /**
  * 담긴 것을 그대로 써도 되는지. 시작일·기간·이름이 모두 같아야 한다.
  * 이름이 바뀌면 판정이 바뀌고, 날이 바뀌면 어제 것은 오늘 것이 아니다.
+ * 오늘 읽은 것이면 몇 시간이 지났어도 쓴다 — 스스로 다시 훑는 건 하루에 한 번뿐이다.
  */
 export function cacheUsable(cache, { start, days, name = '' }) {
   return !!cache && Array.isArray(cache.items) && typeof cache.at === 'number'
     && cache.start === start && cache.days === days && (cache.name || '') === (name || '');
-}
-
-/** 아직 믿어도 되는지. 일부를 못 읽은 결과는 더 짧게 믿는다. */
-export function cacheFresh(cache, now = Date.now(), staleMs = STALE_MS) {
-  if (!cache) return false;
-  const ttl = cache.failed?.length ? Math.min(staleMs, PARTIAL_STALE_MS) : staleMs;
-  return now - cache.at < ttl;
 }
 
 /** 화면에 필요한 것만 남긴다. record(파싱 원본)는 storage 에 넣지 않는다. */
@@ -157,10 +152,13 @@ async function scanMine(dates, { scanRooms, scanCars, onDay, onProgress, signal 
 
 const STYLE = `
 .krs-mine .krs-mine-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-top: .5rem; }
-.krs-mine .krs-mine-title { display: flex; align-items: center; gap: 7px; margin: 0 !important; font-size: .875rem; }
+.krs-mine .krs-mine-title { display: flex; flex: 0 0 auto !important; align-items: center; gap: 7px; margin: 0 !important; font-size: .875rem; }
 .krs-mine .krs-mine-count { display: inline-block; min-width: 18px; padding: 1px 7px; border-radius: 9px; background: #e8f1fd; color: #1f6fd0; font-size: 11px; font-weight: 700; line-height: 1.5; text-align: center; }
 .krs-mine .krs-mine-count:empty { display: none; }
-.krs-mine .krs-mine-note { flex: 1 1 auto; min-width: 0; color: #7a8087; font-size: 12px; }
+.krs-mine .krs-mine-empty { flex: 0 1 auto; min-width: 0; color: #41464d; font-size: 12px; }
+.krs-mine .krs-mine-note { flex: 1 1 auto; min-width: 0; color: #7a8087; font-size: 12px; text-align: left; }
+.krs-mine:not(:has(.krs-mine-item, .krs-mine-warn:not(:empty))) .krs-mine-head { border-bottom-width: 0 !important; }
+.krs-mine:not(:has(.krs-mine-item, .krs-mine-warn:not(:empty))) .krs-mine-body { display: none; }
 .krs-mine .krs-mine-tools { display: flex; gap: 6px; margin-left: auto; }
 .krs-mine .krs-mine-btn { padding: 3px 10px; border: 1px solid #d6dbe0; border-radius: 4px; background: #fff; color: #45464b; font: inherit; font-size: 12px; line-height: 1.4; cursor: pointer; }
 .krs-mine .krs-mine-btn:hover { background: #f3f5f7; }
@@ -185,9 +183,7 @@ const STYLE = `
 .krs-mine .krs-mine-topic { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .krs-mine .krs-mine-topic::before { content: "·"; margin-right: 6px; color: #aeb4ba; }
 .krs-mine .krs-mine-why { flex: none; margin-top: 2px; color: #aeb4ba; font-size: 11px; white-space: nowrap; }
-.krs-mine .krs-mine-empty, .krs-mine .krs-mine-warn { margin: 0; color: #6b7178; font-size: 12px; }
-.krs-mine .krs-mine-warn { color: #a7691a; }
-.krs-mine .krs-mine-list:not(:empty) + .krs-mine-empty:not(:empty),
+.krs-mine .krs-mine-warn { margin: 0; color: #a7691a; font-size: 12px; }
 .krs-mine .krs-mine-list:not(:empty) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
 .krs-mine .krs-mine-empty:empty, .krs-mine .krs-mine-warn:empty { display: none; }
 .krs-mine .krs-mine-login { margin-left: 4px; color: #1f6fd0; text-decoration: underline; }
@@ -204,6 +200,7 @@ function buildStrip(doc) {
     <div class="position-tl w-102 border-t-3 brc-primary ml-n1px mt-n1px"></div>
     <div class="card-header brc-secondary-l3 pb-2 krs-mine-head">
       <h5 class="card-title mb-2 mb-md-0 text-dark-m3 krs-mine-title">내 예약 <span class="krs-mine-count" data-role="count"></span></h5>
+      <span class="krs-mine-empty" data-role="empty"></span>
       <span class="krs-mine-note" data-role="note"></span>
       <span class="krs-mine-tools">
         <button type="button" class="krs-mine-btn" data-act="refresh" title="담아 둔 것을 버리고 사이트를 다시 훑습니다">새로고침</button>
@@ -213,7 +210,6 @@ function buildStrip(doc) {
     <div class="card-body bgc-white krs-mine-body">
       <div class="krs-mine-bar" data-role="bar" hidden><i data-role="fill"></i></div>
       <ul class="krs-mine-list" data-role="list"></ul>
-      <p class="krs-mine-empty" data-role="empty"></p>
       <p class="krs-mine-warn" data-role="warn"></p>
     </div>
   </div>
@@ -329,7 +325,6 @@ export function createHomeCard(doc, deps = {}) {
   const today = deps.today || todayStr;
   const scanRooms = deps.scanRooms || scanDays;
   const scanCars = deps.scanCars || scanCarDays;
-  const staleMs = deps.staleMs ?? STALE_MS;
   const debounceMs = deps.debounceMs ?? RESCAN_DEBOUNCE_MS;
   const openPanel = deps.openPanel || defaultOpenPanel;
   const visible = deps.visible || (() => doc.visibilityState !== 'hidden');
@@ -374,7 +369,8 @@ export function createHomeCard(doc, deps = {}) {
     ui.bar.hidden = true;
     ui.note.textContent = `${range} · ${agoText(cache.at, now())} 읽음`;
     ui.note.title = new Date(cache.at).toLocaleString();
-    ui.empty.textContent = cache.items.length ? '' : `${range} 사이에서 내 예약으로 확인된 건을 찾지 못했습니다.`;
+    // 기간은 바로 옆 note 가 말한다. 머리 한 줄에 들어가야 해서 여기서는 되풀이하지 않는다.
+    ui.empty.textContent = cache.items.length ? '' : '내 예약으로 확인된 건을 찾지 못했습니다';
 
     const warn = [];
     if (!name) warn.push('이름을 넣으면 예약자 이름으로도 찾습니다 — 예약 패널의 "설정 및 연결"');
@@ -393,9 +389,9 @@ export function createHomeCard(doc, deps = {}) {
 
   /**
    * 담긴 것을 보여주고, 필요하면 훑는다.
-   *   담긴 것이 없다        → 훑는다(진행 막대)
-   *   담긴 것이 신선하다    → 그것만 보여준다
-   *   담긴 것이 묵었다      → 먼저 보여주고 다시 훑어 바꿔 끼운다
+   *   오늘 읽어 둔 것이 없다       → 훑는다(진행 막대). 하루에 한 번이 여기다
+   *   오늘 읽어 둔 것이 있다       → 그것만 보여준다. 몇 시간이 지났어도 다시 훑지 않는다
+   *   force(새로고침·예약 변경)    → 먼저 보여주고 다시 훑어 바꿔 끼운다
    */
   async function run({ force = false } = {}) {
     if (disposed) return undefined;
@@ -416,7 +412,7 @@ export function createHomeCard(doc, deps = {}) {
       const usable = cacheUsable(cache, { start, days, name });
 
       if (usable) paintResult(cache, name);
-      if (usable && !force && cacheFresh(cache, now(), staleMs)) return;
+      if (usable && !force) return;
 
       setBusy(true);
       if (!usable) {
@@ -488,7 +484,9 @@ export function createHomeCard(doc, deps = {}) {
 
   const offChanged = onChanged((changes, area) => {
     if (area && area !== 'local') return;
+    // 패널이 예약·취소·수정 뒤 캐시를 지웠거나 넣은 기록(justBooked)을 고쳤다 — 이 확장으로 예약이 바뀐 것이다.
     const gone = CACHE_KEY in changes && changes[CACHE_KEY].newValue === undefined;
+    // 이름·기간이 바뀌면 담긴 것은 다른 조건으로 읽은 것이라 더는 맞지 않는다.
     const settings = ['myName', 'justBooked', 'spanDays'].some((k) => k in changes);
     if (gone || settings) wantRescan();
   });

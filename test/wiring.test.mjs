@@ -127,18 +127,24 @@ console.log('회의실 모드로 시작');
 }
 
 console.log('홈의 내 예약 카드에서 누른 날짜로 연다');
+// 패널은 부탁이 없으면 오늘을 연다. 부탁 날짜가 오늘과 겹치면 따랐는지 무시했는지 가릴 수 없어 한 주 뒤로 잡는다.
+const JUMP_DATE = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() + 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+})();
 {
-  const { window, store } = await boot({ mode: 'mine', homeJump: { date: '2026-10-01', mode: 'car', at: Date.now() } });
+  const { window, store } = await boot({ mode: 'mine', homeJump: { date: JUMP_DATE, mode: 'car', at: Date.now() } });
   const doc = window.document;
-  t('부탁받은 날짜가 잡힌다', () => assert.equal(doc.getElementById('date').value, '2026-10-01'));
+  t('부탁받은 날짜가 잡힌다', () => assert.equal(doc.getElementById('date').value, JUMP_DATE));
   t('저장된 모드 대신 차량 탭으로 열린다', () =>
     assert.ok(doc.getElementById('tabCar').classList.contains('active')));
   t('부탁은 읽고 지운다', () => assert.equal(store.homeJump, undefined));
 }
 {
-  const { window, store } = await boot({ mode: 'room', homeJump: { date: '2026-10-01', mode: 'car', at: Date.now() - 10 * 60_000 } });
+  const { window, store } = await boot({ mode: 'room', homeJump: { date: JUMP_DATE, mode: 'car', at: Date.now() - 10 * 60_000 } });
   const doc = window.document;
-  t('묵은 부탁은 무시한다', () => assert.notEqual(doc.getElementById('date').value, '2026-10-01'));
+  t('묵은 부탁은 무시한다', () => assert.notEqual(doc.getElementById('date').value, JUMP_DATE));
   t('묵은 부탁도 지운다', () => assert.equal(store.homeJump, undefined));
   t('회의실 탭 그대로', () => assert.ok(doc.getElementById('tabRoom').classList.contains('active')));
 }
@@ -205,6 +211,50 @@ console.log('설정 및 연결의 Teams 버튼 체크박스');
   const { window } = await boot({ mode: 'room', teamsButton: false });
   t('꺼 둔 설정이면 꺼진 채로 뜬다', () =>
     assert.equal(window.document.getElementById('teamsButton').checked, false));
+}
+
+console.log('설정 및 연결의 미회람 문서 자동 열람 체크박스');
+{
+  const { wired, window, store } = await boot({ mode: 'room' });
+  const doc = window.document;
+  const box = doc.getElementById('docCirculate');
+  const line = doc.getElementById('docCirculateState');
+  t('설정 및 연결 안에 있다', () => {
+    assert.ok(box, '체크박스가 없다');
+    assert.equal(box.type, 'checkbox');
+    assert.match(box.closest('details.diag')?.querySelector('summary')?.textContent || '', /설정 및 연결/);
+  });
+  // 읽음 처리는 되돌릴 수 없다. 켠 적이 없는 브라우저에서 켜진 채로 뜨면 안 된다.
+  t('설정이 없으면 꺼진 채로 뜬다', () => assert.equal(box.checked, false));
+  t('change 리스너', () => assert.ok(wired.get('docCirculate')?.has('change')));
+  t('무엇을 켜고 끄는지 적혀 있다', () => assert.match(box.closest('label').textContent, /미회람 문서/));
+  t('한 번도 돌지 않았으면 결과 줄은 감춘다', () => assert.equal(line.hidden, true));
+
+  box.checked = true;
+  box.dispatchEvent(new window.Event('change'));
+  await new Promise((r) => setTimeout(r, 40));
+  t('켜면 저장된다', () => assert.equal(store.docCirculate, true));
+  t('켠 것이 활동 기록에 남는다', () =>
+    assert.ok((store.activityLog || []).some((e) => e.kind === 'setting' && /미회람.*켬/.test(e.text))));
+
+  box.checked = false;
+  box.dispatchEvent(new window.Event('change'));
+  await new Promise((r) => setTimeout(r, 40));
+  t('끄면 저장된다', () => assert.equal(store.docCirculate, false));
+}
+{
+  const at = new Date('2026-10-01T09:00:00').getTime();
+  const { window } = await boot({
+    mode: 'room', docCirculate: true,
+    docCirculateState: { date: '2026-10-01', state: 'done', at, ok: true, text: '미회람 문서 5건을 모두 열어 회람 처리했습니다' },
+  });
+  const doc = window.document;
+  t('켜 둔 설정이면 켜진 채로 뜬다', () => assert.equal(doc.getElementById('docCirculate').checked, true));
+  t('홈에서 돈 마지막 결과를 언제 한 것인지와 함께 보여준다', () => {
+    const line = doc.getElementById('docCirculateState');
+    assert.equal(line.hidden, false);
+    assert.equal(line.textContent, '2026-10-01 09:00:00 · 미회람 문서 5건을 모두 열어 회람 처리했습니다');
+  });
 }
 
 console.log('차량 모드로 시작 (조기 return 회귀 방지)');

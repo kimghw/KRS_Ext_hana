@@ -17,6 +17,9 @@ import {
   ENABLE_KEY as HOME_ENABLE_KEY, homeEnabled,
 } from './src/home.js';
 import { ENABLE_KEY as TEAMS_ENABLE_KEY, teamsEnabled } from './src/people.js';
+import {
+  ENABLE_KEY as CIRC_ENABLE_KEY, STATE_KEY as CIRC_STATE_KEY, circulateEnabled, stateText as circulateStateText,
+} from './src/circulate.js';
 import { fmtTime, todayStr, buildGrid, canDelete } from './src/parse.js';
 import { isFoldedRoom, foldLabels } from './src/roomorder.js';
 
@@ -40,6 +43,7 @@ const el = {
   mineWrap: $('mineWrap'), mineList: $('mineList'), mineEmpty: $('mineEmpty'), myName: $('myName'),
   scanBar: $('scanBar'), scanNote: $('scanNote'), scanFill: $('scanFill'),
   homeCard: $('homeCard'), teamsButton: $('teamsButton'),
+  docCirculate: $('docCirculate'), docCirculateState: $('docCirculateState'),
   logBox: $('logBox'), logCount: $('logCount'), logOut: $('logOut'),
   logCopy: $('logCopy'), logSave: $('logSave'), logClear: $('logClear'),
 };
@@ -2164,6 +2168,16 @@ async function runCapture() {
   }
 }
 
+/**
+ * 미회람 문서 열람의 마지막 결과. 도는 것은 홈의 콘텐츠 스크립트이고, 패널은 그쪽이 적어 둔 것을 보여주기만 한다.
+ * 한 번도 돌지 않았으면 줄을 감춘다.
+ */
+function paintCirculate(st) {
+  const text = circulateStateText(st);
+  el.docCirculateState.textContent = text;
+  el.docCirculateState.hidden = !text;
+}
+
 /* ------------------------------------------------------------- 초기화 */
 
 function initHourSelects() {
@@ -2179,7 +2193,7 @@ async function init() {
 
   const saved = await chrome.storage.local.get(
     ['hourStart', 'hourEnd', 'region', 'apiKey', 'mode', 'justBooked', 'myName', 'spanDays',
-      'foldOpen', HOME_ENABLE_KEY, TEAMS_ENABLE_KEY]);
+      'foldOpen', HOME_ENABLE_KEY, TEAMS_ENABLE_KEY, CIRC_ENABLE_KEY, CIRC_STATE_KEY]);
   if (saved.hourStart != null) el.hourStart.value = saved.hourStart;
   if (saved.hourEnd != null) el.hourEnd.value = saved.hourEnd;
   if (saved.spanDays != null) el.spanDays.value = saved.spanDays;
@@ -2192,6 +2206,8 @@ async function init() {
   el.myName.value = state.myName;
   el.homeCard.checked = homeEnabled(saved[HOME_ENABLE_KEY]);
   el.teamsButton.checked = teamsEnabled(saved[TEAMS_ENABLE_KEY]);
+  el.docCirculate.checked = circulateEnabled(saved[CIRC_ENABLE_KEY]);
+  paintCirculate(saved[CIRC_STATE_KEY]);
   // 패널을 연 것도 남긴다. 기록을 읽을 때 어디서 한 판이 시작됐는지가 보인다.
   logEvent('open', true, `패널 열림 · v${chrome.runtime.getManifest?.()?.version ?? '?'}`,
     { mode: saved.mode || 'room' });
@@ -2272,6 +2288,12 @@ async function init() {
     chrome.storage.local.set({ [TEAMS_ENABLE_KEY]: on });
     logEvent('setting', true, `인명 검색 카드 Teams 버튼 ${on ? '켬' : '끔'}`);
   });
+  // DOC-Cruiser 미회람 문서 자동 열람. 열려 있는 홈 탭은 저장소 변화를 듣고 곧바로 시작하거나 멈춘다.
+  el.docCirculate.addEventListener('change', () => {
+    const on = el.docCirculate.checked;
+    chrome.storage.local.set({ [CIRC_ENABLE_KEY]: on });
+    logEvent('setting', true, `DOC-Cruiser 미회람 문서 자동 열람 ${on ? '켬' : '끔'}`);
+  });
   el.myName.addEventListener('change', () => {
     state.myName = el.myName.value.trim();
     chrome.storage.local.set({ myName: state.myName });
@@ -2328,6 +2350,12 @@ async function init() {
     // 다른 창의 패널에서 바꿨으면 이 창의 체크박스도 따라간다.
     if (HOME_ENABLE_KEY in changes) el.homeCard.checked = homeEnabled(changes[HOME_ENABLE_KEY].newValue);
     if (TEAMS_ENABLE_KEY in changes) el.teamsButton.checked = teamsEnabled(changes[TEAMS_ENABLE_KEY].newValue);
+    if (CIRC_ENABLE_KEY in changes) el.docCirculate.checked = circulateEnabled(changes[CIRC_ENABLE_KEY].newValue);
+    // 홈에서 도는 열람이 진행·결과를 적을 때마다 따라 그린다. 홈의 기록이 활동 로그에도 들어왔으니 그것도 다시 그린다.
+    if (CIRC_STATE_KEY in changes) {
+      paintCirculate(changes[CIRC_STATE_KEY].newValue);
+      paintLog();
+    }
     if (!changes[HOME_JUMP_KEY]?.newValue) return;
     takeHomeJump().then((j) => { if (j) applyHomeJump(j); });
   });

@@ -161,6 +161,22 @@ export const CAR_DELETE = {
   eventTarget: 'RG_MAIN$ctl00$ctl04$BTN_DEL',
 };
 
+/* ------------------------------------------------------------ DOC-Cruiser 회람 */
+
+/**
+ * 미회람 문서 목록(DOC-Cruiser 왼쪽 메뉴의 "Non-circular documents"). 매개변수 없이 부르면 로그인한 사람 것이다.
+ * 쪽 나눔 없이 전부 한 화면에 내려온다(2026-10-01: 425건, 660KB).
+ * 미인증이면 200 으로 `alert("올바른 로그인 정보가 없습니다…다시 로그인하여 주시기 바랍니다!")` 107바이트만 온다.
+ */
+export const NONCIR_LIST_URL = `${ORIGIN}/intra/intranet/VSDotNet/DORSY/Circulation/Not_Circulation_List.aspx`;
+
+/**
+ * 회람 문서 보기 팝업. 목록의 제목 링크 `ViewCirculationDoc(R_ID, RC_ID, EA_DOCID)` 가 여는 주소다.
+ * 이 주소를 **받기만 해도** 서버가 그 회람 건(RC_ID)에 읽은 시각을 적는다 — 2026-10-01 한 건으로 확인
+ * (목록 425 → 424건, 문서의 회람 표에 그 시각으로 'O').
+ */
+export const CIRC_VIEW_URL = `${ORIGIN}/DOCCruiser/Popup/RfCirculation_View.aspx`;
+
 /**
  * 사내 메일 도메인. 인명 검색 카드에는 이메일이 없고 사용자 ID 만 있어 `<id>@krs.co.kr` 로 만든다
  * (KR Directory 의 실제 E-mail 열과 표본 9/9 일치 — 2026-08-02 확인).
