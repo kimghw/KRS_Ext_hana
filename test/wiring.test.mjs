@@ -213,6 +213,38 @@ console.log('설정 및 연결의 Teams 버튼 체크박스');
     assert.equal(window.document.getElementById('teamsButton').checked, false));
 }
 
+console.log('설정 및 연결의 접수 미확인 공문 카드 체크박스');
+{
+  const { wired, window, store } = await boot({ mode: 'room' });
+  const doc = window.document;
+  const box = doc.getElementById('homeUncfm');
+  t('설정 및 연결 안에 있다', () => {
+    assert.ok(box, '체크박스가 없다');
+    assert.equal(box.type, 'checkbox');
+    assert.match(box.closest('details.diag')?.querySelector('summary')?.textContent || '', /설정 및 연결/);
+  });
+  t('설정이 없으면 켜진 채로 뜬다', () => assert.equal(box.checked, true));
+  t('change 리스너', () => assert.ok(wired.get('homeUncfm')?.has('change')));
+  t('무엇을 켜고 끄는지 적혀 있다', () => assert.match(box.closest('label').textContent, /접수 미확인 공문/));
+
+  box.checked = false;
+  box.dispatchEvent(new window.Event('change'));
+  await new Promise((r) => setTimeout(r, 40));
+  t('끄면 저장된다', () => assert.equal(store.homeUncfm, false));
+  t('끈 것이 활동 기록에 남는다', () =>
+    assert.ok((store.activityLog || []).some((e) => e.kind === 'setting' && /접수 미확인.*끔/.test(e.text))));
+
+  box.checked = true;
+  box.dispatchEvent(new window.Event('change'));
+  await new Promise((r) => setTimeout(r, 40));
+  t('다시 켜면 저장된다', () => assert.equal(store.homeUncfm, true));
+}
+{
+  const { window } = await boot({ mode: 'room', homeUncfm: false });
+  t('꺼 둔 설정이면 꺼진 채로 뜬다', () =>
+    assert.equal(window.document.getElementById('homeUncfm').checked, false));
+}
+
 console.log('설정 및 연결의 미회람 문서 자동 열람 체크박스');
 {
   const { wired, window, store } = await boot({ mode: 'room' });

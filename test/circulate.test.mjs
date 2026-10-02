@@ -535,8 +535,9 @@ console.log('확장 배선');
     assert.equal(box.hasAttribute('checked'), false, '기본이 켜져 있다');
     assert.match(box.closest('details.diag')?.querySelector('summary')?.textContent || '', /설정 및 연결/);
   });
-  t('되돌릴 수 없다는 것을 그 자리에 적어 둔다', () =>
-    assert.match(panel.getElementById('docCirculate').closest('label').nextElementSibling.textContent, /되돌릴 수 없/));
+  // 설명 문단은 두지 않는다. 그래도 되돌릴 수 없다는 말은 그 줄의 툴팁에 남긴다.
+  t('되돌릴 수 없다는 것을 그 줄의 툴팁에 적어 둔다', () =>
+    assert.match(panel.getElementById('docCirculate').closest('label').title, /되돌릴 수 없/));
   t('활동 기록에 이름이 있다', () => assert.equal(KIND_LABEL.circulate, '회람'));
 }
 

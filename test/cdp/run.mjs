@@ -276,7 +276,7 @@ console.log('\n실제 사이트를 읽는다 (로그인 필요)');
           beforeNotice: root.nextElementSibling?.id === 'divPopupInfo',
           busy: root.getAttribute('aria-busy') === 'true',
           items: root.querySelectorAll('li.krs-mine-item').length,
-          note: text('note'), empty: text('empty'), warn: text('warn'),
+          note: text('note'), rooms: text('rooms'), warn: text('warn'),
         };
       })()`, 200000);
       t('홈에 내 예약 카드가 붙는다', () =>
@@ -284,8 +284,8 @@ console.log('\n실제 사이트를 읽는다 (로그인 필요)');
       if (strip.mounted) {
         t('Popup Notice 카드 바로 위에 있다', () => assert(strip.beforeNotice));
         t('훑기가 시간 안에 끝난다', () => assert(!strip.busy, strip.note));
-        t('목록을 그리거나, 못 그린 이유를 말하거나 (둘 중 하나)', () => assert(
-          strip.items > 0 || strip.empty || strip.warn, JSON.stringify(strip)));
+        t('목록을 그리거나, 읽고 0 건이라 하거나, 못 그린 이유를 말하거나', () => assert(
+          strip.items > 0 || strip.rooms !== '' || strip.warn, JSON.stringify(strip)));
         console.log(`  note  ${strip.note}${strip.items ? ` · ${strip.items}건` : ''}${strip.warn ? ` · ${strip.warn}` : ''}`);
 
         // 패널 머리의 체크박스를 사람처럼 눌러 끄고 켠다. 열려 있는 홈에 새로고침 없이 반영돼야 한다.

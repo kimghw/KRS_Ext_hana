@@ -10,9 +10,9 @@
 //        - 이 확장으로 예약·취소·수정했을 때: 패널이 이 캐시를 지우고, 카드는 그것을 보고 다시 훑는다
 //        - 새로고침 버튼을 눌렀을 때
 //
-// 겉모습은 사이트의 카드(Popup Notice 와 같은 markup)를 빌려 홈의 다른 카드와 같아 보이게 한다.
+// 겉모습은 홈 카드 공통 스타일(src/homecard.js — R&D ERP 현황 카드와 같은 색·칩·아이콘 버튼)을 쓰고,
 // 안쪽 목록은 krs-mine-* 접두어의 자체 스타일만 쓴다 — 사이트 CSS 가 바뀌어도 목록은 읽힌다.
-// 예약도 경고도 없으면 본문을 접어 머리 한 줄만 남긴다.
+// 예약도 경고도 없으면 본문을 접어 머리 한 줄(건수 칩 · 읽은 때)만 남긴다. "없습니다" 같은 말은 적지 않는다.
 
 import { scanDays } from './site.js';
 import { scanCarDays } from './rentcar.js';
@@ -21,6 +21,7 @@ import { MONTH_DAYS } from './monthcache.js';
 import { fmtTime, todayStr } from './parse.js';
 import { AuthError } from './net.js';
 import { PORTAL_HOME_URL } from './config.js';
+import { CARD_STYLE, ICON, setChip } from './homecard.js';
 
 /** 훑은 결과를 담는 storage 키. 패널은 예약·취소 뒤 이 키를 지워 카드에게 알린다. */
 export const CACHE_KEY = 'homeMine';
@@ -150,75 +151,62 @@ async function scanMine(dates, { scanRooms, scanCars, onDay, onProgress, signal 
 
 /* ------------------------------------------------------------ 그리기 */
 
-const STYLE = `
-.krs-mine .krs-mine-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-top: .5rem; }
-.krs-mine .krs-mine-title { display: flex; flex: 0 0 auto !important; align-items: center; gap: 7px; margin: 0 !important; font-size: .875rem; }
-.krs-mine .krs-mine-count { display: inline-block; min-width: 18px; padding: 1px 7px; border-radius: 9px; background: #e8f1fd; color: #1f6fd0; font-size: 11px; font-weight: 700; line-height: 1.5; text-align: center; }
-.krs-mine .krs-mine-count:empty { display: none; }
-.krs-mine .krs-mine-empty { flex: 0 1 auto; min-width: 0; color: #41464d; font-size: 12px; }
-.krs-mine .krs-mine-note { flex: 1 1 auto; min-width: 0; color: #7a8087; font-size: 12px; text-align: left; }
-.krs-mine:not(:has(.krs-mine-item, .krs-mine-warn:not(:empty))) .krs-mine-head { border-bottom-width: 0 !important; }
-.krs-mine:not(:has(.krs-mine-item, .krs-mine-warn:not(:empty))) .krs-mine-body { display: none; }
-.krs-mine .krs-mine-tools { display: flex; gap: 6px; margin-left: auto; }
-.krs-mine .krs-mine-btn { padding: 3px 10px; border: 1px solid #d6dbe0; border-radius: 4px; background: #fff; color: #45464b; font: inherit; font-size: 12px; line-height: 1.4; cursor: pointer; }
-.krs-mine .krs-mine-btn:hover { background: #f3f5f7; }
-.krs-mine .krs-mine-btn:disabled { opacity: .6; cursor: default; }
-.krs-mine .krs-mine-btn.primary { border-color: #1f6fd0; background: #1f6fd0; color: #fff; }
-.krs-mine .krs-mine-btn.primary:hover { background: #1a5fb4; }
-.krs-mine .krs-mine-body { padding: 10px 16px 12px; }
-.krs-mine .krs-mine-bar { height: 3px; margin: -4px 0 8px; border-radius: 2px; background: #edf0f3; overflow: hidden; }
-.krs-mine .krs-mine-bar > i { display: block; width: 0; height: 100%; background: #1f6fd0; transition: width .3s; }
+const STYLE = `${CARD_STYLE}
+.krs-mine:not(:has(.krs-mine-item, .krs-mine-warn:not(:empty), .krs-mine-bar:not([hidden]))) .krs-mine-body { display: none; }
+.krs-mine .krs-mine-bar { height: 3px; margin: 0 0 8px; border-radius: 2px; background: #e3eaf3; overflow: hidden; }
+.krs-mine .krs-mine-bar[hidden] { display: none; }
+.krs-mine .krs-mine-bar > i { display: block; width: 0; height: 100%; background: #1f4e9c; transition: width .3s; }
 .krs-mine .krs-mine-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .krs-mine[aria-busy="true"] .krs-mine-list { opacity: .7; }
-.krs-mine .krs-mine-item { display: flex; align-items: flex-start; gap: 9px; flex: 1 1 280px; max-width: 460px; padding: 8px 12px; border: 1px solid #e0e5e8; border-radius: 6px; background: #fff; color: #41464d; font-size: 13px; line-height: 1.35; cursor: pointer; }
-.krs-mine .krs-mine-item:hover { border-color: #1f6fd0; background: #f5f9ff; }
-.krs-mine .krs-mine-item.today { border-left: 3px solid #1f6fd0; }
-.krs-mine .krs-mine-kind { flex: none; margin-top: 1px; padding: 2px 7px; border-radius: 5px; background: #e8f1fd; color: #1f6fd0; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.krs-mine .krs-mine-item { display: flex; align-items: flex-start; gap: 9px; flex: 1 1 280px; max-width: 460px; padding: 8px 12px; border: 1px solid #d5dbe3; border-radius: 8px; background: #fff; color: #222; font-size: 13px; line-height: 1.35; cursor: pointer; }
+.krs-mine .krs-mine-item:hover { border-color: #1f4e9c; background: #f5f8fc; }
+.krs-mine .krs-mine-item.today { border-left: 3px solid #1f4e9c; }
+.krs-mine .krs-mine-kind { flex: none; margin-top: 1px; padding: 2px 8px; border-radius: 10px; background: #e3edfb; color: #1f4e9c; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .krs-mine .krs-mine-kind.car { background: #e3f3ea; color: #1f7a45; }
 .krs-mine .krs-mine-main { flex: 1; min-width: 0; }
 .krs-mine .krs-mine-when { font-weight: 600; font-variant-numeric: tabular-nums; }
-.krs-mine .krs-mine-status { margin-left: 6px; color: #7a8087; font-size: 11px; }
-.krs-mine .krs-mine-sub { display: flex; gap: 6px; min-width: 0; margin-top: 2px; color: #6b7178; font-size: 12px; }
+.krs-mine .krs-mine-status { margin-left: 6px; color: #607089; font-size: 11px; }
+.krs-mine .krs-mine-sub { display: flex; gap: 6px; min-width: 0; margin-top: 2px; color: #607089; font-size: 12px; }
 .krs-mine .krs-mine-room { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .krs-mine .krs-mine-topic { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.krs-mine .krs-mine-topic::before { content: "·"; margin-right: 6px; color: #aeb4ba; }
-.krs-mine .krs-mine-why { flex: none; margin-top: 2px; color: #aeb4ba; font-size: 11px; white-space: nowrap; }
-.krs-mine .krs-mine-warn { margin: 0; color: #a7691a; font-size: 12px; }
+.krs-mine .krs-mine-topic::before { content: "·"; margin-right: 6px; color: #8798b0; }
+.krs-mine .krs-mine-why { flex: none; margin-top: 2px; color: #8798b0; font-size: 11px; white-space: nowrap; }
 .krs-mine .krs-mine-list:not(:empty) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
-.krs-mine .krs-mine-empty:empty, .krs-mine .krs-mine-warn:empty { display: none; }
-.krs-mine .krs-mine-login { margin-left: 4px; color: #1f6fd0; text-decoration: underline; }
+.krs-mine .krs-mine-login { margin-left: 4px; color: #1f4e9c; text-decoration: underline; }
 `;
 
-/** 사이트 카드 markup 을 빌려 겉을 만들고, 안쪽은 우리 것으로 채운다. */
+/** 홈 카드의 공통 겉(homecard.js)을 만들고, 안쪽 목록은 우리 것으로 채운다. */
 function buildStrip(doc) {
   const root = doc.createElement('div');
   root.id = ROOT_ID;
-  root.className = 'row pt-3 mt-1 krs-mine';
+  root.className = 'row pt-3 mt-1 krs-card krs-mine';
   root.innerHTML = `<style>${STYLE}</style>
 <div class="col-12">
-  <div class="card ccard radius-t-0">
-    <div class="position-tl w-102 border-t-3 brc-primary ml-n1px mt-n1px"></div>
-    <div class="card-header brc-secondary-l3 pb-2 krs-mine-head">
-      <h5 class="card-title mb-2 mb-md-0 text-dark-m3 krs-mine-title">내 예약 <span class="krs-mine-count" data-role="count"></span></h5>
-      <span class="krs-mine-empty" data-role="empty"></span>
-      <span class="krs-mine-note" data-role="note"></span>
-      <span class="krs-mine-tools">
-        <button type="button" class="krs-mine-btn" data-act="refresh" title="담아 둔 것을 버리고 사이트를 다시 훑습니다">새로고침</button>
-        <button type="button" class="krs-mine-btn primary" data-act="panel" title="확장의 사이드 패널에서 예약·취소·수정합니다">예약 패널 열기</button>
+  <div class="krs-card-panel">
+    <div class="krs-card-head krs-mine-head">
+      <span class="krs-card-title krs-mine-title">내 예약</span>
+      <span class="krs-card-chips">
+        <span class="krs-card-chip" title="앞으로의 내 회의실 예약"><span>회의실</span><b data-role="rooms"></b></span>
+        <span class="krs-card-chip" title="앞으로의 내 차량 예약"><span>차량</span><b data-role="cars"></b></span>
+      </span>
+      <span class="krs-card-note" data-role="note"></span>
+      <span class="krs-card-tools">
+        <button type="button" class="krs-card-btn" data-act="refresh" title="새로고침 — 담아 둔 것을 버리고 사이트를 다시 훑습니다" aria-label="새로고침">${ICON.refresh}</button>
+        <button type="button" class="krs-card-btn" data-act="panel" title="예약 패널 열기 — 확장의 사이드 패널에서 예약·취소·수정합니다" aria-label="예약 패널 열기">${ICON.panel}</button>
       </span>
     </div>
-    <div class="card-body bgc-white krs-mine-body">
+    <div class="krs-card-body krs-mine-body">
       <div class="krs-mine-bar" data-role="bar" hidden><i data-role="fill"></i></div>
       <ul class="krs-mine-list" data-role="list"></ul>
-      <p class="krs-mine-warn" data-role="warn"></p>
+      <p class="krs-card-warn krs-mine-warn" data-role="warn"></p>
     </div>
   </div>
 </div>`;
   const q = (role) => root.querySelector(`[data-role="${role}"]`);
   return {
     root,
-    count: q('count'), note: q('note'), bar: q('bar'), fill: q('fill'),
-    list: q('list'), empty: q('empty'), warn: q('warn'),
+    rooms: q('rooms'), cars: q('cars'), note: q('note'), bar: q('bar'), fill: q('fill'),
+    list: q('list'), warn: q('warn'),
     refresh: root.querySelector('[data-act="refresh"]'),
   };
 }
@@ -358,7 +346,9 @@ export function createHomeCard(doc, deps = {}) {
   function paintList(items) {
     view.items = items;
     const t = today();
-    ui.count.textContent = items.length ? String(items.length) : '';
+    const cars = items.filter((it) => it.kind === 'car').length;
+    setChip(ui.rooms, items.length - cars);
+    setChip(ui.cars, cars);
     ui.list.innerHTML = items.map((it, i) => itemHtml(it, i, t)).join('');
   }
 
@@ -376,8 +366,6 @@ export function createHomeCard(doc, deps = {}) {
     ui.bar.hidden = true;
     ui.note.textContent = `${range} · ${agoText(cache.at, now())} 읽음`;
     ui.note.title = new Date(cache.at).toLocaleString();
-    // 기간은 바로 옆 note 가 말한다. 머리 한 줄에 들어가야 해서 여기서는 되풀이하지 않는다.
-    ui.empty.textContent = cache.items.length ? '' : '내 예약으로 확인된 건을 찾지 못했습니다';
 
     const warn = [];
     if (!name) warn.push('이름을 넣으면 예약자 이름으로도 찾습니다 — 예약 패널의 "설정 및 연결"');
@@ -432,10 +420,7 @@ export function createHomeCard(doc, deps = {}) {
       if (usable && !force) return;
 
       setBusy(true);
-      if (!usable) {
-        ui.empty.textContent = '';
-        ui.warn.textContent = '';
-      }
+      if (!usable) ui.warn.textContent = '';
       ui.note.textContent = `${range} · 훑는 중...`;
       try {
         const res = await scanMine(dates, {

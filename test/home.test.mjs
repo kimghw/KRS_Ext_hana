@@ -205,14 +205,14 @@ await ta('서른 날을 회의실·차량 두 바퀴 훑고 결과를 담는다'
   assert.equal(saved.items.length, 2);
 
   assert.equal(m.items().length, 2);
-  assert.equal(m.text('count'), '2');
+  assert.equal(m.text('rooms'), '1');
+  assert.equal(m.text('cars'), '1');
   assert.match(m.text('note'), /9\/17~10\/16 · 방금 읽음/);
   assert.ok(m.items()[0].classList.contains('today'));
   assert.match(m.items()[0].textContent, /오늘 \(목\) 09:00~11:00/);
   // 차량 다중일 예약은 하루로 자르지 않고 구간 그대로
   assert.match(m.items()[1].textContent, /9\/20 \(일\) 09:00 ~ 9\/21 \(월\) 18:00/);
   assert.match(m.items()[1].textContent, /이름 일치/);
-  assert.equal(m.text('empty'), '');
   assert.equal(m.text('warn'), '');
   assert.equal(m.root.nextElementSibling.id, 'divPopupInfo');
 });
@@ -300,18 +300,32 @@ await ta('새로고침 버튼은 담긴 것을 먼저 그려 둔 채 다시 훑�
 });
 
 console.log('예약이 없으면 머리 한 줄');
-await ta('없다는 말은 머리 줄에 적고 본문에는 아무것도 두지 않는다', async () => {
+await ta('머리 줄에는 건수 칩과 읽은 때만 — "없습니다·찾지 못했습니다" 같은 말은 적지 않는다', async () => {
   const m = await mount({ storage: fakeStorage({ myName: '홍길동' }) });
   const head = m.root.querySelector('.krs-mine-head');
   const body = m.root.querySelector('.krs-mine-body');
-  assert.match(head.querySelector('[data-role="empty"]').textContent, /찾지 못했습니다/);
+  assert.equal(m.text('rooms'), '0');
+  assert.equal(m.text('cars'), '0');
+  assert.equal(head.querySelector('[data-role="rooms"]').classList.contains('on'), false);
+  assert.doesNotMatch(head.textContent, /없습니다|못했습니다/);
   assert.match(head.querySelector('[data-role="note"]').textContent, /9\/17~10\/16 · 방금 읽음/);
   assert.equal(body.querySelectorAll('li').length, 0);
   assert.equal(body.textContent.trim(), '', '본문에 글이 남으면 한 줄로 접히지 않는다');
 });
-await ta('예약이 있으면 없다는 말은 지우고 본문에 목록을 둔다', async () => {
+await ta('버튼은 글자가 아니라 아이콘이고, 무엇인지는 툴팁·aria-label 이 말한다', async () => {
+  const m = await mount();
+  for (const b of m.root.querySelectorAll('button')) {
+    assert.ok(b.querySelector('svg'), '아이콘이 없다');
+    assert.equal(b.textContent.trim(), '');
+    assert.ok(b.getAttribute('aria-label'), 'aria-label 이 없다');
+    assert.ok(b.title);
+  }
+});
+await ta('예약이 있으면 칩이 도드라지고 본문에 목록을 둔다', async () => {
   const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached, myName: '' }) });
-  assert.equal(m.text('empty'), '');
+  assert.equal(m.text('rooms'), '1');
+  assert.equal(m.root.querySelector('[data-role="rooms"]').classList.contains('on'), true);
+  assert.equal(m.text('cars'), '0');
   assert.equal(m.root.querySelectorAll('.krs-mine-body li.krs-mine-item').length, 1);
 });
 
@@ -321,8 +335,6 @@ await ta('확신 없는 날은 제외하고 몇 일인지 적는다', async () =
   const rooms = fakeScan('room', { [d2]: day('room', d2, [], false, '달력은 3건인데 표에서 0건') });
   const m = await mount({ rooms });
   assert.match(m.text('warn'), /1일은 확인 불가라 제외/);
-  assert.match(m.text('empty'), /찾지 못했습니다/);
-  assert.doesNotMatch(m.text('empty'), /없습니다/);
 });
 await ta('한쪽 훑기가 죽으면 실패 이유와 못 읽은 날 수를 적고, 그 사실을 같이 담는다', async () => {
   const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true })]) });
@@ -343,6 +355,7 @@ await ta('한 날도 못 읽었고 로그인이 끊긴 것이면 그 사실을 �
   const err = new AuthError('로그인이 필요합니다. eclass 에 로그인한 뒤 다시 조회하세요.');
   const m = await mount({ rooms: fakeScan('room', {}, { fail: err }), cars: fakeScan('car', {}, { fail: err }) });
   assert.match(m.text('warn'), /로그인이 필요합니다/);
+  assert.equal(m.text('rooms'), '', '한 날도 못 읽었는데 0 건이라고 하면 안 된다');
   assert.equal(m.storage.data[CACHE_KEY], undefined);
   assert.equal(m.items().length, 0);
   assert.equal(m.root.querySelector('[data-role="warn"] a'), null, '포털 상태를 모르면 다시 로그인 링크를 달지 않는다');

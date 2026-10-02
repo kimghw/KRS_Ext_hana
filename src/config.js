@@ -177,6 +177,22 @@ export const NONCIR_LIST_URL = `${ORIGIN}/intra/intranet/VSDotNet/DORSY/Circulat
  */
 export const CIRC_VIEW_URL = `${ORIGIN}/DOCCruiser/Popup/RfCirculation_View.aspx`;
 
+/* ------------------------------------------------------------ DOC-Cruiser 접수 미확인 */
+
+/**
+ * 접수 미확인 문서 목록(DOC Cruiser Monitoring 의 "3) Uncfm. Rcv DOC" 숫자가 여는 화면).
+ * 사이트는 `?User_ID=…&User_Name_E=…&Dept_Code=…`(base64)를 붙여 열지만, 매개변수 없이 불러도 로그인한
+ * 사람 것이 온다(2026-10-02: 붙인 것과 같은 2건, 25KB). 미회람 목록과 같은 앱(DORSY)·같은 표(RadGridDOC)다.
+ */
+export const UNCFM_LIST_URL = `${ORIGIN}/intra/intranet/VSDotNet/DORSY/Rcv/Rcv_Not_Confirm_List.aspx`;
+
+/**
+ * 접수 문서 보기 창. 목록의 제목 링크 `ViewRcvDoc_Ex(R_ID, S_ID)` 가 `?R_ID=…` 를 붙여 860×800 창으로 연다
+ * (DORSY/JScript.js). S_ID 가 비어 있으면 오프라인 문서라 다른 화면이다. 접수 확인은 이 창의 Save 로 한다.
+ */
+export const RCV_VIEW_URL = `${ORIGIN}/DOCCruiser/Popup/RfReceivePrefer_View.aspx`;
+export const RCV_OFFLINE_VIEW_URL = `${ORIGIN}/DOCCruiser/Popup/RfReceivePreferOffLine_View.aspx`;
+
 /**
  * 사내 메일 도메인. 인명 검색 카드에는 이메일이 없고 사용자 ID 만 있어 `<id>@krs.co.kr` 로 만든다
  * (KR Directory 의 실제 E-mail 열과 표본 9/9 일치 — 2026-08-02 확인).

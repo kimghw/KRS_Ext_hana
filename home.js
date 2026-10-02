@@ -6,7 +6,7 @@
 // 붙일지 말지는 패널 머리의 체크박스(storage 의 homeCard)를 따른다. 꺼져 있어도 모듈은 불러 둔다
 // — 패널에서 다시 켜면 새로고침 없이 카드가 붙어야 하기 때문이다.
 //
-// 같은 자리에서 DOC-Cruiser 미회람 문서 열람(src/circulate.js)도 시작한다.
+// 같은 자리에서 DOC-Cruiser 미회람 문서 열람(src/circulate.js)과 접수 미확인 공문 카드(src/unconfirmed.js)도 시작한다.
 (() => {
   // /eClassVer4/Home/Index, /eClassVer4/Home, /eClassVer4/ — MVC 기본 경로는 대소문자를 가리지 않는다.
   if (!/^\/eclassver4\/(home(\/index)?)?\/?$/i.test(location.pathname)) return;
@@ -24,4 +24,9 @@
   import(chrome.runtime.getURL('src/circulate.js'))
     .then(({ startCirculate }) => startCirculate())
     .catch((err) => warn('미회람 문서 열람을 시작하지 못했습니다', err));
+
+  // DOC-Cruiser 접수 미확인 공문 카드. 내 예약 카드 위에 제목만 늘어놓는다(storage 의 homeUncfm, 기본 켬).
+  import(chrome.runtime.getURL('src/unconfirmed.js'))
+    .then(({ startUnconfirmed }) => startUnconfirmed(document))
+    .catch((err) => warn('접수 미확인 공문 카드를 붙이지 못했습니다', err));
 })();
