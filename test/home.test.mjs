@@ -104,12 +104,12 @@ function fakeScan(kind, byDate = {}, { fail = null, onCall = null, gate = null, 
 /** 카드를 붙인다. 바깥 것은 전부 가짜다. */
 async function mount({
   storage = fakeStorage(), rooms = fakeScan('room'), cars = fakeScan('car'),
-  now = () => NOW, visible = () => true, openPanel = null, doc = homeDoc(), debounceMs = 5,
+  now = () => NOW, visible = () => true, openPanel = null, doc = homeDoc(), debounceMs = 5, alive = () => true,
 } = {}) {
   const panelCalls = [];
   const ctl = await mountHome(doc, {
     storage, onChanged: storage.onChanged, now, today: () => TODAY,
-    scanRooms: rooms, scanCars: cars, visible, debounceMs,
+    scanRooms: rooms, scanCars: cars, visible, debounceMs, alive,
     openPanel: openPanel || (async () => { panelCalls.push(1); return { ok: true }; }),
   });
   const root = doc.getElementById(ROOT_ID);
@@ -428,6 +428,52 @@ await ta('패널을 못 열면 어떻게 열지 말한다', async () => {
   await tick();
   assert.match(m.text('warn'), /툴바의 확장 아이콘/);
 });
+
+console.log('확장이 다시 올려져 끊긴 카드');
+{
+  /** 끊긴 뒤의 chrome.storage 처럼 부르면 던진다. */
+  const cut = (storage, live) => {
+    const dead = () => { throw new Error('Extension context invalidated.'); };
+    return { ...storage, get: (k) => (live() ? storage.get(k) : dead()), set: (o) => (live() ? storage.set(o) : dead()) };
+  };
+  await ta('새로고침을 눌러도 훑지 않고, 페이지를 새로고침하라고 말한다', async () => {
+    let live = true;
+    const rooms = fakeScan('room');
+    const m = await mount({ storage: cut(fakeStorage({ [CACHE_KEY]: cached }), () => live), rooms, alive: () => live });
+    live = false;
+    m.root.querySelector('[data-act="refresh"]').click();
+    await tick();
+    assert.equal(rooms.calls.length, 0);
+    assert.match(m.text('warn'), /페이지를 새로고침/);
+    assert.equal(m.items().length, 1, '읽어 둔 것은 그대로 보여야 한다');
+  });
+  await ta('한 건을 눌러도 부탁을 남기거나 패널을 열려 하지 않는다', async () => {
+    let live = true;
+    const m = await mount({ storage: cut(fakeStorage({ [CACHE_KEY]: cached }), () => live), alive: () => live });
+    live = false;
+    m.items()[0].click();
+    await tick();
+    assert.equal(m.storage.data[JUMP_KEY], undefined);
+    assert.equal(m.panelCalls.length, 0);
+    assert.match(m.text('warn'), /페이지를 새로고침/);
+  });
+  await ta('훑는 사이에 끊기면 "훑기 실패" 대신 같은 안내를 한다', async () => {
+    let live = true;
+    const rooms = fakeScan('room', {}, { onCall: () => { live = false; } });
+    const m = await mount({ storage: cut(fakeStorage(), () => live), rooms, alive: () => live });
+    assert.match(m.text('warn'), /페이지를 새로고침/);
+    assert.doesNotMatch(m.text('warn'), /훑기 실패/);
+    assert.equal(m.storage.data[CACHE_KEY], undefined);
+  });
+  await ta('버튼도 목록도 아닌 곳을 누른 것에는 말하지 않는다', async () => {
+    let live = true;
+    const m = await mount({ storage: cut(fakeStorage({ [CACHE_KEY]: cached }), () => live), alive: () => live });
+    live = false;
+    m.root.querySelector('.krs-mine-title').click();
+    await tick();
+    assert.doesNotMatch(m.text('warn'), /페이지를 새로고침/);
+  });
+}
 
 console.log('켜고 끄기 (패널 머리의 체크박스)');
 t('값이 없으면 켠 것, false 일 때만 끈 것', () => {

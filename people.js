@@ -11,5 +11,6 @@
 
   import(chrome.runtime.getURL('src/people.js'))
     .then(({ startPeople }) => startPeople(document))
-    .catch((err) => console.warn('[KRS WORKSPACE] 인명 카드에 Teams 버튼을 붙이지 못했습니다:', err));
+    // 불러오는 사이에 확장이 다시 올려져 끊긴 것(runtime.id 가 사라진다)은 고장이 아니라 알리지 않는다.
+    .catch((err) => { if (chrome.runtime?.id) console.warn('[KRS WORKSPACE] 인명 카드에 Teams 버튼을 붙이지 못했습니다:', err); });
 })();

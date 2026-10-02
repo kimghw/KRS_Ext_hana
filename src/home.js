@@ -250,6 +250,12 @@ async function defaultOpenPanel() {
   return r || { ok: false, error: '응답이 없습니다' };
 }
 
+/**
+ * 이 스크립트가 아직 확장과 이어져 있는가. 확장을 다시 올리면(업데이트·새로고침) 먼저 열려 있던 홈의
+ * 스크립트는 끊겨 runtime.id 가 사라지고, 그 뒤로 storage·메시지는 "Extension context invalidated" 만 던진다.
+ */
+const defaultAlive = () => typeof chrome === 'undefined' || !!chrome.runtime?.id;
+
 /** storage 변화를 듣는다. 돌려주는 함수로 그만 듣는다 — 카드를 끄면 떼어야 한다. */
 function defaultOnChanged(fn) {
   const ev = chrome.storage.onChanged;
@@ -328,6 +334,7 @@ export function createHomeCard(doc, deps = {}) {
   const debounceMs = deps.debounceMs ?? RESCAN_DEBOUNCE_MS;
   const openPanel = deps.openPanel || defaultOpenPanel;
   const visible = deps.visible || (() => doc.visibilityState !== 'hidden');
+  const alive = deps.alive || defaultAlive;
 
   // 확장을 다시 올렸거나 두 번 불렸으면 먼저 것은 치운다.
   doc.getElementById(ROOT_ID)?.remove();
@@ -388,13 +395,23 @@ export function createHomeCard(doc, deps = {}) {
   }
 
   /**
+   * 확장과 끊겼으면 그렇다고 말한다. 끊긴 카드는 읽어 둔 것을 보여줄 뿐 더 할 수 있는 일이 없다
+   * — 조용히 오류만 내느니 어떻게 되살리는지 적는다.
+   */
+  function orphaned() {
+    if (alive()) return false;
+    ui.warn.textContent = '확장이 다시 올려져 이 카드는 멈췄습니다. 페이지를 새로고침하면 다시 붙습니다.';
+    return true;
+  }
+
+  /**
    * 담긴 것을 보여주고, 필요하면 훑는다.
    *   오늘 읽어 둔 것이 없다       → 훑는다(진행 막대). 하루에 한 번이 여기다
    *   오늘 읽어 둔 것이 있다       → 그것만 보여준다. 몇 시간이 지났어도 다시 훑지 않는다
    *   force(새로고침·예약 변경)    → 먼저 보여주고 다시 훑어 바꿔 끼운다
    */
   async function run({ force = false } = {}) {
-    if (disposed) return undefined;
+    if (disposed || orphaned()) return undefined;
     if (running) {
       if (force) rerun = true;
       return running;
@@ -457,7 +474,8 @@ export function createHomeCard(doc, deps = {}) {
         paintResult(payload, name);
       } catch (err) {
         ui.bar.hidden = true;
-        ui.warn.textContent = `훑기 실패: ${err.message}`;
+        // 훑는 사이에 확장이 다시 올려졌으면 결과를 담다가 여기로 온다.
+        if (!orphaned()) ui.warn.textContent = `훑기 실패: ${err.message}`;
       } finally {
         setBusy(false);
       }
@@ -506,10 +524,10 @@ export function createHomeCard(doc, deps = {}) {
   ui.root.addEventListener('click', async (e) => {
     const target = e.target?.closest ? e.target : null;
     const act = target?.closest('[data-act]')?.dataset.act;
+    const li = act ? null : target?.closest('li[data-i]');
+    if ((!act && !li) || orphaned()) return;
     if (act === 'refresh') { run({ force: true }); return; }
     if (act === 'panel') { await askPanel(); return; }
-    const li = target?.closest('li[data-i]');
-    if (!li) return;
     const it = view.items[+li.dataset.i];
     if (!it) return;
     // 패널이 어느 날짜·종류를 열지 부탁을 남기고 연다. 이미 열려 있으면 패널이 저장소 변화로 알아챈다.
