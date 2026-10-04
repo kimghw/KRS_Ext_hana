@@ -8,3 +8,6 @@ native/com.krs.meetingroom.json
 
 # 다리 호출 기록 — 입력한 문장·회의 주제·이름이 들어 있다. 공개 저장소에 올리지 않는다.
 native/logs/
+
+# Gmail 시험 구현이 내려 둔 메일 본문·첨부 — 개인 메일이다. 공개 저장소에 올리지 않는다.
+gmail/out/
