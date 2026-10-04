@@ -307,7 +307,7 @@ t('사후정산이 완료된 출장에는 정산 내역이 보여 주기만 하�
   ]);
   assert.ok(legs().every((l) => l.icons.every((b) => b.disabled)));
   assert.deepEqual(['.at-after-drop', 'button[data-act="after"]', 'button[data-act="legs-go"]', '.at-kept'].map((q) => doneBox().querySelector(q)), [null, null, null, null]);
-  assert.equal(doneBox().dataset.seq, undefined, '붙여넣기는 이 칸으로 오지 않는다 — 완료된 출장의 증빙은 증빙 송부 칸이 받는다');
+  assert.equal(doneBox().dataset.seq, undefined, '붙여넣기는 이 칸으로 오지 않는다 — 완료된 출장의 증빙은 여비증빙 송부 칸이 받는다');
   assert.equal(doneBox().querySelector('.at-lodge-count').textContent, '없음', '숙박비 내역도 같이 선다(이 출장은 숙박 줄을 올리지 않았다)');
 });
 // 사후정산에 따로 올린 교통 줄이 화면에 있다 — 지움 표시가 된 줄과 아직 저장하지 않은 줄(번호 없음)은 치지 않는다.

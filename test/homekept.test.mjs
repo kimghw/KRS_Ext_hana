@@ -2,7 +2,7 @@
 //
 // 홈 카드는 증빙을 읽어서 보관만 한다(src/intake.js — 숙박 증빙·항공권에는 읽은 기록 record 와 "아직 안 올림" todo 를 붙인다).
 // 출장 카드는 그것을 알아보고 `홈에서 넣은 증빙을 사후정산에 올리기` 버튼을 세우며, 두 번 누르면 **다시 읽지 않고** 그때 읽은 기록으로
-// 올린다. 올리기 전에는 증빙 송부 칸의 저장·보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다.
+// 올린다. 올리기 전에는 여비증빙 송부 칸의 저장·보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다.
 // eclass 여비계산서와 Claude 는 흉내 낸다 — **실제 사이트에는 아무것도 보내지 않는다.**
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -143,7 +143,7 @@ await ta('홈 카드가 증빙을 넣으면(보관함이 바뀌면) 펴 둔 출�
   assert.equal(goBtn().textContent, '홈에서 넣은 증빙을 사후정산에 올리기');
   assert.equal(goBtn().closest('.at-leg-go').querySelector('.at-after-note').textContent, '홈 카드에서 넣은 증빙 1장은 사후정산에 아직 올리지 않았습니다');
 });
-t('올리기 전에는 증빙 송부 칸의 사후정산 저장·보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다', () => {
+t('올리기 전에는 여비증빙 송부 칸의 사후정산 저장·보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다', () => {
   assert.equal(sendNote(), '홈 카드에서 넣은 증빙을 사후정산 칸에서 먼저 올려 주세요');
   assert.deepEqual(['send-save', 'send-go'].map((act) => doc.querySelector(`#atList button[data-act="${act}"]`).disabled), [true, true]);
 });
@@ -172,7 +172,8 @@ await ta('올린 뒤에는 "아직 안 올림" 표시가 없어진다 — 버튼
   const hotel = [...shelf.values()].find((k) => k.name === 'hotel.png');
   assert.deepEqual([hotel.label, hotel.todo, 'record' in hotel], ['숙박 증빙', undefined, false]);
   assert.deepEqual(store[MARKS_KEY]['TR-1'].find((k) => k.name === 'hotel.png'), { name: 'hotel.png', label: '숙박 증빙' });
-  assert.equal(sendNote(), '보내기는 사후정산을 저장하고 확정(완료)한 뒤에 보냅니다');
+  assert.equal(sendNote(), '', '막는 까닭이 걷힌다 — 저장·확정부터 한다는 안내는 카드에 적지 않는다');
+  assert.equal(doc.querySelector('#atList button[data-act="send-save"]').disabled, false);
 });
 await ta('같은 증빙을 홈 카드에 또 넣어도 같은 숙박 줄을 두 번 올리지 않는다', async () => {
   await fromHome('hotel.png', HOTEL);

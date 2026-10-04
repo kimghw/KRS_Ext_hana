@@ -2068,7 +2068,7 @@ async function takeHomeJump() {
 
 /**
  * 부탁받은 날짜·종류로 간다. 내 예약 목록에서 한 줄을 누른 것과 같다. 근태 건이면 근태 탭으로 간다.
- * 출장 줄의 `보내기`에서 왔으면(docNo) 그 출장 카드의 증빙 송부 칸까지 간다(attendpanel.js 의 seek).
+ * 출장 줄의 `보내기`에서 왔으면(docNo) 그 출장 카드의 여비증빙 송부 칸까지 간다(attendpanel.js 의 seek).
  */
 function applyHomeJump(jump) {
   if (jump.mode === 'attend') {

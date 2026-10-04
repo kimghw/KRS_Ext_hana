@@ -485,7 +485,7 @@ await ta('줄을 지우면 적어 둔 내용도 버린다', async () => {
 console.log('신청서의 버튼은 여비계산서 칸보다 위에 선다');
 NIGHT.actions = ['change', 'cancel'];
 await open();
-t('변경·취소신청은 여비계산서 줄·사후정산 칸·증빙 송부 칸보다 위에 있다 — 맨 아래에 있으면 정산에 딸린 버튼으로 읽힌다', () => {
+t('변경·취소신청은 여비계산서 줄·사후정산 칸·여비증빙 송부 칸보다 위에 있다 — 맨 아래에 있으면 정산에 딸린 버튼으로 읽힌다', () => {
   assert.deepEqual([...card().querySelector('.at-more-box').children].map((n) => n.className.split(' ')[0]), ['at-acts', 'at-tripline', 'at-after', 'at-send']);
   assert.deepEqual([...card().querySelectorAll('.at-acts button')].map((b) => b.textContent), ['변경', '취소신청']);
 });

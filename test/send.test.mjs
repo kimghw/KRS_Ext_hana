@@ -25,13 +25,26 @@ t('숙박했거나 비행기를 탔으면 사후정산이 완료된 뒤에 보�
   assert.deepEqual(gate({ trip: TRIP, stage: pre(false), need: { needed: true }, kept: KEPT }), [false, false, 'after', '사전정산을 완료한 뒤에 사후정산을 저장하고 보냅니다']);
   assert.deepEqual(gate({ trip: TRIP, stage: pre(true), need: { needed: true }, kept: KEPT }), [true, true, 'after', '']);
   assert.deepEqual(gate({ trip: TRIP, stage: post(false), need: { needed: true }, kept: KEPT }), [true, true, 'after', '']);
-  assert.deepEqual(gate({ trip: TRIP, stage: post(false), need: { needed: true }, kept: [] }), [false, true, 'after', '보낼 증빙이 없습니다 — 증빙을 넣어 주세요']);
   assert.deepEqual(gate({ trip: TRIP, stage: post(true), need: { needed: true }, kept: KEPT }), [true, true, 'after', '']);
-  assert.deepEqual(gate({ trip: TRIP, stage: post(true), need: null, kept: [] }), [false, true, 'after', '보낼 증빙이 없습니다 — 증빙을 넣어 주세요'],
+  assert.deepEqual(gate({ trip: TRIP, stage: post(true), need: null, kept: KEPT }), [true, true, 'after', ''],
     '사후정산이 완료됐으면 사전정산의 교통편을 못 읽었어도 단계는 됐다');
   assert.deepEqual([pre(false), pre(true), post(false), post(true)].map((stage) => settle({ trip: TRIP, stage, need: { needed: true }, kept: KEPT })), [false, true, true, false],
     '사전정산을 완료한 뒤부터 사후정산을 완료하기 전까지만 저장·확정이 남아 있다');
   assert.equal(settle({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [KEPT[0]] }), false, '당일 출장에는 사후정산이 없다');
+});
+t('숙박·비행기 출장은 보관한 증빙이 없어도 보낸다 — 여비계산서만 나간다(2026-10-04 사용자 지정: "작성할게 없으면 그걸 보내면 됨"). 당일 출장은 당일증빙이 있어야 한다', () => {
+  assert.deepEqual(gate({ trip: TRIP, stage: pre(true), need: { needed: true }, kept: [] }), [true, true, 'after', '']);
+  assert.deepEqual(gate({ trip: TRIP, stage: post(false), need: { needed: true }, kept: [] }), [true, true, 'after', '']);
+  assert.deepEqual(gate({ trip: TRIP, stage: post(true), need: null, kept: [] }), [true, true, 'after', '']);
+  assert.deepEqual(gate({ trip: TRIP, stage: pre(false), need: { needed: true }, kept: [] }), [false, false, 'after', '사전정산을 완료한 뒤에 사후정산을 저장하고 보냅니다'],
+    '사전정산을 완료하기 전에는 그래도 못 보낸다');
+  assert.deepEqual(gate({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [] }), [false, true, 'day', '당일증빙(출장지에서 결제한 영수증)을 넣어 주세요']);
+});
+t('완료한 사후정산을 다시 작성하는 중이면(reopen) 완료하기 전처럼 저장·확정이 남아 있다(2026-10-04 사용자 지정) — 당일 출장에는 해당 없다', () => {
+  const settle = (o) => sendGate(o).settle;
+  assert.deepEqual([false, true].map((reopen) => settle({ trip: TRIP, stage: post(true), need: { needed: true }, kept: KEPT, reopen })), [false, true]);
+  assert.deepEqual(gate({ trip: TRIP, stage: post(true), need: { needed: true }, kept: [], reopen: true }), [true, true, 'after', '']);
+  assert.equal(settle({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [KEPT[0]], reopen: true }), false);
 });
 t('여비계산서가 없거나 사전정산의 교통편을 아직 못 읽었으면 까닭을 말한다', () => {
   assert.deepEqual(gate({ trip: null, stage: null, need: null, kept: KEPT }), [false, false, '', '여비계산서가 있어야 보낼 수 있습니다']);
@@ -87,6 +100,8 @@ t('제목과 본문 — 과제·계정, 출장자, 기간·출장지, 목적, �
     '여비계산서: 145580 (사후정산 완료)', '첨부: 여비증빙_145580_김거화.pdf — 여비계산서 1부 · 항공기 증명 1장 · 숙박 증빙 2장',
   ]);
   assert.equal(sendLines({ account: 'A', me: '', trip: DAY, stage: pre(true), kept: [KEPT[0]], file: 'f.pdf' })[3], '출장: 2026-09-23 · 서울 본사');
+  const bare = sendLines({ account: 'A', me: '김거화', trip: TRIP, stage: post(true), kept: [], file: 'f.pdf' });
+  assert.deepEqual([bare[0], bare.at(-1)], ['여비계산서를 보냅니다.', '첨부: f.pdf — 여비계산서 1부'], '보관한 증빙이 없으면 여비계산서만 나간다고 적는다');
 });
 
 console.log('Teams MCP 가 닿는가');

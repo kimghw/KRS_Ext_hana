@@ -1,4 +1,4 @@
-// 신청 내역 출장 카드의 "증빙 송부" 칸 — 보관함의 증빙을 PDF 하나로 묶어 담당자에게 보낸다(2026-10-03 사용자 지정).
+// 신청 내역 출장 카드의 "여비증빙 송부" 칸 — 보관함의 증빙을 PDF 하나로 묶어 담당자에게 보낸다(2026-10-03 사용자 지정).
 // 언제 보낼 수 있는지·무슨 글인지는 src/send.js, 묶는 일은 src/pdf.js, 보내는 길은 src/teams.js(Teams MCP)·src/memo.js(쪽지)다.
 // 여기는 그것들을 카드에 잇기만 한다. 카드를 그리고 누름을 넘겨 주는 것은 attendpanel.js 다.
 //
@@ -14,6 +14,8 @@
 // 지금 보내는 곳이다. 가장 최근 세트는 카드를 펴면 미리 켜져 있다. 직접 고르는 칸(과제·계정, 받는 사람, 보내는 길)은 **접혀 있고**
 // `직접 고르기`로 편다(2026-10-04 사용자 지정: "접었다가 … 3개 정도 리스트해서 이전 보낸 정보로"). 이전에 보낸 곳이 없거나 지금
 // 고른 곳이 그 줄들에 없으면 칸이 펴져 있다 — 보이지 않는 곳으로 보내지 않는다.
+// 줄의 보내는 길은 글이 아니라 **아이콘**이고(Teams 로고 · 쪽지 말풍선), `직접 고르기`도 첫 줄 오른쪽의 목록 아이콘이다
+// (2026-10-04 사용자 지정: "teams 는 진짜 팀즈 아이콘, 직접 고르기는 teams 오른쪽에 … 리스트업 아이콘").
 //
 // 어느 길로 보낼지는 편 칸의 `보내는 길` 칩(Teams · 쪽지)으로 **고른다**(2026-10-04 사용자 지정). 켜진 칩이 지금 나가는 길이고,
 // 고른 것은 기억한다. 고르지 않았으면 Teams MCP 가 닿을 때 Teams, 아니면 쪽지다. Teams 로 가려는 누름(Teams 칩, Teams 로 보냈던
@@ -22,6 +24,8 @@
 //
 // 숙박·비행기가 있는 출장인데 사후정산을 아직 완료하지 않았으면(2026-10-03 사용자 지정) 버튼이 둘이다 — `사후정산 저장`은 카드에
 // 있는 대로 저장만 하고, `보내기`는 저장 → 확정 → 송부를 잇는다. 저장과 확정은 attendpanel.js 가 한다(ctx.save·ctx.confirm).
+// 완료한 사후정산을 출장 카드에서 다시 작성하는 중일 때도(ctx.reopen, 2026-10-04 사용자 지정) 같은 두 버튼이 선다.
+// 숙박·비행기 출장은 보관한 증빙이 없어도 보낸다 — 여비계산서의 출력만 나간다(2026-10-04 사용자 지정, src/send.js sendGate).
 // `사후정산 저장`은 실제 계산서를 바꾸는 누름이라 두 번 눌러야 나간다(confirmOf — 첫 누름에는 무엇을 할지만 적어 보여 준다).
 // `보내기`는 팝업이 그 확인을 맡는다 — 저장·확정부터 한다는 것도 팝업에 적힌다.
 
@@ -43,6 +47,17 @@ const GO_TITLE = '사후정산을 저장하고 확정(완료)한 뒤에 증빙�
 const SET_TITLE = '이 과제·계정과 받는 사람, 보내는 길로 보냅니다';
 const FOLD_TITLE = '과제·계정, 받는 사람, 보내는 길을 직접 고릅니다';
 const WAY_RETRY = 'Teams 서버(localhost:5003)를 켠 뒤';
+// 이전에 보낸 줄에 적는 보내는 길의 아이콘 — Teams 는 Teams 로고(제 색 그대로), 쪽지는 말풍선이다.
+const WAY_ICON = {
+  teams: '<svg viewBox="0 0 2228.833 2073.333" aria-hidden="true"><g stroke="none">'
+    + '<path fill="#5059C9" d="M1554.637,777.5h575.713c54.391,0,98.483,44.092,98.483,98.483v524.398c0,199.901-162.051,361.952-361.952,361.952h-1.711c-199.901,0.028-361.975-162-362.004-361.901V828.971C1503.167,800.544,1526.211,777.5,1554.637,777.5z"/>'
+    + '<circle fill="#5059C9" cx="1943.75" cy="440.583" r="233.25"/><circle fill="#7B83EB" cx="1218.083" cy="336.917" r="336.917"/>'
+    + '<path fill="#7B83EB" d="M1667.323,777.5H717.01c-53.743,1.33-96.257,45.931-95.01,99.676v598.105c-7.505,322.519,247.657,590.16,570.167,598.053c322.51-7.893,577.671-275.534,570.167-598.053V877.176C1763.579,823.431,1721.066,778.83,1667.323,777.5z"/>'
+    + '<path fill="#4B53BC" d="M95.01,466.5h950.312c52.473,0,95.01,42.538,95.01,95.01v950.312c0,52.473-42.538,95.01-95.01,95.01H95.01c-52.473,0-95.01-42.538-95.01-95.01V561.51C0,509.038,42.538,466.5,95.01,466.5z"/>'
+    + '<path fill="#FFF" d="M820.211,828.193H630.241v517.297H509.211V828.193H320.123V727.844h500.088V828.193z"/></g></svg>',
+  memo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M5 3.5h14a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-7.2L7 21.5v-4H5a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3Z"/></svg>',
+};
+const FOLD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/></svg>';
 const stamp = (at) => { const d = new Date(at); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const whoText = (p) => `${p.name || p.id}${p.title ? ` ${p.title}` : ''}`;
 const personText = (p) => [whoText(p), p.dept].filter(Boolean).join(' · ');
@@ -183,8 +198,9 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
   /**
    * 출장 카드의 송부 칸. 여비계산서가 없으면 빈 글이다.
    * @param {{it:object, trip:object|null, stage:object|null, need:object|null, kept:object[], me:string, locked:boolean,
-   *          save?:Function, confirm?:Function, again?:Function, hold?:string}} ctx
+   *          save?:Function, confirm?:Function, again?:Function, hold?:string, reopen?:boolean}} ctx
    *   it 은 신청 내역의 출장 한 건, trip·stage 는 그 여비계산서와 단계, need 는 사후정산 대상인가, kept 는 보관함의 증빙이다.
+   *   reopen 은 완료한 사후정산을 출장 카드에서 다시 작성하는 중인가다(그러면 완료하기 전처럼 저장 → 확정부터 한다).
    *   save·confirm 은 사후정산을 저장·확정하는 길(진행 글을 받는 함수를 넘긴다, 못 하면 던진다), again 은 그 뒤의 사정을 다시 주는 길,
    *   hold 는 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭이다
    */
@@ -200,32 +216,36 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     // Teams 로 못 가는 까닭 — Teams 로 가려던 카드라면 칸 머리에 마우스를 올렸을 때 왜 쪽지인지 보인다.
     const noTeams = teamsWhy(box.teams);
     const wayNote = way.note || (wantNow(s) === 'teams' && noTeams ? `${noTeams} — 지금은 쪽지로 갑니다` : '');
-    const head = (how) => `<div class="at-send-head"><strong>증빙 송부</strong><span class="at-send-how"${wayNote ? ` title="${escapeHtml(wayNote)}"` : ''}>${escapeHtml(how)}</span></div>`;
+    const head = (how) => `<div class="at-send-head"><strong>여비증빙 송부</strong><span class="at-send-how"${wayNote ? ` title="${escapeHtml(wayNote)}"` : ''}>${escapeHtml(how)}</span></div>`;
     const doneNote = done ? `<p class="at-send-note ok">${escapeHtml(`보냈습니다 — ${stamp(done.at)} · ${done.channel} · ${done.to} · ${done.account}`)}</p>` : '';
     // 아직 보낼 때가 아니면(정산이 덜 끝났다) 까닭 한 줄만 적는다.
     if (!gate.staged) return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(gate.why)}${doneNote}</div>`;
 
     const off = locked || s.busy ? ' disabled' : '';
     // 사후정산이 완료된 카드에는 사후정산 칸(보관 중인 증빙 목록)이 없다 — 무엇이 묶이는지 여기에 적는다.
-    const files = stage.phase === 'post' && stage.done && kept.length
+    // 완료한 사후정산을 다시 작성하는 중이면(gate.settle) 사후정산 칸이 다시 서 있어 거기에 적힌다.
+    const files = !gate.settle && stage.phase === 'post' && stage.done && kept.length
       ? `<ul class="at-send-files">${kept.map((k) => `<li><span>${escapeHtml(`${k.label} · ${k.name}`)}</span><button type="button" class="small ghost at-kept-drop" data-act="kept-drop" `
         + `data-name="${escapeHtml(k.name)}" title="보관함에서 빼기" aria-label="${escapeHtml(k.name)} 보관함에서 빼기"${off}>×</button></li>`).join('')}</ul>` : '';
     // 사후정산을 쓰는 중이면 증빙은 위의 사후정산 칸(증빙 넣는 곳)이 읽어서 올리고 보관한다 — 읽지 않고 담는 칸을 여기에 또 두지 않는다.
     const add = gate.settle ? '' : `<label class="at-send-add"><input type="file" multiple accept="${EVIDENCE_ACCEPT}" data-send="file" aria-label="보낼 증빙 넣기"${off} />`
       + `<span>${kept.length ? '증빙 더 넣기' : '증빙 넣기'} · 읽지 않고 그대로 묶습니다</span></label>`;
     // 이전에 보낸 곳(2026-10-04 사용자 지정) — 한 줄이 과제·계정 · 받는 사람 · 보내는 길이고, 누르면 그 셋으로 보낸다. 켜진 줄이
-    // 지금 보내는 곳이다. Teams 로 보냈던 줄인데 지금 Teams 로 못 가면 길이 흐리다. 직접 고르는 칸은 접혀 있다 — 켜진 줄이 없으면
-    // (이전에 보낸 곳이 없거나, 지금 고른 곳이 줄에 없다) 접을 수 없다.
+    // 지금 보내는 곳이다. 길은 아이콘으로 적고(이름은 낭독기와 마우스를 올렸을 때만), Teams 로 보냈던 줄인데 지금 Teams 로 못 가면
+    // 아이콘이 흐리다. 직접 고르는 칸은 접혀 있고 첫 줄 오른쪽의 목록 아이콘으로 편다 — 켜진 줄이 없으면(이전에 보낸 곳이 없거나,
+    // 지금 고른 곳이 줄에 없다) 접을 수 없다.
     const open = s.open || !anyOn(s);
     const wayTag = (x) => {
       const w = WAYS.find((v) => v.channel === x.way);
-      return !w ? '' : `<span class="at-send-set-way${w.channel === 'teams' && noTeams ? ' dim' : ''}">${escapeHtml(w.label)}</span>`;
+      if (!w) return '';
+      const dim = w.channel === 'teams' && !!noTeams;
+      return `<span class="at-send-set-way${dim ? ' dim' : ''}" title="${escapeHtml(dim ? `${w.label} — ${noTeams}` : w.label)}">${WAY_ICON[w.channel]}<span class="sr-only">${escapeHtml(w.label)}</span></span>`;
     };
     const setTitle = (x) => `${personText(x.person)} — ${SET_TITLE}${x.way === 'teams' && noTeams ? ` (${noTeams} — 누르면 다시 확인합니다)` : ''}`;
-    const sets = !box.sets.length ? '' : '<div class="at-send-sets" role="group" aria-label="이전에 보낸 곳">'
-      + box.sets.map((x, i) => `<button type="button" class="at-send-set${setOn(x, s) ? ' active' : ''}" data-act="send-set" data-i="${i}" aria-pressed="${setOn(x, s)}" `
-        + `title="${escapeHtml(setTitle(x))}"${off}><strong>${escapeHtml(x.account)}</strong><span class="at-send-set-who">${escapeHtml(whoText(x.person))}</span>${wayTag(x)}</button>`).join('')
-      + `<button type="button" class="small ghost at-send-fold" data-act="send-fold" aria-expanded="${open}" title="${FOLD_TITLE}"${anyOn(s) ? '' : ' hidden'}>직접 고르기</button></div>`;
+    const rows = box.sets.map((x, i) => `<button type="button" class="at-send-set${setOn(x, s) ? ' active' : ''}" data-act="send-set" data-i="${i}" aria-pressed="${setOn(x, s)}" `
+      + `title="${escapeHtml(setTitle(x))}"${off}><strong>${escapeHtml(x.account)}</strong><span class="at-send-set-who">${escapeHtml(whoText(x.person))}</span>${wayTag(x)}</button>`);
+    const fold = `<button type="button" class="at-send-fold" data-act="send-fold" aria-expanded="${open}" aria-label="직접 고르기" title="${FOLD_TITLE}"${anyOn(s) ? '' : ' hidden'}>${FOLD_ICON}</button>`;
+    const sets = !rows.length ? '' : `<div class="at-send-sets" role="group" aria-label="이전에 보낸 곳">${rows[0]}${fold}${rows.slice(1).join('')}</div>`;
     const person = s.person
       ? `<span class="at-send-picked" title="${escapeHtml(personText(s.person))}"><span class="at-send-who">${escapeHtml(personText(s.person))}</span><button type="button" class="small ghost at-kept-drop" data-act="send-person-clear" title="받는 사람 바꾸기" aria-label="받는 사람 바꾸기"${off}>×</button></span>`
       : `<input type="text" data-send="person" value="${escapeHtml(s.query)}" placeholder="이름·ID 로 찾기" aria-label="받는 사람 찾기" autocomplete="off"${off} />`
@@ -238,7 +258,9 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       + WAYS.map((w) => `<button type="button" class="at-chip${w.channel === way.channel ? ' active' : ''}${w.channel === 'teams' && noTeams ? ' dim' : ''}" data-act="send-way" `
         + `data-way="${w.channel}" aria-pressed="${w.channel === way.channel}" title="${escapeHtml(wayTitle(w))}"${off}>${escapeHtml(w.label)}</button>`).join('') + '</span></div>';
     // 사후정산을 아직 완료하지 않은 출장 — 저장만 하는 버튼이 보내기 옆에 서고, 보내기는 저장 → 확정 → 송부를 잇는다.
-    const settleNote = !gate.settle ? '' : `<p class="at-send-note${ctx.hold ? ' error' : ''}">${escapeHtml(ctx.hold || '보내기는 사후정산을 저장하고 확정(완료)한 뒤에 보냅니다')}</p>`;
+    // 저장·확정부터 한다는 안내는 카드에 적지 않는다(2026-10-04 사용자 지정) — 보내기 버튼의 title 과 팝업에 적혀 있다.
+    // 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭(ctx.hold)만 적는다.
+    const settleNote = gate.settle && ctx.hold ? `<p class="at-send-note error">${escapeHtml(ctx.hold)}</p>` : '';
     const saveBtn = !gate.settle ? '' : `<button type="button" class="small ghost at-send-save" data-act="send-save" title="${SAVE_TITLE}"${canSave(gate, s, ctx) && !locked ? '' : ' disabled'}>사후정산 저장</button>`;
     // 직접 고르는 칸 — 과제·계정과 받는 사람은 한 줄에 나란히 선다(2026-10-04 사용자 지정, 칸이 좁아 과제·계정의 안내 글은 짧게
     // 적는다). 그 아래가 보내는 길이다.
@@ -433,7 +455,7 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
         { seq: trip.seq, docNo: it.docNo, channel: way.channel, to: person.id, account, files: [calName({ trip }), ...kept.map((k) => k.name)], pages: pdf.pages });
     } catch (err) {
       s.error = failed ? `${failed}: ${err.message}` : err.message;
-      setError(err, failed || '증빙 송부 실패');
+      setError(err, failed || '여비증빙 송부 실패');
       // 사후정산 저장·확정이 안 된 것은 attendpanel.js 가 이미 기록했다.
       if (!failed) logEvent('trip', false, `여비계산서 증빙 송부 실패(${way.label}): ${trip.seq} — ${err.message}`, { seq: trip.seq, docNo: it.docNo, channel: way.channel, to: person.id });
     } finally {

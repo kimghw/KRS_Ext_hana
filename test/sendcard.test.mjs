@@ -1,4 +1,4 @@
-// 신청 내역 출장 카드의 "증빙 송부" 칸(sendbox.js + attendpanel.js) — 과제·계정을 고르고, 받는 사람을 찾아, 보관함의 증빙을
+// 신청 내역 출장 카드의 "여비증빙 송부" 칸(sendbox.js + attendpanel.js) — 과제·계정을 고르고, 받는 사람을 찾아, 보관함의 증빙을
 // PDF 하나로 묶어 보낸다(2026-10-03 사용자 지정). 패널을 진짜 화면(sidepanel.html)에 붙여 치고 눌러 본다.
 // 보내기를 누르면 보낼 내용이 팝업으로 뜨고 팝업의 보내기를 눌러야 나간다. 과제·계정과 받는 사람, 보내는 길은 한 세트로 기억해
 // 이전에 보낸 곳 세 줄로 보이고, 직접 고르는 칸은 접혀 있다(2026-10-04 사용자 지정).
@@ -185,7 +185,7 @@ t('출장 카드의 버튼 줄에 복사가 없다 — 그 상태에서 할 일(
 
 console.log('당일 출장 — 사전정산을 마쳤고 당일증빙이 있으면 보낼 수 있다');
 t('송부 칸에 어느 길로 무엇이 가는지 적히고, 과제·계정과 받는 사람을 묻는다. 정하기 전에는 보내기가 잠겨 있다', () => {
-  assert.equal(q('.at-send-head strong').textContent, '증빙 송부');
+  assert.equal(q('.at-send-head strong').textContent, '여비증빙 송부');
   assert.equal(q('.at-send-how').textContent, '쪽지 · 여비계산서 1부 · 당일출장 증명 1장 → PDF 1개');
   assert.deepEqual(labels(), ['과제·계정', '받는 사람', '보내는 길']);
   assert.deepEqual(ways(), [['Teams', false], ['쪽지', true]], '보내는 길은 칩으로 고른다 — 켜진 칩이 지금 나가는 길이다(Teams MCP 가 없으면 쪽지)');
@@ -266,27 +266,37 @@ t('보낸 곳이 이전에 보낸 곳의 한 줄로 선다(과제·계정 · 받
   assert.equal(q('.at-send-sets').getAttribute('aria-label'), '이전에 보낸 곳');
   assert.match(setBtn(0).title, /^홍길동 책임 · 회계팀 — 이 과제·계정과 받는 사람, 보내는 길로 보냅니다$/);
   assert.deepEqual([labels(), q('.at-send-pair'), ways()], [[], null, []], '`최근에 보낸 곳` 칩도 `보내는 길` 칩도 보이지 않는다');
-  assert.deepEqual([foldBtn().textContent, foldBtn().getAttribute('aria-expanded'), foldBtn().hidden], ['직접 고르기', 'false', false]);
+  assert.deepEqual([foldBtn().getAttribute('aria-label'), foldBtn().getAttribute('aria-expanded'), foldBtn().hidden], ['직접 고르기', 'false', false]);
+});
+t('줄의 보내는 길은 아이콘이고(이름은 낭독기와 마우스를 올렸을 때만), `직접 고르기`는 첫 줄 바로 뒤의 목록 아이콘이다(2026-10-04 사용자 지정)', () => {
+  const way = setBtn(0).querySelector('.at-send-set-way');
+  assert.deepEqual([!!way.querySelector('svg'), way.querySelector('.sr-only').textContent, way.title], [true, '쪽지', '쪽지']);
+  assert.deepEqual([foldBtn().textContent, !!foldBtn().querySelector('svg'), foldBtn().previousElementSibling], ['', true, setBtn(0)]);
 });
 
 console.log('숙박·비행기가 있는 출장 — 사후정산이 완료된 뒤에 보낸다');
 await open('TR-2');
-t('사후정산을 쓰는 중이면 `사후정산 저장`과 `보내기`가 선다 — 보관한 증빙이 없으면 보내기는 잠겨 있고, 증빙은 위의 사후정산 칸에 넣는다', () => {
-  assert.equal(q('.at-send-how').textContent, '보낼 증빙이 없습니다 — 증빙을 넣어 주세요');
-  assert.deepEqual([...box().querySelectorAll('.at-send-btns button')].map((b) => [b.textContent, b.disabled]), [['사후정산 저장', false], ['보내기', true]]);
+t('사후정산을 쓰는 중이면 `사후정산 저장`과 `보내기`가 선다 — 보관한 증빙이 없어도 보낼 수 있다(여비계산서만 나간다, 2026-10-04 사용자 지정). 증빙은 위의 사후정산 칸에 넣는다', () => {
+  assert.equal(q('.at-send-how').textContent, '쪽지 · 여비계산서 1부 → PDF 1개');
+  assert.deepEqual([...box().querySelectorAll('.at-send-btns button')].map((b) => [b.textContent, b.disabled]), [['사후정산 저장', false], ['보내기', false]]);
   assert.equal(q('.at-send-add'), null, '읽지 않고 담는 칸은 사후정산이 완료된 뒤에만 선다');
-  assert.equal(q('.at-send-note').textContent, '보내기는 사후정산을 저장하고 확정(완료)한 뒤에 보냅니다');
+  assert.equal(q('.at-send-note'), null, '저장·확정부터 한다는 안내는 카드에 적지 않는다(2026-10-04 사용자 지정) — 버튼의 title 과 팝업에 있다');
+  assert.match(goBtn().title, /^사후정산을 저장하고 확정\(완료\)한 뒤에 증빙을 보냅니다 — /);
 });
 st.trips.rows[1].travelers[0].post = '완료';
 bt.docs[145580].post = '완료';
 await open('TR-2');
-t('사후정산이 완료됐는데 보관한 증빙이 없으면 넣으라고 한다 — 가장 최근에 보낸 곳이 미리 켜져 있고, 직접 고르는 칸은 접혀 있다', () => {
-  assert.equal(q('.at-send-how').textContent, '보낼 증빙이 없습니다 — 증빙을 넣어 주세요');
+t('사후정산이 완료됐으면 보관한 증빙이 없어도 여비계산서만 보낼 수 있다 — 가장 최근에 보낸 곳이 미리 켜져 있고, 직접 고르는 칸은 접혀 있다', () => {
+  assert.equal(q('.at-send-how').textContent, '쪽지 · 여비계산서 1부 → PDF 1개');
   assert.equal(q('.at-send-add span').textContent, '증빙 넣기 · 읽지 않고 그대로 묶습니다');
   assert.deepEqual(sets(), [['RND-2026-01 · 홍길동 책임 · 쪽지', true]]);
   assert.deepEqual([labels(), q('input[data-send="account"]'), foldBtn().getAttribute('aria-expanded')], [[], null, 'false']);
-  assert.equal(goBtn().disabled, true);
+  assert.equal(goBtn().disabled, false);
   assert.equal(q('button[data-act="send-save"]'), null, '완료된 사후정산에는 저장 버튼이 없다');
+  goBtn().click();
+  assert.deepEqual([popTo()[2], popLines()[1], popLines().at(-1)], ['쪽지 · 여비계산서 1부 → PDF 1개', '여비계산서를 보냅니다.', '첨부: 여비증빙_145580_김거화.pdf — 여비계산서 1부'],
+    '보낼 내용에도 여비계산서만 나간다고 적힌다');
+  popBtn('cancel').click();
 });
 foldBtn().click();
 t('`직접 고르기`를 누르면 과제·계정, 받는 사람, 보내는 길 칸이 펴진다 — 켜진 줄의 것이 채워져 있다. 다시 누르면 접힌다', () => {
@@ -368,7 +378,7 @@ console.log('보내다 실패하면 카드에 까닭이 남는다');
 }
 t('사이트가 첨부를 받지 않으면 보내지 않고, 최근 목록도 보낸 기록도 바뀌지 않는다', () => {
   assert.match(q('.at-send-note.error').textContent, /사이트가 첨부를 받지 않았습니다/);
-  assert.match(doc.getElementById('atStatus').textContent, /^증빙 송부 실패: 사이트가 첨부를 받지 않았습니다/);
+  assert.match(doc.getElementById('atStatus').textContent, /^여비증빙 송부 실패: 사이트가 첨부를 받지 않았습니다/);
   assert.deepEqual(store.sendSets.map((x) => x.account), ['일반관리비', 'RND-2026-01']);
   assert.ok(logs.some((l) => l.kind === 'trip' && !l.ok && /증빙 송부 실패/.test(l.text)));
 });
@@ -489,7 +499,41 @@ t('보낸 뒤 — 카드의 단계가 "사후정산 완료"가 되고 저장 버
   assert.deepEqual([...box().querySelectorAll('.at-send-files li span')].map((n) => n.textContent), ['숙박 증빙 · 호텔.png']);
 });
 
-console.log('홈 WORKSPACE 카드의 보내기 — 그 출장 카드의 증빙 송부 칸으로 와서 보낼 내용 팝업을 띄운다 (2026-10-04 사용자 지정)');
+console.log('보낸 뒤에도 사후정산을 다시 작성할 수 있다 (2026-10-04 사용자 지정: "보내고 나서.. 증빙을 추가하거나 하면 사후 저장 후 다시 정산작성할 수 있어야 함")');
+const reopenBtn = () => doc.querySelector('#atList li.open button[data-act="after-reopen"]');
+const afterHead = () => ['strong', '.at-after-why'].map((sel) => doc.querySelector(`#atList li.open .at-after-head ${sel}`).textContent);
+const afterDrop = () => doc.querySelector('#atList li.open .at-after-drop');
+site.calls.length = 0;
+t('완료한 출장의 정산 내역에 `다시 작성`이 선다 — 누르면 완료하기 전의 사후정산 칸(증빙 넣는 곳)이 다시 서고 송부 칸에 `사후정산 저장`이 돌아온다. 누르는 것만으로는 사이트에 아무것도 가지 않는다', () => {
+  assert.deepEqual([afterHead()[0], reopenBtn().textContent, afterDrop()], ['정산 내역', '다시 작성', null]);
+  assert.match(afterHead()[1], / · 완료$/);
+  reopenBtn().click();
+  assert.deepEqual([afterHead()[0], reopenBtn().textContent, !!afterDrop()], ['사후정산', '그만두기', true]);
+  assert.match(afterHead()[1], / · 다시 작성 중$/);
+  assert.deepEqual([...box().querySelectorAll('.at-send-btns button')].map((b) => [b.textContent, b.disabled]), [['사후정산 저장', false], ['다시 보내기', false]]);
+  assert.equal(q('.at-send-files'), null, '보관 중인 증빙은 다시 선 사후정산 칸에 적힌다');
+  assert.deepEqual(writes(), []);
+});
+reopenBtn().click();
+t('`그만두기`를 누르면 정산 내역(보기)으로 돌아간다 — 저장 버튼도 다시 없다', () => {
+  assert.deepEqual([afterHead()[0], reopenBtn().textContent, afterDrop(), saveBtn(), writes()], ['정산 내역', '다시 작성', null, null, []]);
+});
+reopenBtn().click();
+goBtn().click();
+t('다시 작성하는 중의 보내기는 완료하기 전과 같다 — 팝업이 저장·확정부터 한다고 적는다', () => {
+  assert.equal(pop().querySelector('.at-pop-note').textContent, '사후정산을 저장하고 확정(완료)한 뒤에 증빙을 보냅니다 — 여비계산서 146100');
+  assert.equal(popBtn('go').textContent, '저장·확정 후 보내기');
+});
+popBtn('go').click();
+await until(() => writes().includes('SendDraft') && !goBtn().disabled, '다시 저장 → 확정 → 송부');
+t('사후정산을 다시 저장하고(단계가 "작성"으로 돌아간다) 다시 확정한 뒤에 보낸다 — 끝나면 카드는 정산 내역으로 돌아간다', () => {
+  assert.deepEqual(writes(), ['Save', 'Confirm', 'SendDraft']);
+  assert.equal(site.printedAt, '완료', '다시 확정한 뒤의 계산서를 출력해 보낸다');
+  assert.match(tripline(), /여비계산서 146100 · 사후정산 완료/);
+  assert.deepEqual([afterHead()[0], reopenBtn().textContent, saveBtn(), goBtn().textContent], ['정산 내역', '다시 작성', null, '다시 보내기']);
+});
+
+console.log('홈 WORKSPACE 카드의 보내기 — 그 출장 카드의 여비증빙 송부 칸으로 와서 보낼 내용 팝업을 띄운다 (2026-10-04 사용자 지정)');
 site.calls.length = 0;
 panel.seek({ docNo: 'TR-1', send: true });
 t('홈 카드에서 보내기를 누르고 오면 그 출장 카드가 펴지고 보낼 내용 팝업이 뜬다 — 카드의 보내기를 누른 것과 같고, 아직 아무것도 나가지 않는다', () => {

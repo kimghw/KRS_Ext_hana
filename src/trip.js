@@ -177,9 +177,10 @@ export async function tripPreConfirm(row, { name = '', onStage = () => {} } = {}
 
 /**
  * 사후정산을 완료한다 — 사후정산을 저장해 단계가 "사후정산 작성"이 된 계산서 화면의 **확정**을 누르는 요청이다(사전정산과 같은
- * CalPrint/Confirm). 증빙 송부 칸의 `보내기`가 사후정산을 저장한 뒤에 부른다(2026-10-03 사용자 지정: "저장 후 확정 후 보내기").
+ * CalPrint/Confirm). 여비증빙 송부 칸의 `보내기`가 사후정산을 저장한 뒤에 부른다(2026-10-03 사용자 지정: "저장 후 확정 후 보내기").
  *
- * **"사후정산 작성" 단계의 계산서 화면은 2026-10-03 현재 직접 보지 못했다**(그 단계인 계산서가 없었다). 본 것은 앞뒤 단계다 —
+ * "사후정산 작성" 단계의 계산서 화면은 2026-10-04 에 실제 화면(145580 — 사용자가 송부 칸의 `사후정산 저장`을 누른 뒤)을 읽어 확인했다:
+ * 사전정산 때와 같은 확정 폼(action CalPrint/Confirm, 칸 seq·trseq·토큰, onsubmit 에 confirm)이 삭제 폼 옆에 선다. 아래는 그 전에 본 것이다 —
  * 사전정산 완료(145580)와 사후정산 완료(143884·141851)의 화면에는 확정 폼이 없고 삭제 폼뿐이며, 단계 줄은 지금 도달한 단계가 켜진다.
  * 143884 는 패널이 사후정산을 올린 직후 목록에서 "작성"이었다가, 패널이 보낸 것 없이 "완료"가 됐다. 그래서 사전정산과 같은 자리에
  * 확정 폼이 선다고 보고 지었다: 화면의 단계가 "사후정산 작성"이고 확정 폼이 이 계산서의 것일 때만 보내고, 폼이 없으면 보내지 않는다.
@@ -300,7 +301,7 @@ function blobOf(file) {
  * @param {string} trseq 출장자 번호(목록의 traveler.trseq)
  * @param {object} plan src/after.js afterPlan 의 결과
  * @param {{name?:string, onStage?:Function, always?:boolean}} who always 를 주면 새로 올릴 것이 없어도 화면의 폼을 그대로 저장한다 —
- *   입력 화면의 `저장` 버튼만 누른 것과 같다(증빙 송부 칸의 `사후정산 저장`: 단계가 "사후정산 작성"이 돼야 확정할 수 있다)
+ *   입력 화면의 `저장` 버튼만 누른 것과 같다(여비증빙 송부 칸의 `사후정산 저장`: 단계가 "사후정산 작성"이 돼야 확정할 수 있다)
  * @returns {Promise<{row: object, stage: object, sent: boolean, same: object[], lodgeRows: object[], lodgeSeqs: string[]}>}
  */
 export async function tripAfterSave(row, trseq, plan, { name = '', onStage = () => {}, always = false } = {}) {
@@ -337,11 +338,18 @@ export async function tripAfterSave(row, trseq, plan, { name = '', onStage = () 
   // 이번에 새로 생긴 숙박 줄. 못 읽어도 저장은 된 것이라 던지지 않는다 — 줄 번호만 모른다.
   let lodgeRows = [];
   if (send.lodge.length) {
+    let read = false;
     try {
       const known = new Set(had.map((h) => h.seq));
       const again = formFields(toDoc((await siteFetch(tripAfterUrl(row.seq, trseq))).html));
-      lodgeRows = lodgeRowsOf(again).filter((h) => h.seq && h.del !== '1' && !known.has(h.seq));
+      if (again) {
+        lodgeRows = lodgeRowsOf(again).filter((h) => h.seq && h.del !== '1' && !known.has(h.seq));
+        read = true;
+      }
     } catch { /* 줄 번호를 몰라도 저장은 됐다 */ }
+    // 화면을 다시 읽었는데 새 줄이 하나도 없으면 사이트가 받지 않은 것이다 — 올렸다고 하지 않는다. 완료한 사후정산을 다시 작성할 때
+    // 사이트가 저장을 받아 주는지는 실제로 보내 본 적이 없다(2026-10-04) — 받지 않으면 여기서 드러난다.
+    if (read && !lodgeRows.length) throw new Error('저장을 보냈지만 사후정산 화면에 숙박 줄이 생기지 않았습니다. eclass 의 사후정산 입력 화면에서 확인해 주세요.');
   }
   return { row: fresh, stage, sent: true, same, lodgeRows, lodgeSeqs: lodgeRows.map((h) => h.seq) };
 }

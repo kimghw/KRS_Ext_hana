@@ -47,7 +47,7 @@ t('고를 수 있는 값은 안 봄(0)·4주·8주이고, 고르지 않았으면
   assert.deepEqual(stagesWindow(TODAY), { from: '2026-08-09', to: TODAY });
 });
 
-console.log('정산이 끝났는가 — 사후정산 완료 또는 증빙 송부');
+console.log('정산이 끝났는가 — 사후정산 완료 또는 여비증빙 송부');
 const STAGES = { day: TODAY, since: '2026-08-09', me: '김거화', rows: [
   bt('101', day(-3), day(-3), '작성', ''), bt('102', day(-5), day(-4), '완료', '대기'), bt('103', day(-8), day(-7), '완료', '작성'), bt('104', day(-10), day(-9), '완료', '완료'),
 ] };

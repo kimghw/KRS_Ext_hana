@@ -5,6 +5,10 @@
 //   - 숙박도 비행기도 없으면(당일) **사전정산을 마친 뒤** 당일증빙을 PDF 로 해서 보낸다.
 //   - 숙박했거나 비행기를 탔으면 **사후정산이 완료된 뒤** 관련 증빙을 PDF 하나로 묶어 보낸다.
 //     사후정산을 아직 완료하지 않았으면 송부 칸에 `사후정산 저장`과 `보내기`가 서고, 보내기가 저장 → 확정 → 송부를 잇는다.
+//   - 숙박·비행기 출장은 **보관한 증빙이 없어도 보낸다**(2026-10-04 사용자 지정: "사전정산 있으니.. 작성할게 없으면 그걸 보내면 됨")
+//     — 여비계산서의 출력만 나간다. 당일 출장은 당일증빙이 있어야 보낸다(그것이 당일 출장의 증명이다).
+//   - 완료한 사후정산도 **다시 작성**할 수 있다(2026-10-04 사용자 지정: "보내고 나서.. 증빙을 추가하거나 하면 사후 저장 후 다시
+//     정산작성할 수 있어야 함") — 출장 카드에서 다시 작성하는 중이면(reopen) 완료하기 전과 같이 `사후정산 저장`과 `보내기`가 선다.
 //   - Teams MCP 가 연결돼 있으면 Teams 로, 아니면 쪽지로 보낸다. 어느 길로 보낼지는 송부 칸의 `보내는 길` 칩으로 고를 수 있다
 //     (2026-10-04 사용자 지정) — 쪽지를 고르면 Teams MCP 가 연결돼 있어도 쪽지로 간다.
 //   - 보내는 PDF 의 맨 앞은 **확정한 여비계산서의 출력**이다(2026-10-04 사용자 지정: "확정한 다음에 출력해서 증빙들과 합쳐서 보내야지").
@@ -25,14 +29,14 @@ export function pushRecent(list, value, keyOf = (x) => x) {
 
 /**
  * 지금 보낼 수 있는가. kind 는 'day'(당일·비행기 없음 — 사전정산 뒤에 보낸다)·'after'(숙박·비행기 — 사후정산 완료 뒤에 보낸다).
- * @param {{trip: object|null, stage: {phase:'pre'|'post', done:boolean}|null, need: {needed:boolean}|null, kept: object[]}} ctx
+ * @param {{trip: object|null, stage: {phase:'pre'|'post', done:boolean}|null, need: {needed:boolean}|null, kept: object[], reopen?: boolean}} ctx
  *   trip 은 여비계산서, stage 는 그 단계(src/travel.js tripStage), need 는 사후정산 대상인가(src/after.js afterNeed — 사전정산의
- *   교통편을 아직 못 읽었으면 null), kept 는 보관함의 증빙이다
- * @returns {{ready: boolean, staged: boolean, settle: boolean, kind: 'day'|'after'|'', why: string}} staged 는 정산이 보낼 단계까지 왔는가
- *   (증빙만 있으면 된다), settle 은 사후정산을 아직 완료하지 않았는가 — 보내기가 사후정산을 저장하고 확정한 뒤에 보낸다(2026-10-03
- *   사용자 지정). ready 가 거짓이면 why 가 그 까닭이다
+ *   교통편을 아직 못 읽었으면 null), kept 는 보관함의 증빙, reopen 은 완료한 사후정산을 출장 카드에서 다시 작성하는 중인가다
+ * @returns {{ready: boolean, staged: boolean, settle: boolean, kind: 'day'|'after'|'', why: string}} staged 는 정산이 보낼 단계까지 왔는가,
+ *   settle 은 사후정산을 아직 완료하지 않았는가(다시 작성하는 중이어도 그렇다) — 보내기가 사후정산을 저장하고 확정한 뒤에 보낸다
+ *   (2026-10-03 사용자 지정). ready 가 거짓이면 why 가 그 까닭이다
  */
-export function sendGate({ trip, stage, need, kept }) {
+export function sendGate({ trip, stage, need, kept, reopen = false }) {
   const wait = (kind, why) => ({ ready: false, staged: false, settle: false, kind, why });
   if (!trip || !stage) return wait('', '여비계산서가 있어야 보낼 수 있습니다');
   if (stage.phase !== 'post' && !need) return wait('', '사전정산의 교통편을 확인하는 중입니다');
@@ -40,10 +44,9 @@ export function sendGate({ trip, stage, need, kept }) {
   if (stage.phase === 'pre' && !stage.done) {
     return wait(kind, kind === 'after' ? '사전정산을 완료한 뒤에 사후정산을 저장하고 보냅니다' : '사전정산이 완료된 뒤에 보냅니다');
   }
-  const settle = kind === 'after' && !(stage.phase === 'post' && stage.done);
-  if (!kept?.length) {
-    return { ready: false, staged: true, settle, kind, why: kind === 'day' ? '당일증빙(출장지에서 결제한 영수증)을 넣어 주세요' : '보낼 증빙이 없습니다 — 증빙을 넣어 주세요' };
-  }
+  const settle = kind === 'after' && (reopen || !(stage.phase === 'post' && stage.done));
+  // 당일 출장은 당일증빙이 그 출장의 증명이라 있어야 보낸다. 숙박·비행기 출장은 증빙이 없으면 여비계산서만 보낸다.
+  if (kind === 'day' && !kept?.length) return { ready: false, staged: true, settle, kind, why: '당일증빙(출장지에서 결제한 영수증)을 넣어 주세요' };
   return { ready: true, staged: true, settle, kind, why: '' };
 }
 
@@ -109,7 +112,8 @@ export function sendTitle({ account, me, trip }) {
  */
 export function sendLines({ account, me, trip, stage, reason = '', kept, file }) {
   return [
-    '여비계산서와 증빙을 보냅니다.',
+    // 보관한 증빙이 없으면 여비계산서만 나간다.
+    kept?.length ? '여비계산서와 증빙을 보냅니다.' : '여비계산서를 보냅니다.',
     `과제·계정: ${account}`,
     `출장자: ${me || '-'}`,
     `출장: ${span(trip)}${trip.location ? ` · ${trip.location}` : ''}`,

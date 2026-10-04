@@ -51,7 +51,8 @@ const LIST = () => `<div class="bt-topmenu"><span class="bt-user"> 김거화 (ki
   }).join('')}</tbody></table><div class="bt-pager"><div>전체 2건 · 1/1 페이지</div></div>`;
 const STEPS = ['사전정산&#xA;작성', '사전정산&#xA;완료', '사후정산&#xA;작성', '사후정산&#xA;완료'];
 // 계산서 화면. 사전정산을 쓰는 중이면 확정 폼이 있고, 그 옆에 늘 삭제 폼이 있다(같은 seq·다른 토큰).
-// 사후정산을 쓰는 중("사후정산 작성")의 확정 폼은 실제 화면에서 보지 못했다 — 사전정산과 같은 자리에 선다고 보고 흉내 낸다(postForm 을 끄면 없다).
+// 사후정산을 쓰는 중("사후정산 작성")의 확정 폼도 사전정산과 같은 자리에 선다(postForm 을 끄면 없다) — 2026-10-04 실제 화면(145580,
+// 사후정산 작성)에서 확인했다: action 은 같은 CalPrint/Confirm 이고 칸은 seq·trseq·토큰이다.
 const CAL = (seq, trseq) => {
   const d = site.docs[seq];
   const at = d.post === '완료' ? 3 : d.post === '작성' ? 2 : d.pre === '완료' ? 1 : 0;
@@ -66,8 +67,13 @@ ${at === 0 || (at === 2 && site.postForm) ? `<form method="post" style="display:
 <input name="__RequestVerificationToken" type="hidden" value="tok-delete" /></form>
 <div class="bt-steps">${STEPS.map((lbl, i) => `<div class="bt-step ${i < at ? 'done' : i === at ? 'active' : ''}"><div class="dot">${i + 1}</div><div class="lbl">${lbl}</div></div>`).join('')}</div></div>`;
 };
+// 사후정산 입력 화면. 저장한 숙박 줄은 사이트가 줄 번호를 붙여 다시 그린다 — 올린 뒤 화면을 다시 읽어 새 줄이 생겼는지 본다.
 const AFTER = (seq, trseq) => `<form method="post" id="frm" enctype="multipart/form-data" action="/BusinessTrip/AfterTrip/Save">
-<input type="hidden" name="seq" value="${seq}"><input type="hidden" name="trseq" value="${trseq}"><table><tbody id="trBody"></tbody></table>
+<input type="hidden" name="seq" value="${seq}"><input type="hidden" name="trseq" value="${trseq}"><table><tbody id="lodgeBody">${
+  (site.docs[seq].lodges || []).map((l) => `<tr><td><select name="lodge_nation"><option value="KR||" selected>대한민국</option></select>`
+    + `<input type="hidden" name="lodge_seq" value="${l.seq}" /><input type="hidden" name="lodge_del" value="0" /><input type="hidden" name="lodge_oldfile" value="" />`
+    + `<input name="lodge_paydate" value="${l.paydate}" /></td><td><input name="lodge_sday" value="${l.sday}" /></td><td><input name="lodge_company" value="${l.company}" /></td>`
+    + `<td><input name="lodge_total" value="${l.total}" /></td></tr>`).join('')}</tbody></table><table><tbody id="trBody"></tbody></table>
 <input name="__RequestVerificationToken" type="hidden" value="tok-after"></form>`;
 const LOGIN = '<form><input id="tbUserId" name="UserId"></form>';
 globalThis.fetch = async (url, init = {}) => {
@@ -89,7 +95,11 @@ globalThis.fetch = async (url, init = {}) => {
     }
     if (u.endsWith('/BusinessTrip/AfterTrip/Save')) {
       site.calls.push(`after:${init.body.get('seq')}`);
-      site.docs[init.body.get('seq')].post = '작성';
+      const d = site.docs[init.body.get('seq')];
+      d.post = '작성';
+      // 줄 번호가 빈 숙박 줄은 새 줄이다 — 번호를 붙여 저장한다.
+      const [seqs, days, sdays, names, totals] = ['lodge_seq', 'lodge_paydate', 'lodge_sday', 'lodge_company', 'lodge_total'].map((k) => init.body.getAll(k));
+      d.lodges = [...(d.lodges || []), ...seqs.flatMap((s, i) => (s ? [] : [{ seq: String(81600 + (d.lodges || []).length + i), paydate: days[i], sday: sdays[i], company: names[i], total: totals[i] }]))];
       return page('ok');
     }
     throw new Error('모르는 쓰기 주소 ' + u);
@@ -170,7 +180,7 @@ await ta('로그인이 풀려 계산서 화면 대신 로그인 화면이 오면
   site.login = false;
 });
 
-console.log('사후정산 확정 — 증빙 송부 칸의 보내기가 사후정산을 저장한 뒤에 부른다');
+console.log('사후정산 확정 — 여비증빙 송부 칸의 보내기가 사후정산을 저장한 뒤에 부른다');
 await ta('사전정산만 완료한 계산서(사후정산 대기)에는 보내지 않는다 — 사후정산을 먼저 저장해야 한다', async () => {
   site.docs = fresh();
   site.docs[145580].pre = '완료';
@@ -270,7 +280,7 @@ t('사전정산을 쓰는 중인 출장 카드: 칸의 이름이 "사전정산"�
   assert.deepEqual(head(), ['사전정산', '작성 중 · 당일']);
   assert.equal(doneBtn().textContent, '사전정산 완료');
   assert.match(card().querySelector('.at-after-drop .at-file').textContent, /출장지에서 결제한 영수증\(당일출장 증명\)을 넣으면 사전정산을 완료\(확정\)하고 보관하고/);
-  assert.match(card().querySelector('.at-send-how').textContent, /사전정산이 완료된 뒤에 보냅니다/, '증빙 송부는 아직 때가 아니다');
+  assert.match(card().querySelector('.at-send-how').textContent, /사전정산이 완료된 뒤에 보냅니다/, '여비증빙 송부는 아직 때가 아니다');
 });
 doneBtn().click();
 t('첫 번째 누름은 어느 계산서인지 적어 보여주기만 한다', () => {
@@ -300,7 +310,7 @@ await ta('영수증을 읽어 당일출장 증명으로 확인하고 → 사전�
   assert.equal(card().querySelector('.at-after-note.error'), null);
   assert.match(card().querySelector('.at-tripline').textContent, /사전정산 완료/);
 });
-t('증빙 송부 칸이 열린다 — 사전정산이 완료됐고 보낼 증빙이 있다', () => {
+t('여비증빙 송부 칸이 열린다 — 사전정산이 완료됐고 보낼 증빙이 있다', () => {
   assert.match(card().querySelector('.at-send-how').textContent, /당일출장 증명 1장 → PDF 1개/);
   assert.ok(card().querySelector('.at-send button[data-act="send-go"]'));
 });

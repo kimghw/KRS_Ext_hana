@@ -793,7 +793,7 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     const none = tripMarks({});
     assert.deepEqual(none.map((x) => [x.key, x.icon, x.on]),
       [['go', 'train', false], ['back', 'train', false], ['lodge', 'lodge', false], ['ticket', 'ticket', false], ['proof', 'proof', false], ['sent', 'sent', false]]);
-    assert.equal(none[5].title, '증빙 보내기 — 아직 보내지 않았습니다 · 누르면 예약 패널의 출장 카드(증빙 송부)를 열어 보낼 내용을 보여 줍니다');
+    assert.equal(none[5].title, '증빙 보내기 — 아직 보내지 않았습니다 · 누르면 예약 패널의 출장 카드(여비증빙 송부)를 열어 보낼 내용을 보여 줍니다');
     assert.match(none[0].title, /^가는 편 없음 — 여비계산서 목록을 아직 읽지 못했습니다$/);
     assert.match(tripMarks({ known: true })[1].title, /^오는 편 없음 — 여비계산서가 없습니다$/);
     assert.match(tripMarks({ known: true, doc: doc501 })[0].title, /사전정산의 교통편을 아직 읽지 못했습니다$/);
@@ -810,7 +810,7 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     assert.deepEqual(full.map((x) => x.title), [
       '가는 편 — KTX 부산→행신 일반석 59,800원', '오는 편 — 비행기 특실 · 예약 패널에서 고름',
       '숙박 증빙 1장 — hotel.png · 사후정산에는 아직 올리지 않았습니다(예약 패널의 출장 카드에서 올립니다)', '항공권 1장 — a.pdf', '출장증빙 2장 — lunch.png · etc.png',
-      '증빙 보냄 — 9/17 14:05 · 쪽지 · 홍길동 · RND-01 · 누르면 예약 패널의 증빙 송부 칸을 엽니다(다시 보내기)',
+      '증빙 보냄 — 9/17 14:05 · 쪽지 · 홍길동 · RND-01 · 누르면 예약 패널의 여비증빙 송부 칸을 엽니다(다시 보내기)',
     ]);
     assert.match(tripMarks({ sent: {} })[5].title, /^증빙 보냄 —  · 누르면/, '보낸 기록에 적힌 것이 없어도 보낸 것이다');
     // 패널에서 고른 것이 사전정산의 줄과 같으면 사전정산의 줄을 그대로 말한다 — 사전정산을 못 읽었으면 고른 것만 안다.
@@ -865,13 +865,13 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     await m.storage.set({ [SENT_KEY]: { 'T-0': { at: NOW, channel: 'Teams', to: '홍길동', account: 'RND-01' } } });
     await tick();
     assert.deepEqual(marksOfLi(m.items()[0]).at(-1), ['sent', true]);
-    assert.equal(markOf(m.items()[0], 'sent').title, '증빙 보냄 — 9/17 09:00 · Teams · 홍길동 · RND-01 · 누르면 예약 패널의 증빙 송부 칸을 엽니다(다시 보내기)');
+    assert.equal(markOf(m.items()[0], 'sent').title, '증빙 보냄 — 9/17 09:00 · Teams · 홍길동 · RND-01 · 누르면 예약 패널의 여비증빙 송부 칸을 엽니다(다시 보내기)');
     // 다녀온 출장은 보내면 카드에서 빠진다(정산이 끝난 것이다 — src/settling.js 의 규칙 그대로).
     const past = await mount({ storage: fakeStorage({ [SENT_KEY]: { 'X-4': { at: NOW } } }), plans: fakePlans(HR), trips: fakeTrips([doc501]) });
     assert.ok(!past.items().some((li) => li.dataset.doc === 'X-4'));
   });
   // 출장 줄에서 누르는 것 둘(2026-10-04 사용자 지정) — 계산서 보기(그 출장의 여비계산서 화면을 새 탭으로)와 보내기(종이비행기 —
-  // 패널의 그 출장 카드, 증빙 송부 칸으로 가서 보낼 내용을 띄운다).
+  // 패널의 그 출장 카드, 여비증빙 송부 칸으로 가서 보낼 내용을 띄운다).
   await ta('계산서 보기 — 계산서가 걸린 출장이면 파랗고, 누르면 그 계산서(번호와 내 출장자 번호)를 연다. 패널은 열지 않는다', async () => {
     const m = await mount({ plans: fakePlans(HR), trips: fakeTrips([{ ...doc501, travelers: [{ name: '남', post: '대기', trseq: '7' }, { name: '김거화', post: '대기', trseq: '8' }] }]) });
     const [past, trip] = tripLis(m);
@@ -899,7 +899,7 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     await tick();
     assert.deepEqual(m.billCalls, [['501', '']]);
   });
-  await ta('보내기 — 종이비행기를 누르면 그 출장 카드의 증빙 송부 칸으로 가 달라는 부탁을 남기고 패널을 연다(보내는 것은 패널의 팝업에서 한다)', async () => {
+  await ta('보내기 — 종이비행기를 누르면 그 출장 카드의 여비증빙 송부 칸으로 가 달라는 부탁을 남기고 패널을 연다(보내는 것은 패널의 팝업에서 한다)', async () => {
     const m = await mount({ plans: fakePlans(HR), trips: fakeTrips([doc501]) });
     const plane = markOf(tripLis(m)[0], 'sent');
     assert.deepEqual([plane.tagName, plane.dataset.act, plane.dataset.doc], ['BUTTON', 'send', 'X-4']);

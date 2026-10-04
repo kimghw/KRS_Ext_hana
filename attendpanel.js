@@ -59,6 +59,9 @@ const WEB_TITLE = 'HR 웹페이지에서 이 문서 열기';
 const WEB_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>';
 /** 증빙을 넣는 칸의 아이콘 — 받침에서 위로 올라가는 화살표(올리기). */
 const DROP_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>';
+/** 완료한 사후정산을 다시 작성하는 버튼(정산 내역의 `다시 작성`)과, 그것을 그만두는 버튼의 풍선말. */
+const REOPEN_TITLE = '완료한 사후정산을 다시 작성합니다 — 증빙을 넣거나 가는 편·오는 편을 바꿔 저장하고, 보내기가 다시 확정한 뒤 보냅니다';
+const REOPEN_STOP = '다시 작성을 그만둡니다 — 저장하지 않은 것은 사후정산에 올라가지 않습니다';
 /** 증빙 넣는 곳의 풍선말 — 칸을 낮추느라 칸 안에서 뺀 자세한 말이다. */
 const DROP_TITLE = '이미지·PDF, 여러 장도 됩니다 — 붙여넣기(Ctrl+V)는 이 카드를 편 채 패널 어디서든 됩니다';
 const md = (s) => `${+s.slice(5, 7)}/${+s.slice(8)}`;
@@ -155,7 +158,7 @@ export function createAttendPanel({
     // 폼의 기간이 key 와 달라지면 다시 찾는다. booking 은 신청을 보내는 중인 차량, note 는 방금 한 신청의 결과 글이다.
     cars: { key: '', win: null, loading: false, result: null, error: '', booking: '', note: null },
     // 홈의 WORKSPACE 카드에서 출장 줄의 `보내기`를 눌러 온 부탁: { docNo, send, at, seen } — 신청 내역이 읽히면 그 출장 카드를 펴고
-    // 증빙 송부 칸으로 간다(seek·followSeek). 없으면 null.
+    // 여비증빙 송부 칸으로 간다(seek·followSeek). 없으면 null.
     seek: null,
   };
 
@@ -191,7 +194,7 @@ export function createAttendPanel({
     return true;
   }
 
-  // 출장 카드의 증빙 송부 칸. 아래 함수들은 이 뒤에 적혀 있지만 부를 때는 이미 있다.
+  // 출장 카드의 여비증빙 송부 칸. 아래 함수들은 이 뒤에 적혀 있지만 부를 때는 이미 있다.
   const sendBox = createSendBox({
     escapeHtml, logEvent, evidence, readFile: (f) => readFile(f), repaint: () => paintList(),
     setStatus: (...args) => setStatus(...args), setError: (...args) => setError(...args),
@@ -1190,11 +1193,11 @@ export function createAttendPanel({
       const tripLine = !isTrip(it) ? '' : `<div class="at-tripline"><span>${escapeHtml(
         trip ? `여비계산서 ${trip.seq} · ${stage.label}` : noTripNote(it))}</span>`
         + `<button type="button" class="small ghost at-web at-tripbtn ${icon.state}" data-act="trip" title="${TRIP_TITLE} — ${escapeHtml(icon.label)}" aria-label="${TRIP_TITLE} — ${escapeHtml(icon.label)}">${tripIcon(icon.digit)}</button></div>`;
-      // 출장이면 사후정산 칸 아래에 증빙 송부 칸(sendbox.js)이 선다 — 정산이 끝난 뒤 증빙을 PDF 로 묶어 담당자에게 보낸다.
+      // 출장이면 사후정산 칸 아래에 여비증빙 송부 칸(sendbox.js)이 선다 — 정산이 끝난 뒤 증빙을 PDF 로 묶어 담당자에게 보낸다.
       const afterBox = isTrip(it) ? afterHtml(it, trip, stage) + sendBox.html(sendCtx(it)) : '';
       const note = it.rejectNote ? `<span class="at-reject" title="반려 의견">반려 의견 · ${escapeHtml(it.rejectNote)}</span>` : '';
       // 신청서에 하는 일(변경·취소신청·HR 에서 열기)은 여비계산서 칸보다 위에 선다(2026-10-03 사용자 지정) — 맨 아래에 있으면
-      // 사후정산·증빙 송부에 딸린 버튼으로 읽혀 헷갈렸다. 그 아래가 여비계산서(계산서 줄·사후정산·증빙 송부)다.
+      // 사후정산·여비증빙 송부에 딸린 버튼으로 읽혀 헷갈렸다. 그 아래가 여비계산서(계산서 줄·사후정산·여비증빙 송부)다.
       return `<li data-i="${i}" class="open ${cls}">${head}`
         + `<div id="atMore_${i}" class="at-more-box">${note}`
         + `<div class="at-acts">${acts}</div>${cancelBox}${tripLine}${afterBox}</div></li>`;
@@ -1208,7 +1211,7 @@ export function createAttendPanel({
   const SEEK_TTL_MS = 30_000;
 
   /**
-   * 홈의 WORKSPACE 카드에서 출장 줄의 `보내기`를 눌러 왔다(2026-10-04 사용자 지정) — 신청 내역에서 그 출장 카드를 펴고 증빙 송부 칸을
+   * 홈의 WORKSPACE 카드에서 출장 줄의 `보내기`를 눌러 왔다(2026-10-04 사용자 지정) — 신청 내역에서 그 출장 카드를 펴고 여비증빙 송부 칸을
    * 보이게 하며, 보낼 수 있으면 보낼 내용 팝업을 띄운다(카드의 `보내기`를 누른 것과 같다 — 팝업의 보내기를 눌러야 나간다).
    * 신청 내역 → 여비계산서 → 사전정산의 교통편·보관함이 읽히는 대로 여러 번 그려지므로, 그릴 때마다 이어 간다(followSeek).
    */
@@ -1281,7 +1284,7 @@ export function createAttendPanel({
     && st.all.some((x) => x.docNo !== it.docNo && isTrip(x) && isLive(x) && x.from === it.from && (x.to || x.from) === (it.to || it.from));
   /**
    * 그 출장의 여비계산서(기간과 출장자가 같은 것). 출장이 아니거나 아직 못 읽었으면 null. 가려진 줄(shadowed)도 null 이다 —
-   * 딱지·편 카드·버튼이 같은 판단을 쓴다(계산서와 사후정산·증빙 송부는 올려 둔 신청서의 줄에서 한다).
+   * 딱지·편 카드·버튼이 같은 판단을 쓴다(계산서와 사후정산·여비증빙 송부는 올려 둔 신청서의 줄에서 한다).
    */
   const tripOf = (it) => (isTrip(it) && st.trips?.rows && !shadowed(it) ? tripDocFor(it, st.trips.rows, st.trips.me) : null);
   /**
@@ -1428,7 +1431,9 @@ export function createAttendPanel({
    * 사전정산을 아직 완료(확정)하지 않았으면 칸의 이름이 "사전정산"이고 `사전정산 완료` 버튼이 선다 — 사후정산을 올리거나 증빙을
    * 담당자에게 보내려면 완료돼 있어야 하기 때문이다. 그때도 증빙은 받는다(넣으면 확정부터 하고 이어서 처리한다 — runAfter).
    * 가는 편·오는 편은 사전정산이 완료된 뒤에 바꾼다(그 전에는 보여 주기만 한다).
-   * 사후정산까지 완료된 출장은 같은 자리에 정산 내역을 보여 주기만 한다(doneHtml).
+   * 사후정산까지 완료된 출장은 같은 자리에 정산 내역을 보여 주기만 한다(doneHtml) — 거기의 `다시 작성`을 누르면(a.reopen,
+   * 2026-10-04 사용자 지정: "보내고 나서.. 증빙을 추가하거나 하면 사후 저장 후 다시 정산작성할 수 있어야 함") 완료하기 전과 같은
+   * 칸이 다시 선다. 누르는 것만으로는 사이트에 아무것도 가지 않는다 — 증빙을 넣거나 저장·보내기를 눌렀을 때 간다.
    */
   function afterHtml(it, trip, stage) {
     if (!trip || !stage) return '';
@@ -1437,18 +1442,21 @@ export function createAttendPanel({
       return `<div class="at-after"><p class="at-after-note${a.detailError ? ' error' : ''}">${escapeHtml(
         a.detailError ? `사전정산의 교통편을 읽지 못했습니다: ${a.detailError}` : '사전정산의 교통편을 확인하는 중...')}</p></div>`;
     }
-    if (stage.phase === 'post' && stage.done) return doneHtml(trip, a);
+    const locked = !!a.busy || st.busy;
+    const again = stage.phase === 'post' && stage.done;
+    if (again && !a.reopen) return doneHtml(trip, a, locked);
     const route = legsOf(it, trip);
     const pre = stage.phase === 'pre' && !stage.done;
     const need = afterNeed(trip, a.detail, st.legs[it.docNo]);
-    const locked = !!a.busy || st.busy;
     const openTitle = '사후정산 입력 화면을 eclass 에서 열기';
     // 사전정산 완료(확정)는 계산서의 단계를 바꾸는 일이라 두 번 눌러야 나간다(사이트도 "확정하시겠습니까?" 를 묻는다).
     const doneTitle = '사전정산을 완료(확정)합니다 — 계산서 화면의 확정 버튼과 같습니다. 사후정산을 올리거나 증빙을 보내려면 완료돼 있어야 합니다';
     const head = pre
       ? `<strong>사전정산</strong><span class="at-after-why">${escapeHtml(`작성 중 · ${need.why}`)}</span>`
         + `<button type="button" class="small at-request at-pre-done" data-act="pre-done" title="${doneTitle}"${locked ? ' disabled' : ''}>사전정산 완료</button>`
-      : `<strong>사후정산</strong><span class="at-after-why">${escapeHtml(need.why)}</span>`
+      : `<strong>사후정산</strong><span class="at-after-why">${escapeHtml(again ? `${need.why} · 다시 작성 중` : need.why)}</span>`
+        // 완료한 사후정산을 다시 작성하는 중이면 그만둘 수 있다 — 사이트의 단계가 아직 완료일 때만이다(저장해서 "작성"이 되면 이 버튼은 없다).
+        + (again ? `<button type="button" class="small ghost at-reopen" data-act="after-reopen" title="${REOPEN_STOP}"${locked ? ' disabled' : ''}>그만두기</button>` : '')
         + `<button type="button" class="small ghost at-web" data-act="after" title="${openTitle}" aria-label="${openTitle}">${WEB_ICON}</button>`;
     // 증빙 없이 편만 바꿨을 때 올리는 버튼. 올릴 값이 있는 편이 하나라도 있어야 한다. 두 번 눌러야 나간다.
     const goTitle = '바꾼 가는 편·오는 편을 사후정산의 교통비 내역으로 올립니다';
@@ -1481,13 +1489,15 @@ export function createAttendPanel({
    * 사후정산이 완료된 출장의 정산 내역(2026-10-04 사용자 지정 — 완료된 출장을 펴도 표가 보여야 한다). 가는 편·오는 편과 숙박비 내역을
    * 보여 주기만 한다. 편은 사후정산에 따로 올린 교통 줄이 있으면 그 줄이고, 없으면 사전정산의 줄이다(그 값이 선다) — 카드에서 골라 둔
    * 편(st.legs)은 얹지 않는다. 계산서에 실제로 있는 줄만 적는다.
-   * 증빙 넣는 곳은 없다 — 완료된 출장에 넣는 증빙은 아래 증빙 송부 칸이 받는다. data-seq 를 달지 않아 붙여넣기도 이 칸으로 오지 않는다.
+   * 증빙 넣는 곳은 없다 — 완료된 출장에 넣는 증빙은 아래 여비증빙 송부 칸이 받는다. data-seq 를 달지 않아 붙여넣기도 이 칸으로 오지 않는다.
+   * 머리의 `다시 작성`을 누르면 완료하기 전의 사후정산 칸으로 바뀐다(afterHtml 의 a.reopen) — 그때는 증빙을 읽어서 사후정산에 올린다.
    */
-  function doneHtml(trip, a) {
+  function doneHtml(trip, a, locked = false) {
     const post = lodgeBox.state.by[trip.seq]?.trans || [];
     const rows = post.length ? post : a.detail.rows;
     const need = afterNeed(trip, { transports: rows.map((r) => r.transport) });
-    return `<div class="at-after"><div class="at-after-head"><strong>정산 내역</strong><span class="at-after-why">${escapeHtml(`${need.why} · 완료`)}</span></div>`
+    return `<div class="at-after"><div class="at-after-head"><strong>정산 내역</strong><span class="at-after-why">${escapeHtml(`${need.why} · 완료`)}</span>`
+      + `<button type="button" class="small ghost at-reopen" data-act="after-reopen" title="${REOPEN_TITLE}"${locked ? ' disabled' : ''}>다시 작성</button></div>`
       + legsHtml(legPlan({ trip, rows }), false, post.length ? '사후정산에 없음' : '사전정산에 없음')
       + lodgeBox.html(lodgeCtx(trip, { lodging: need.lodging, readonly: true }))
       + '</div>';
@@ -1517,7 +1527,7 @@ export function createAttendPanel({
   const todoOf = (a) => (a?.kept || []).filter((k) => k.todo && k.record);
 
   /**
-   * 증빙 송부 칸(sendbox.js)에 넘길 그 출장의 사정 — 여비계산서와 단계, 사후정산 대상인가(사전정산의 교통편을 읽은 뒤에 안다),
+   * 여비증빙 송부 칸(sendbox.js)에 넘길 그 출장의 사정 — 여비계산서와 단계, 사후정산 대상인가(사전정산의 교통편을 읽은 뒤에 안다),
    * 보관함의 증빙. refresh 는 보관함을 다시 읽고 카드를 다시 그린다(송부 칸에서 증빙을 넣었을 때).
    * save·confirm 은 사후정산을 아직 완료하지 않은 출장의 `사후정산 저장`과 `보내기`(저장 → 확정 → 송부)가 부르고, again 은 그 뒤의
    * 사정을 다시 준다. hold 는 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭이다(사후정산 칸이 정산금액을 묻고 있다).
@@ -1525,9 +1535,12 @@ export function createAttendPanel({
   function sendCtx(it) {
     const trip = tripOf(it);
     const a = trip ? st.after[trip.seq] || (st.after[trip.seq] = {}) : {};
+    const stage = trip ? tripStage(trip, st.trips.me) : null;
     return {
-      it, trip, stage: trip ? tripStage(trip, st.trips.me) : null, kept: a.kept || [], me: st.trips?.me || st.me?.name || '',
+      it, trip, stage, kept: a.kept || [], me: st.trips?.me || st.me?.name || '',
       need: trip && a.detail ? afterNeed(trip, a.detail, st.legs[it.docNo]) : null, locked: st.busy || !!a.busy,
+      // 완료한 사후정산을 카드에서 다시 작성하는 중인가 — 그러면 완료하기 전처럼 `사후정산 저장`과 `보내기`(저장 → 확정 → 송부)가 선다.
+      reopen: !!a.reopen && stage?.phase === 'post' && stage.done,
       refresh: () => loadKept(it.docNo, a).then(paintList),
       save: (onStage) => saveAfter(it, onStage), confirm: (onStage) => confirmPost(it, onStage), again: () => sendCtx(it),
       hold: a.ask ? '사후정산 칸에서 정산금액을 먼저 정해 주세요'
@@ -1774,7 +1787,7 @@ export function createAttendPanel({
   }
 
   /**
-   * 사후정산을 지금 카드에 있는 대로 저장한다(2026-10-03 사용자 지정) — 증빙 송부 칸의 `사후정산 저장`과 `보내기`(저장 → 확정 → 송부)가 부른다.
+   * 사후정산을 지금 카드에 있는 대로 저장한다(2026-10-03 사용자 지정) — 여비증빙 송부 칸의 `사후정산 저장`과 `보내기`(저장 → 확정 → 송부)가 부른다.
    * 증빙으로 읽은 숙박 줄은 넣을 때 이미 올라가 있다. 여기서는 가는 편·오는 편을 바꿨으면(또는 이 패널에서 항공권을 넣었으면) 그것을
    * 교통비·항공 내역으로 올리고, 새로 올릴 것이 없어도 입력 화면의 폼을 그대로 저장한다(화면의 `저장` 버튼과 같다) — 단계가
    * "사후정산 작성"이 돼야 확정할 수 있다. 값을 모르는 편이 있으면(항공권을 다시 넣어야 하는 편 등) 교통비 내역은 화면에 있는 그대로
@@ -1815,7 +1828,7 @@ export function createAttendPanel({
   }
 
   /**
-   * 사후정산을 완료(확정)한다 — 계산서 화면의 확정과 같은 요청이다(src/trip.js 의 tripPostConfirm). 증빙 송부 칸의 `보내기`가 사후정산을
+   * 사후정산을 완료(확정)한다 — 계산서 화면의 확정과 같은 요청이다(src/trip.js 의 tripPostConfirm). 여비증빙 송부 칸의 `보내기`가 사후정산을
    * 저장한 뒤에 부른다. 끝나면 여비계산서 목록을 다시 읽어 카드의 단계를 맞추고, 다시 읽은 그 계산서 줄을 돌려준다. 못 했으면 던진다.
    */
   async function confirmPost(it, onStage = () => {}) {
@@ -1824,6 +1837,8 @@ export function createAttendPanel({
     try {
       const r = await tripPostConfirm(trip, { name: st.trips?.me || '', onStage });
       logEvent('trip', true, r.sent ? `여비계산서 사후정산 완료(확정): ${trip.seq}` : `여비계산서 사후정산이 이미 완료돼 있음: ${trip.seq}`, { seq: trip.seq, sent: r.sent });
+      // 다시 작성하던 사후정산이 다시 완료됐다 — 카드는 정산 내역(보기)으로 돌아간다.
+      if (st.after[trip.seq]) st.after[trip.seq].reopen = false;
       await loadTrips();
       return r.row;
     } catch (err) {
@@ -1855,8 +1870,9 @@ export function createAttendPanel({
       paintList();
     }
     const stage = tripStage(trip, st.trips?.me);
-    // 사후정산이 완료된 출장에 놓거나 붙여 넣은 파일은 보낼 증빙이다 — 읽지 않고 보관함에 담는다(증빙 송부 칸의 "증빙 넣기"와 같다).
-    if (stage.phase === 'post' && stage.done) return sendBox.add(sendCtx(it), [...(fileList || [])]);
+    // 사후정산이 완료된 출장에 놓거나 붙여 넣은 파일은 보낼 증빙이다 — 읽지 않고 보관함에 담는다(여비증빙 송부 칸의 "증빙 넣기"와 같다).
+    // 카드에서 `다시 작성`을 눌러 둔 출장이면(a.reopen) 완료하기 전처럼 읽어서 사후정산에 올린다.
+    if (stage.phase === 'post' && stage.done && !a.reopen) return sendBox.add(sendCtx(it), [...(fileList || [])]);
     if (!a.detail) {
       // 줄을 펴자마자 놓았으면 조건(사전정산의 교통편)을 아직 못 읽었다. 여기서 기다린다.
       a.loading = true;
@@ -2383,6 +2399,17 @@ export function createAttendPanel({
       return undefined;
     }
     if (a === 'leg') return pickLeg(it, btn.dataset.leg, btn.dataset.t);
+    if (a === 'after-reopen') {
+      // 완료한 사후정산을 다시 작성한다(정산 내역의 `다시 작성`) · 그만둔다(`그만두기`). 카드의 모양만 바뀐다 — 사이트에는 아무것도 가지 않는다.
+      const row = tripOf(it);
+      if (!row) return undefined;
+      disarm();
+      const box = st.after[row.seq] || (st.after[row.seq] = {});
+      Object.assign(box, { reopen: !box.reopen, error: '', info: '', result: null });
+      paintList();
+      el.list.querySelector('button[data-act="after-reopen"]')?.focus();
+      return undefined;
+    }
     if (a === 'lodge-info') {
       // 숙박비 내역의 `증빙`·`손수 작성` — 그 줄의 내용을 펴고, 다시 누르면 접는다. 사이트에는 아무것도 가지 않는다.
       const row = tripOf(it);
@@ -2413,7 +2440,7 @@ export function createAttendPanel({
       return answerAsk(it, btn);
     }
     if (a.startsWith('send-')) {
-      // 증빙 송부 칸의 버튼(이전에 보낸 줄·직접 고르기·받는 사람 고르기, 사후정산 저장, 보내기). `사후정산 저장`은 실제 계산서를 바꾸는
+      // 여비증빙 송부 칸의 버튼(이전에 보낸 줄·직접 고르기·받는 사람 고르기, 사후정산 저장, 보내기). `사후정산 저장`은 실제 계산서를 바꾸는
       // 일이라 두 번 눌러야 나간다 — 첫 누름에는 무엇을 하는지 적어 보여주기만 한다. `보내기`는 보낼 내용을 팝업으로 띄우고,
       // 팝업의 보내기를 눌러야 나간다(사후정산 저장·확정부터 하는 경우에도 그 팝업이 확인이다).
       const ctx = sendCtx(it);
@@ -2576,7 +2603,7 @@ export function createAttendPanel({
       e.preventDefault();
       input.parentElement.querySelector('button[data-act="ask-krw"]')?.click();
     });
-    // 증빙 송부 칸의 글 칸(과제·계정, 받는 사람 찾기)과 파일 칸.
+    // 여비증빙 송부 칸의 글 칸(과제·계정, 받는 사람 찾기)과 파일 칸.
     for (const type of ['input', 'change']) {
       el.list.addEventListener(type, (e) => {
         const li = e.target instanceof HTMLElement ? e.target.closest('li[data-i]') : null;
@@ -2642,7 +2669,7 @@ export function createAttendPanel({
     st.routes = { ...(rule?.[ROUTES_KEY] && typeof rule[ROUTES_KEY] === 'object' ? rule[ROUTES_KEY] : {}), ...st.routes };
     st.back = backWeeksOf(rule?.[BACK_KEY]);
     st.stages = stagesFresh(rule?.[STAGES_KEY], attendToday()) ? rule[STAGES_KEY] : null;
-    // 증빙 송부 칸이 기억해 둔 것(최근에 보낸 곳, 보낸 기록)을 읽고 Teams MCP 가 닿는지 본다. 기다리지 않는다 — 읽히면 다시 그린다
+    // 여비증빙 송부 칸이 기억해 둔 것(최근에 보낸 곳, 보낸 기록)을 읽고 Teams MCP 가 닿는지 본다. 기다리지 않는다 — 읽히면 다시 그린다
     // (증빙을 이미 보낸 다녀온 출장은 기본 보기에서 빠진다).
     sendBox.load().then(() => { pruneSettled(); paintList(); }, () => {});
     // 차량 조회를 켜 둔 채 다른 탭에 다녀왔으면 다시 읽는다 — 그 사이 차량을 신청했거나 취소했을 수 있다.

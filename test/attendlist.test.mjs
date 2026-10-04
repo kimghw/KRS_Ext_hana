@@ -256,7 +256,7 @@ t('회수한 신청서는 계산서가 없으면 붙이지 않는다. 승인된 
 });
 const rowOf = (no) => [...doc.querySelectorAll('#atList > li')].find((li) => li.querySelector('.at-reason').textContent === no);
 rowOf('T-NEW-TEMP').querySelector('.at-head').click();
-t('가려진 임시저장 줄은 펴도 같은 판단이다 — 계산서 줄이 올려 둔 신청서를 가리키고, 사후정산·증빙 송부 칸이 없다', () => {
+t('가려진 임시저장 줄은 펴도 같은 판단이다 — 계산서 줄이 올려 둔 신청서를 가리키고, 사후정산·여비증빙 송부 칸이 없다', () => {
   const li = doc.querySelector('#atList > li.open');
   assert.match(li.querySelector('.at-tripline').textContent, /^같은 기간에 올려 둔 출장 신청서가 있습니다 — 여비계산서는 그 줄에서 봅니다/);
   assert.deepEqual([li.querySelector('.at-after'), li.querySelector('.at-send')], [null, null]);

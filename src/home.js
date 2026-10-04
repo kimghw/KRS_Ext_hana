@@ -24,10 +24,10 @@
 // 그 출장의 증빙으로 들어간다 — 배경이 한 장씩 읽어 증빙으로 쓸 수 있는 것만 보관함에 담는다(src/intake.js). 줄의 오른쪽에는
 // 선 아이콘 여섯이 세 개씩 두 줄로 선다: 가는 편·오는 편(교통편 — 기차·비행기·버스)·숙박 / 항공권·출장증빙·보냄. 들어와 있으면(보냈으면)
 // 파란 선, 없으면 회색 선이다(tripMarks). 예전에 적던 "다녀온 출장 · 사전정산 완료"는 글로 적지 않고 줄의 풍선말로 옮겼다.
-// 그 가운데 보냄(종이비행기)은 누르는 것이다 — **보내기**: 패널을 열어 그 출장 카드의 증빙 송부 칸으로 가고 보낼 내용을 띄운다(2026-10-04
+// 그 가운데 보냄(종이비행기)은 누르는 것이다 — **보내기**: 패널을 열어 그 출장 카드의 여비증빙 송부 칸으로 가고 보낼 내용을 띄운다(2026-10-04
 // 사용자 지정). 아이콘 옆(숨기기 눈 아이콘 아래)에는 **계산서 보기**가 선다 — 그 출장의 여비계산서 화면을 새 탭으로 연다.
 // 가는 편·오는 편은 사전정산의 교통편 줄(하루에 한 번 읽어 LEGS_KEY 에 담는다)에 패널의 출장 카드에서 고른 것(PICKS_KEY)을 얹은 것이고,
-// 숙박·항공권·출장증빙은 보관함에 담긴 증빙(src/evidence.js 의 MARKS_KEY), 보냄은 패널의 증빙 송부 칸이 적는 보낸 기록(SENT_KEY)이다.
+// 숙박·항공권·출장증빙은 보관함에 담긴 증빙(src/evidence.js 의 MARKS_KEY), 보냄은 패널의 여비증빙 송부 칸이 적는 보낸 기록(SENT_KEY)이다.
 // **여비계산서는 여기서 바꾸지 않는다** — 숙박 증빙·항공권을 사후정산에 올리는 것은 패널의 출장 카드가 한다(실제 계산서를 바꾸는
 // 일이고, 정산금액을 물어야 할 때가 있다).
 
@@ -217,8 +217,8 @@ const LODGE_LABEL = '숙박 증빙';
 const FLIGHT_LABEL = '항공기 증명';
 const TODO_NOTE = '사후정산에는 아직 올리지 않았습니다(예약 패널의 출장 카드에서 올립니다)';
 /** 보냄 아이콘(보내기)을 누르면 하는 일 — 실제로 나가는 것은 패널에 뜨는 팝업의 보내기를 눌렀을 때다. */
-const SEND_HOW = '누르면 예약 패널의 출장 카드(증빙 송부)를 열어 보낼 내용을 보여 줍니다';
-const SEND_AGAIN = '누르면 예약 패널의 증빙 송부 칸을 엽니다(다시 보내기)';
+const SEND_HOW = '누르면 예약 패널의 출장 카드(여비증빙 송부)를 열어 보낼 내용을 보여 줍니다';
+const SEND_AGAIN = '누르면 예약 패널의 여비증빙 송부 칸을 엽니다(다시 보내기)';
 const pad2 = (n) => String(n).padStart(2, '0');
 /** 보낸 때를 "10/4 14:32" 로. */
 const sentStamp = (at) => { const d = new Date(at); return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -236,7 +236,7 @@ export function legsSlim(rows, trip) {
 /**
  * 출장 한 건의 아이콘 여섯(2026-10-04 사용자 지정) — 가는 편·오는 편(교통편), 숙박, 항공권, 출장증빙, 보냄. on 이면 파란 선이고
  * 아니면 회색 선이다. 가는 편·오는 편은 사전정산의 줄에 패널에서 고른 것을 얹은 것이고(고른 것이 먼저다), 숙박·항공권·출장증빙은
- * 보관함의 증빙이며, 보냄은 증빙을 담당자에게 보낸 기록(패널의 증빙 송부 칸이 적는 SENT_KEY)이다. 가는 편이 먼저, 오는 편이 그다음이다
+ * 보관함의 증빙이며, 보냄은 증빙을 담당자에게 보낸 기록(패널의 여비증빙 송부 칸이 적는 SENT_KEY)이다. 가는 편이 먼저, 오는 편이 그다음이다
  * — 방향 화살표는 두지 않는다(같은 날 사용자 지정: 차례로 안다).
  * @param {{doc?: object|null, known?: boolean, legs?: {go: object|null, back: object|null}|null, picks?: object|null, kept?: object[],
  *          sent?: {at?: number, channel?: string, to?: string, account?: string}|null}} of
@@ -273,7 +273,7 @@ export function tripMarks({ doc = null, known = false, legs = null, picks = null
     files('proof', '출장증빙', all.filter((k) => k.label !== LODGE_LABEL && k.label !== FLIGHT_LABEL), '출장지에서 결제한 영수증을'),
     {
       key: 'sent', icon: 'sent', on: !!sent,
-      // 이 아이콘은 누르는 것이다(보내기) — 누르면 패널이 그 출장 카드의 증빙 송부 칸을 열고 보낼 내용을 보여 준다.
+      // 이 아이콘은 누르는 것이다(보내기) — 누르면 패널이 그 출장 카드의 여비증빙 송부 칸을 열고 보낼 내용을 보여 준다.
       title: sent ? `증빙 보냄 — ${[sent.at ? sentStamp(sent.at) : '', sent.channel, sent.to, sent.account].filter(Boolean).join(' · ')} · ${SEND_AGAIN}`
         : `증빙 보내기 — 아직 보내지 않았습니다 · ${SEND_HOW}`,
     },
@@ -1215,7 +1215,7 @@ export function createHomeCard(doc, deps = {}) {
       await Promise.resolve().then(() => openBill(bill.seq, bill.trseq)).catch((err) => flash(`계산서를 열지 못했습니다: ${err.message}`));
       return;
     }
-    // 출장 줄의 보내기(종이비행기) — 패널에 그 출장 카드의 증빙 송부 칸을 열어 달라는 부탁을 남기고 연다. 실제로 나가는 것은
+    // 출장 줄의 보내기(종이비행기) — 패널에 그 출장 카드의 여비증빙 송부 칸을 열어 달라는 부탁을 남기고 연다. 실제로 나가는 것은
     // 패널에 뜨는 보낼 내용 팝업의 보내기를 눌렀을 때다(받는 사람·과제·계정과 보관함은 패널이 안다).
     if (act === 'send') {
       const trip = view.all.find((p) => p.docNo === docNo);

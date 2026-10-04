@@ -32,7 +32,7 @@ export const TRIP_LOOKBACK_DAYS = 28;
 
 /**
  * 현황(패널)과 홈 카드에 올릴 근태. 기간은 start~end 이지만 **출장만은 start 의 4주(backDays) 전부터** — 다녀온 출장의
- * 여비계산서를 올려야 하므로 지난 출장이 눈에 띄어야 한다. 그 가운데 정산이 끝난 것(사후정산 완료·증빙 송부 — settled)은 뺀다.
+ * 여비계산서를 올려야 하므로 지난 출장이 눈에 띄어야 한다. 그 가운데 정산이 끝난 것(사후정산 완료·여비증빙 송부 — settled)은 뺀다.
  * 그 밖의 종류는 start 전에 끝난 것을 뺀다. 두 화면이 같은 규칙을 써야 서로 어긋나 보이지 않는다 — rule 은 src/settling.js 의
  * tripRule 이 저장소에서 읽어 준다.
  * @param {object[]} items listItems 의 결과

@@ -537,6 +537,9 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-after-head strong { color: var(--fg); }
 .attend .at-after-why { color: var(--muted); }
 .attend .at-after-head button.at-web { margin-left: auto; min-height: 28px; padding: 4px 8px; color: var(--muted); }
+/* 완료한 사후정산을 다시 작성하는 버튼(정산 내역의 `다시 작성`)과 그만두는 버튼 — 머리 줄 오른쪽 끝이고, 옆에 ↗ 가 있으면 그 왼쪽이다. */
+.attend .at-after-head button.at-reopen { margin-left: auto; min-height: 26px; padding: 2px 8px; border: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
+.attend .at-after-head button.at-reopen + button.at-web { margin-left: 0; }
 .attend .at-after-head button.at-web svg { width: 14px; height: 14px; pointer-events: none; }
 /* 사전정산을 아직 완료(확정)하지 않은 출장 카드의 `사전정산 완료` 버튼 — 머리 줄 오른쪽 끝에 선다. */
 .attend .at-after-head button.at-pre-done { margin-left: auto; min-height: 28px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
@@ -763,7 +766,7 @@ button.danger:hover { filter: brightness(1.08); }
   .attend .at-range-dates button[data-back] { padding: 4px 5px; font-size: 12px; }
 }
 
-/* 출장 카드의 증빙 송부 칸(sendbox.js) — 이전에 보낸 곳을 고르거나 과제·계정과 받는 사람을 직접 골라, 보관함의 증빙을 PDF 하나로 묶어 보낸다. */
+/* 출장 카드의 여비증빙 송부 칸(sendbox.js) — 이전에 보낸 곳을 고르거나 과제·계정과 받는 사람을 직접 골라, 보관함의 증빙을 PDF 하나로 묶어 보낸다. */
 .attend .at-send { margin-top: 8px; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; font-size: 12px; }
 .attend .at-send-head { display: flex; align-items: baseline; gap: 8px; }
 .attend .at-send-head strong { flex: none; color: var(--fg); }
@@ -795,19 +798,21 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-send-way .at-label { flex-basis: auto; margin-right: 2px; }
 .attend .at-send-way .at-chip.dim:not(.active) { color: var(--faint); border-style: dashed; }
 /* 이전에 보낸 곳(2026-10-04 사용자 지정) — 한 줄이 과제·계정 · 받는 사람 · 보내는 길이고, 켜진 줄이 지금 보내는 곳이다.
-   Teams 로 보냈던 줄인데 지금 Teams 로 못 가면 길이 흐리다. 맨 아래의 `직접 고르기`가 과제·계정, 받는 사람, 보내는 길 칸을 편다. */
-.attend .at-send-sets { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-.attend .at-send-set { justify-content: flex-start; gap: 6px; width: 100%; min-height: 30px; padding: 4px 6px 4px 10px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; text-align: left; }
+   보내는 길은 아이콘이다(Teams 로고 · 쪽지 말풍선) — Teams 로 보냈던 줄인데 지금 Teams 로 못 가면 아이콘이 흐리다.
+   첫 줄 오른쪽의 목록 아이콘(`직접 고르기`)이 과제·계정, 받는 사람, 보내는 길 칸을 편다 — 그 아이콘이 없을 때는 줄이 칸 폭을 다 쓴다. */
+.attend .at-send-sets { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; margin-top: 8px; }
+.attend .at-send-sets:has(> .at-send-fold[hidden]) .at-send-set { grid-column: 1 / -1; }
+.attend .at-send-set { grid-column: 1; justify-content: flex-start; gap: 6px; width: 100%; min-height: 30px; padding: 4px 8px 4px 10px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; text-align: left; }
 .attend .at-send-set:hover:not(:disabled) { border-color: var(--pick); background: var(--pick-soft); }
 .attend .at-send-set.active { border-color: var(--pick); background: var(--pick-soft); }
 .attend .at-send-set strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attend .at-send-set-who { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.attend .at-send-set-way { flex: none; margin-left: auto; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 600; }
-.attend .at-send-set.active .at-send-set-way:not(.dim) { border-color: var(--pick); background: var(--pick); color: #fff; }
-.attend .at-send-set-way.dim { color: var(--faint); border-style: dashed; }
-.attend .at-send-fold { align-self: flex-end; gap: 3px; min-height: 22px; padding: 1px 6px; font-size: 12px; }
-.attend .at-send-fold::after { content: ""; width: 5px; height: 5px; margin: -3px 2px 0 3px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: rotate(45deg); }
-.attend .at-send-fold[aria-expanded="true"]::after { margin-top: 3px; transform: rotate(-135deg); }
+.attend .at-send-set-way { position: relative; flex: none; display: inline-flex; margin-left: auto; color: var(--pick); }
+.attend .at-send-set-way svg { width: 18px; height: 18px; pointer-events: none; }
+.attend .at-send-set-way.dim { opacity: .45; filter: grayscale(1); }
+.attend .at-send-fold { grid-column: 2; grid-row: 1; width: 30px; min-height: 30px; padding: 0; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+.attend .at-send-fold svg { width: 16px; height: 16px; pointer-events: none; }
+.attend .at-send-fold:hover, .attend .at-send-fold[aria-expanded="true"] { border-color: var(--pick); background: var(--pick-soft); color: var(--pick); }
 /* 보내기를 누르면 뜨는 팝업(sendbox.js) — 누구에게 무슨 글이 가는지 그대로 보이고, 팝업의 보내기를 눌러야 나간다. */
 .attend .at-pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(0 0 0 / 38%); }
 .attend .at-pop-card { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 440px; max-height: calc(100vh - 32px); overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 22%); font-size: 13px; }
