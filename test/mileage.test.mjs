@@ -15,7 +15,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 
 console.log('항공 마일리지 표');
 t('확장이 쓰는 표는 air-mileage.yaml 그대로이고 모양이 맞다', () => {
-  assert.deepEqual(AIR_MILEAGE, parse(fs.readFileSync(new URL('../air-mileage.yaml', import.meta.url), 'utf8')));
+  assert.deepEqual(AIR_MILEAGE, parse(fs.readFileSync(new URL('../references/air-mileage.yaml', import.meta.url), 'utf8')));
   assert.deepEqual(checkMileage(AIR_MILEAGE), []);
 });
 t('대한항공 국내선 — 김포·인천↔김해 215, 김포·인천↔제주 276마일. 적립률은 일반석 100% · 특실(프레스티지) 125%', () => {

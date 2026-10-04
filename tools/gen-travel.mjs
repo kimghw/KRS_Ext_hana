@@ -11,10 +11,10 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
-const RULES = new URL('../travel-rules.yaml', import.meta.url);
-const FARES = new URL('../ktx-fares.yaml', import.meta.url);
-const OFFICIAL = new URL('../ktx-fares-official.yaml', import.meta.url);
-const MILEAGE = new URL('../air-mileage.yaml', import.meta.url);
+const RULES = new URL('../references/travel-rules.yaml', import.meta.url);
+const FARES = new URL('../references/ktx-fares.yaml', import.meta.url);
+const OFFICIAL = new URL('../references/ktx-fares-official.yaml', import.meta.url);
+const MILEAGE = new URL('../references/air-mileage.yaml', import.meta.url);
 const TARGET = new URL('../src/travelspec.js', import.meta.url);
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -157,10 +157,18 @@ export function checkFares(fares) {
     if (!['official', 'observed', 'manual'].includes(r.source)) at(`${name}: source 는 official·observed·manual 가운데 하나입니다`);
   }
   const stations = new Set((fares.routes || []).flatMap((r) => [r.a, r.b]));
+  // 길잡이의 값은 역 하나이거나 후보 역의 목록이다(places — 가까운 역이 여럿인 도시). 공항은 역 하나다.
   for (const key of ['places', 'airports']) {
-    for (const [place, station] of Object.entries(fares[key] || {})) {
-      if (!stations.has(station)) at(`${key}.${place}: 운임표에 없는 역(${station})`);
+    for (const [place, value] of Object.entries(fares[key] || {})) {
+      const list = key === 'places' && Array.isArray(value) ? value : [value];
+      if (!list.length) at(`${key}.${place}: 후보 역이 비어 있습니다`);
+      if (new Set(list).size !== list.length) at(`${key}.${place}: 같은 역을 두 번 적었습니다`);
+      for (const station of list) if (!stations.has(station)) at(`${key}.${place}: 운임표에 없는 역(${station})`);
     }
+  }
+  if (fares.transfers != null && !Array.isArray(fares.transfers)) at('transfers 는 갈아타는 역의 목록입니다');
+  for (const station of Array.isArray(fares.transfers) ? fares.transfers : []) {
+    if (!stations.has(station)) at(`transfers: 운임표에 없는 역(${station})`);
   }
   return errors;
 }

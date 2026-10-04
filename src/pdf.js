@@ -1,4 +1,5 @@
 // 증빙 여러 장(그림·PDF)을 PDF 하나로 묶는다 — 담당자에게 보낼 때 붙이는 파일이다(2026-10-03 사용자 지정).
+// 맨 앞에는 확정한 여비계산서의 출력(PDF, src/calpdf.js)이 온다(2026-10-04 사용자 지정) — 그것은 sendbox.js 가 받아 첫 파일로 넘긴다.
 //
 //   그림(JPEG·PNG) → 한 장에 한 쪽(A4, 넓은 그림은 가로). 휴대폰 사진의 돌려 찍은 표시(EXIF)는 바로 세워 넣는다.
 //   PDF            → 그 쪽들을 그대로 옮겨 붙인다. 암호가 걸린 PDF 는 옮길 수 없어 던진다.
@@ -95,7 +96,8 @@ const TURN_OF = { 3: 180, 4: 180, 5: 90, 6: 90, 7: 270, 8: 270 };
 
 /**
  * 증빙들을 차례대로 PDF 하나로 묶는다.
- * @param {{name:string, type?:string, dataUrl:string}[]} files 보관함(src/evidence.js)에서 꺼낸 것 그대로
+ * @param {{name:string, type?:string, dataUrl?:string, bytes?:Uint8Array}[]} files 보관함(src/evidence.js)에서 꺼낸 것 그대로.
+ *   바이트를 이미 가진 것(사이트에서 받은 여비계산서 PDF)은 dataUrl 대신 bytes 로 준다
  * @param {{title?:string, toPng?:Function}} [opts] title 은 문서 제목, toPng 는 그 밖의 그림을 PNG 바이트로 바꾸는 길(테스트가 갈아 끼운다)
  * @returns {Promise<{bytes: Uint8Array, pages: number, parts: {name:string, pages:number}[]}>} parts 는 파일마다 몇 쪽이 들어갔는가
  */
@@ -105,7 +107,7 @@ export async function buildPdf(files, { title = '', toPng = browserToPng } = {})
   if (title) out.setTitle(title);
   const parts = [];
   for (const f of files) {
-    const bytes = bytesOf(f.dataUrl);
+    const bytes = f.bytes || bytesOf(f.dataUrl);
     const kind = sniff(bytes);
     const before = out.getPageCount();
     if (kind === 'pdf') {

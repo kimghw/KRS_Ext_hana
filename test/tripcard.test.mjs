@@ -297,7 +297,37 @@ t('사전정산을 쓰는 중이면 칸의 이름이 "사전정산"이고 `사�
 st.trips.rows[0].pre = '완료';
 st.trips.rows[0].travelers[0].post = '완료';
 await panel.reload();
-t('사후정산이 완료된 출장에는 사후정산 칸이 없다', () => assert.equal(doc.querySelector('#atList .at-after'), null));
+const doneBox = () => doc.querySelector('#atList .at-after');
+t('사후정산이 완료된 출장에는 정산 내역이 보여 주기만 하는 표로 선다 — 아이콘은 잠겨 있고, 증빙 넣는 곳·올리는 버튼·보관함은 없다', () => {
+  assert.deepEqual([doneBox().querySelector('.at-after-head strong').textContent, doneBox().querySelector('.at-after-why').textContent], ['정산 내역', '1박 · 완료']);
+  // 사후정산에 따로 올린 교통 줄이 없으면(수단이 안 적힌 줄은 치지 않는다) 사전정산의 줄이다 — 카드에서 골라 둔 편(오는 편 비행기)은 얹지 않는다.
+  assert.deepEqual(store.attendLegs['TR-1'], { back: { t: 'plane', g: 'standard' } });
+  assert.deepEqual(legs().map((l) => [l.name, l.on, l.what, l.cls]), [
+    ['가는 편 9/9', ['train'], 'KTX 부산→서울 일반석 53,700원', 'at-leg-what'], ['오는 편 9/10', ['train'], 'KTX 서울→부산 일반석 53,700원', 'at-leg-what'],
+  ]);
+  assert.ok(legs().every((l) => l.icons.every((b) => b.disabled)));
+  assert.deepEqual(['.at-after-drop', 'button[data-act="after"]', 'button[data-act="legs-go"]', '.at-kept'].map((q) => doneBox().querySelector(q)), [null, null, null, null]);
+  assert.equal(doneBox().dataset.seq, undefined, '붙여넣기는 이 칸으로 오지 않는다 — 완료된 출장의 증빙은 증빙 송부 칸이 받는다');
+  assert.equal(doneBox().querySelector('.at-lodge-count').textContent, '없음', '숙박비 내역도 같이 선다(이 출장은 숙박 줄을 올리지 않았다)');
+});
+// 사후정산에 따로 올린 교통 줄이 화면에 있다 — 지움 표시가 된 줄과 아직 저장하지 않은 줄(번호 없음)은 치지 않는다.
+site.oldRows = [['501', '0', '2026-09-09', '부산', '서울', '기차(KTX등)', '일반석', '53700'], ['502', '0', '2026-09-10', '김포', '김해', '비행기', '일반석', '98,000'],
+  ['503', '1', '2026-09-10', '서울', '부산', '버스', '', '30000'], ['', '0', '2026-09-10', '서울', '부산', '버스', '', '30000']].map(([seq, del, date, dep, arr, how, grade, total]) =>
+  `<tr><td><input type="hidden" name="tr_seq" value="${seq}"/><input type="hidden" name="tr_del" value="${del}"/><input type="date" name="tr_date" value="${date}"/>
+<input type="text" name="tr_dep" value="${dep}"/><input type="text" name="tr_arr" value="${arr}"/>
+<select name="tr_transport">${['기차(KTX등)', '버스', '비행기'].map((v) => `<option value="${v}"${v === how ? ' selected="selected"' : ''}>${v}</option>`).join('')}</select>
+<input type="text" name="tr_grade" value="${grade}"/><input type="text" name="tr_total" value="${total}"/>
+<select name="tr_currency"><option value="KRW" selected="selected">원(KRW)</option></select></td></tr>`).join('');
+doneBox().querySelector('button[data-act="lodge-refresh"]').click();
+await until(() => legs()[1]?.what.startsWith('비행기'), '사후정산의 교통 줄 읽기');
+t('사후정산에 따로 올린 교통 줄이 있으면 그 줄이 선다 — 수단은 화면의 이름(기차(KTX등)·비행기)에서 읽고, 비행기를 탔으면 그렇게 적는다', () => {
+  assert.deepEqual(legs().map((l) => [l.on, l.what, l.cls]), [
+    [['train'], 'KTX 부산→서울 일반석 53,700원', 'at-leg-what'], [['plane'], '비행기 김포→김해 일반석 98,000원', 'at-leg-what'],
+  ]);
+  assert.equal(doneBox().querySelector('.at-after-why').textContent, '1박 · 비행기 · 완료');
+  assert.ok(legs().every((l) => l.icons.every((b) => b.disabled)));
+  assert.equal(site.posts.length, 2, '읽기만 했다 — 아무것도 보내지 않았다');
+});
 
 console.log(`\n통과 ${pass}건`);
 process.exit(0);   // 패널이 걸어 둔 타이머(두 번 누르기)가 남아 있어도 끝낸다

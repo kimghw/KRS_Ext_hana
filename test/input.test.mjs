@@ -18,7 +18,7 @@ const read = (p) => fs.readFileSync(new URL(p, root), 'utf8');
 
 console.log('명세와 생성물');
 t('src/inputspec.js 는 input.yaml 로 만든 그대로다 (어긋났으면 node tools/gen-input.mjs)', () => {
-  assert.equal(read('src/inputspec.js'), render(read('input.yaml')));
+  assert.equal(read('src/inputspec.js'), render(read('references/input.yaml')));
 });
 t('명세의 모양이 틀리면 생성기가 거부한다', () => {
   assert.deepEqual(checkSpec({ tasks: TASKS }), []);

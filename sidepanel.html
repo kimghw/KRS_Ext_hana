@@ -74,12 +74,13 @@
       </div>
       <!-- 조회 기간 — 한 줄이다(2026-10-04 사용자 지정: 지난 내역(히스토리) 버튼을 빼고 날짜 칸 왼쪽에 4주·8주 버튼).
            기본 보기는 오늘부터 근태를 올려 둔 가장 늦은 날까지 전부이고, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 4주(또는 8주)까지
-           보인다 — 4주·8주가 그 기간을 고른다(켜진 것을 다시 누르면 지난 출장을 보지 않는다). 홈의 WORKSPACE 카드도 같은 값을 따른다.
+           보인다. 4주·8주를 누르면 그만큼 전부터 그 가장 늦은 날까지를 곧바로 조회한다(그 기간의 것 전부 — 같은 날 사용자 지정:
+           누르면 바로 조회). 켜진 것을 다시 누르면 기본 보기로 돌아온다. 마지막에 누른 주 수를 기본 보기와 홈의 WORKSPACE 카드가 따른다.
            다른 기간은 날짜 칸에 적고 조회를 누른다(그 기간의 것 전부). -->
       <div id="atRangeBox" class="at-range card hidden" role="group" aria-label="신청 내역 조회 기간">
         <div class="at-range-dates">
-          <button type="button" class="small ghost active" data-back="4" aria-pressed="true" title="기본 보기 — 오늘부터 전부, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 4주까지 (켜져 있을 때 다시 누르면 지난 출장을 보지 않습니다)">4주</button>
-          <button type="button" class="small ghost" data-back="8" aria-pressed="false" title="기본 보기 — 오늘부터 전부, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 8주까지 (켜져 있을 때 다시 누르면 지난 출장을 보지 않습니다)">8주</button>
+          <button type="button" class="small ghost" data-back="4" aria-pressed="false" title="4주 전부터 근태를 올려 둔 가장 늦은 날까지 바로 조회합니다 (켜져 있을 때 다시 누르면 기본 보기로 돌아옵니다)">4주</button>
+          <button type="button" class="small ghost" data-back="8" aria-pressed="false" title="8주 전부터 근태를 올려 둔 가장 늦은 날까지 바로 조회합니다 (켜져 있을 때 다시 누르면 기본 보기로 돌아옵니다)">8주</button>
           <input type="date" id="atRangeFrom" aria-label="조회 시작일" />
           <span aria-hidden="true">~</span>
           <input type="date" id="atRangeTo" aria-label="조회 종료일" />

@@ -259,6 +259,23 @@ console.log('교통비 줄의 출발·도착 시 — KTX 편은 출장 출발·�
     assert.deepEqual(times(kept)[1], [AFTER_TRANSPORT.train, '서울', '부산', '15', '19']);
     assert.deepEqual(times(afterPlan([back], { trip: TRIP, detail: TRAIN }))[0], [AFTER_TRANSPORT.train, '부산', '서울', '', '']);
   });
+  t('갈아타는 KTX 편은 구간마다 한 줄이다 — 부산→오송·오송→목포가 가는 편이고, 편을 바꾸면 네 줄이 시각이 이어져 올라간다 (2026-10-04 사용자 지정)', () => {
+    const seg = (date, dep, arr, total) => ({ ...KTX(date, dep, arr), total });
+    const VIA = [seg('2026-09-09', '부산', '오송', 37800), seg('2026-09-09', '오송', '목포', 31700), seg('2026-09-10', '목포', '오송', 31700), seg('2026-09-10', '오송', '부산', 37800)];
+    const detail = { rows: VIA, transports: VIA.map((r) => r.transport), ...when };
+    const MOKPO = { ...TRIP, location: '전남 목포시' };
+    assert.deepEqual(afterPlan([], { trip: MOKPO, detail }).trans, [], '손대지 않았으면 사전정산의 네 줄이 그대로 선다');
+    const p = afterPlan([], { trip: MOKPO, detail, picks: { back: { t: 'train', g: 'first' } } });
+    assert.deepEqual(p.trans.map((x) => [x.date, x.dep, x.arr, x.transport, x.grade, x.total, x.shr, x.ehr]), [
+      ['2026-09-09', '부산', '오송', AFTER_TRANSPORT.train, '일반석', 37800, '7', '10'], ['2026-09-09', '오송', '목포', AFTER_TRANSPORT.train, '일반석', 31700, '10', '12'],
+      ['2026-09-10', '목포', '오송', AFTER_TRANSPORT.train, '특실', 46000, '15', '17'], ['2026-09-10', '오송', '부산', AFTER_TRANSPORT.train, '특실', 54800, '17', '20'],
+    ]);
+    assert.deepEqual(p.legs.map((l) => [l.key, l.row.dep, l.row.arr, l.row.total]), [['go', '부산', '목포', 69500], ['back', '목포', '부산', 100800]], '카드에는 편마다 한 줄로 보인다');
+    assert.equal(afterFields([], p).filter(([n]) => n === 'tr_dep').length, 4);
+    // 항공권이 가는 편에만 앉으면 오는 편은 KTX — 사전정산에 줄이 없어도 갈아타는 길을 찾는다.
+    const fly = afterPlan([flight({ arrPlace: '무안' })], { trip: MOKPO, detail: { ...NONE, ...when }, workplace: '부산 본사' });
+    assert.deepEqual(times(fly), [[AFTER_TRANSPORT.plane, '김해', '무안', '7', '8'], [AFTER_TRANSPORT.train, '목포', '오송', '15', '17'], [AFTER_TRANSPORT.train, '오송', '부산', '17', '20']]);
+  });
   t('폼에는 tr_shr·tr_ehr 로 나간다', () => {
     const fields = afterFields([['tr_seq', '77'], ['tr_del', '0']], afterPlan([back], { trip: TRIP, detail: { ...TRAIN, ...when } }));
     const get = (k) => fields.filter(([n]) => n === k).map(([, v]) => v);

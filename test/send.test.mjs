@@ -1,6 +1,6 @@
 // 여비계산서 증빙 송부의 규칙(src/send.js)과 Teams MCP 확인(src/teams.js) — 언제 보내는지, 어느 길로, 무슨 글로, 최근 과제·계정.
 import assert from 'node:assert/strict';
-import { sendGate, channelOf, pushRecent, pdfName, sendTitle, sendLines, evidenceCount, RECENT_MAX } from '../src/send.js';
+import { sendGate, channelOf, teamsWhy, wantOf, wantOfLabel, WAYS, pushRecent, pdfName, sendTitle, sendLines, evidenceCount, RECENT_MAX } from '../src/send.js';
 import { teamsState, teamsSendFile, rpcReply, FILE_TOOL, TEAMS_MCP_URL } from '../src/teams.js';
 
 let pass = 0;
@@ -45,13 +45,30 @@ t('Teams MCP 가 닿고 파일을 보낼 수 있으면 Teams, 아니면 쪽지 �
   assert.deepEqual(channelOf(null), { channel: 'memo', label: '쪽지', note: '' });
   assert.match(channelOf({ up: true, canSendFile: false }).note, /Teams MCP 는 연결돼 있지만 파일을 보내는 도구가 없어 쪽지로 보냅니다/);
 });
+t('보내는 길은 고를 수 있다(2026-10-04 사용자 지정) — 쪽지를 고르면 Teams MCP 가 닿아도 쪽지, Teams 를 고르면 닿을 때만 Teams 다', () => {
+  const UP = { up: true, canSendFile: true };
+  const DOWN = { up: false, canSendFile: false };
+  assert.deepEqual(WAYS, [{ channel: 'teams', label: 'Teams' }, { channel: 'memo', label: '쪽지' }]);
+  assert.deepEqual(channelOf(UP, 'memo'), { channel: 'memo', label: '쪽지', note: '' }, '고른 쪽지에는 까닭을 적지 않는다');
+  assert.deepEqual([channelOf(UP, 'teams').channel, channelOf(UP, '').channel], ['teams', 'teams']);
+  assert.deepEqual([channelOf(DOWN, 'teams').channel, channelOf(null, 'teams').channel, channelOf(DOWN, 'memo').channel], ['memo', 'memo', 'memo'], 'Teams 를 골랐어도 닿지 않으면 쪽지다');
+  assert.match(channelOf({ up: true, canSendFile: false }, 'teams').note, /파일을 보내는 도구가 없어 쪽지로 보냅니다/);
+  assert.deepEqual(['teams', 'memo', '', 'mail', undefined, null].map(wantOf), ['teams', 'memo', '', '', '', ''], '모르는 값은 고르지 않은 것이다');
+});
+t('Teams 로 못 가는 까닭 — 아직 못 봤다 · 연결돼 있지 않다 · 파일을 보내는 도구가 없다. 갈 수 있으면 빈 글이다', () => {
+  assert.equal(teamsWhy(null), 'Teams MCP 가 닿는지 확인하는 중입니다');
+  assert.equal(teamsWhy({ up: false, canSendFile: false }), 'Teams MCP 가 연결돼 있지 않습니다');
+  assert.equal(teamsWhy({ up: true, canSendFile: false }), 'Teams MCP 는 연결돼 있지만 파일을 보내는 도구가 없습니다');
+  assert.equal(teamsWhy({ up: true, canSendFile: true }), '');
+});
 
 console.log('최근에 쓴 과제·계정');
-t('쓴 것이 맨 앞으로 오고, 같은 것은 하나만, 다섯 개까지 남는다', () => {
+t('쓴 것이 맨 앞으로 오고, 같은 것은 하나만, 세 개까지 남는다(2026-10-04 사용자 지정 — 이전에 보낸 곳은 세 줄쯤)', () => {
   let list = [];
   for (const a of ['A', 'B', 'C', 'D', 'E', 'F', 'B']) list = pushRecent(list, a);
-  assert.deepEqual(list, ['B', 'F', 'E', 'D', 'C']);
-  assert.equal(RECENT_MAX, 5);
+  assert.deepEqual(list, ['B', 'F', 'E']);
+  assert.equal(RECENT_MAX, 3);
+  assert.deepEqual(['Teams', '쪽지', '메일', undefined].map(wantOfLabel), ['teams', 'memo', '', ''], '보낸 기록에 적힌 길의 이름을 길로 읽는다');
   assert.deepEqual(pushRecent(['A'], ''), ['A'], '빈 값은 넣지 않는다');
   assert.deepEqual(pushRecent([{ id: 'kim', name: '옛 이름' }, { id: 'lee' }], { id: 'kim', name: '김' }, (p) => p.id), [{ id: 'kim', name: '김' }, { id: 'lee' }]);
 });
@@ -66,8 +83,8 @@ t('제목과 본문 — 과제·계정, 출장자, 기간·출장지, 목적, �
   assert.equal(sendTitle({ account: 'RND-2026-01', me: '김거화', trip: TRIP }), '[여비 증빙] RND-2026-01 · 김거화 9/9~9/10 경기도 고양시 킨텍스');
   assert.equal(sendTitle({ account: '일반관리비', me: '김거화', trip: DAY }), '[여비 증빙] 일반관리비 · 김거화 9/23 서울 본사');
   assert.deepEqual(sendLines({ account: 'RND-2026-01', me: '김거화', trip: TRIP, stage: post(true), reason: 'K-Battery Show 참석', kept: KEPT, file: '여비증빙_145580_김거화.pdf' }), [
-    '여비계산서 증빙을 보냅니다.', '과제·계정: RND-2026-01', '출장자: 김거화', '출장: 2026-09-09 ~ 2026-09-10 · 경기도 고양시 킨텍스', '목적: K-Battery Show 참석',
-    '여비계산서: 145580 (사후정산 완료)', '첨부: 여비증빙_145580_김거화.pdf — 항공기 증명 1장 · 숙박 증빙 2장',
+    '여비계산서와 증빙을 보냅니다.', '과제·계정: RND-2026-01', '출장자: 김거화', '출장: 2026-09-09 ~ 2026-09-10 · 경기도 고양시 킨텍스', '목적: K-Battery Show 참석',
+    '여비계산서: 145580 (사후정산 완료)', '첨부: 여비증빙_145580_김거화.pdf — 여비계산서 1부 · 항공기 증명 1장 · 숙박 증빙 2장',
   ]);
   assert.equal(sendLines({ account: 'A', me: '', trip: DAY, stage: pre(true), kept: [KEPT[0]], file: 'f.pdf' })[3], '출장: 2026-09-23 · 서울 본사');
 });

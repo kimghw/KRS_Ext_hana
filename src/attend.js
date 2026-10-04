@@ -865,7 +865,8 @@ export function plansIn(items, from, to) {
     .filter((it) => FORM_BY_ID[it.formId] && it.from && live.has(it.status) && it.from <= to && (it.to || it.from) >= from)
     .map((it) => ({
       docNo: it.docNo, label: PLAN_LABEL[it.kindName] || it.kindName, group: GROUP_OF[it.kindName] || '', from: it.from, to: it.to || it.from,
-      start: it.start, end: it.end, gubun: it.gubun, status: it.statusName, reason: it.reason,
+      // state 는 결재 상태를 줄인 말(신청·승인 — statusLabel)이다. 홈 카드가 종류 딱지 아래에 적는다.
+      start: it.start, end: it.end, gubun: it.gubun, status: it.statusName, state: statusLabel(it), reason: it.reason,
     }))
     .sort((a, b) => `${a.from} ${a.start}`.localeCompare(`${b.from} ${b.start}`));
 }

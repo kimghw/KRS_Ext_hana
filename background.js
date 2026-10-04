@@ -2,6 +2,9 @@ import { hrListDocs, hrCloseWorker, hrWorkerAlive } from './src/hr.js';
 import { loadPlans } from './src/plans.js';
 import { receiptSmart } from './src/llm.js';
 import { todayStr } from './src/parse.js';
+import { createEvidenceStore } from './src/evidence.js';
+import { intakeEvidence } from './src/intake.js';
+import { createLogbook } from './src/logbook.js';
 
 // 툴바 아이콘 클릭 시 사이드 패널이 열리도록 한다.
 chrome.sidePanel
@@ -78,10 +81,44 @@ async function readReceipt(msg) {
   }
 }
 
+/**
+ * 홈의 WORKSPACE 카드가 출장 줄에 놓거나 붙여 넣은 증빙 한 장을 받아 달라고 한다(2026-10-04 사용자 지정). 카드는 콘텐츠 스크립트라
+ * Claude 도 보관함(확장의 IndexedDB)도 쓸 수 없다. 패널의 출장 카드와 같은 판단(src/intake.js)으로 읽어 증빙으로 쓸 수 있는 것만
+ * 보관함에 담는다 — 여비계산서는 바꾸지 않는다(사후정산에 올리는 것은 패널의 출장 카드가 한다). 무엇을 받았는지는 활동 기록에 남긴다.
+ * @returns {Promise<{ok: boolean, kept?: boolean, name?: string, label?: string, note?: string, todo?: boolean, error?: string}>}
+ */
+async function keepEvidence(msg) {
+  const awake = setInterval(() => chrome.runtime.getPlatformInfo?.(() => {}), AWAKE_MS);
+  try {
+    const { apiKey = '' } = await chrome.storage.local.get('apiKey');
+    const r = await intakeEvidence(msg, {
+      store: createEvidenceStore(),
+      read: (file, ctx) => receiptSmart(file, ctx, { apiKey, useNative: true }),
+    });
+    const what = r.ok ? (r.kept ? `${r.label} 보관` : `${r.label} — 증빙으로 쓸 수 없음(${r.note})`) : `실패 — ${r.error}`;
+    createLogbook({ storage: chrome.storage.local })
+      .add('trip', { ok: r.ok, text: `홈 카드에서 받은 증빙: ${r.name || msg?.file?.name || '?'} · ${what}`, data: { docNo: msg?.docNo, seq: msg?.trip?.seq, todo: !!r.todo } })
+      .catch(() => {});
+    return r;
+  } finally {
+    clearInterval(awake);
+  }
+}
+
+/** 홈의 WORKSPACE 카드가 보관함에 무엇이 들어 있는지 줄여 적어 달라고 한다(src/evidence.js 의 MARKS_KEY) — 적어 둔 것이 아직 없을 때 한 번이다. */
+function syncMarks() {
+  return createEvidenceStore().sync().then(
+    (marks) => ({ ok: true, marks }),
+    (err) => ({ ok: false, error: err?.message || String(err) }),
+  );
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'openSidePanel') openSidePanel(sender).then(sendResponse);
   else if (msg?.type === 'hrPlans') readPlans(!!msg.force).then(sendResponse);
   else if (msg?.type === 'receiptRead') readReceipt(msg).then(sendResponse);
+  else if (msg?.type === 'evidenceKeep') keepEvidence(msg).catch((err) => ({ ok: false, error: err?.message || String(err) })).then(sendResponse);
+  else if (msg?.type === 'evidenceMarks') syncMarks().then(sendResponse);
   else return false;
   return true;   // 답은 나중에 준다
 });

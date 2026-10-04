@@ -15,9 +15,10 @@ import {
   parseTripList, tripListPages, tripUser, tripDocFor, tripStage, formFields, saveBody, parseFeeRows, pickFeeRow, parseTransRows,
   parseCalPage, STEP_PRE_WRITING, STEP_POST_WRITING,
 } from './travel.js';
-import { afterFields, lodgeRowsOf, lodgeSame } from './after.js';
+import { afterFields, lodgeRowsOf, lodgeSame, transRowsOf } from './after.js';
+import { calReport, reportTarget, reportPdf } from './calpdf.js';
 
-const BASE = `${ORIGIN}/BusinessTrip`;
+const BASE =`${ORIGIN}/BusinessTrip`;
 const RETURN = encodeURIComponent('/BusinessTrip/Home/List');
 /** 포털 껍데기 안에서 여비계산서 목록을 여는 주소(eclass 메뉴의 Business Trip Expense). */
 export const TRIP_SHELL_URL = `${ORIGIN}/eClassVer4/Common/Default?title=Business%20Trip%20Expense&menu=%2FBusinessTrip%2FbtMain.aspx&menuID=PBR000080001&newWindow=False`;
@@ -208,6 +209,29 @@ export async function tripPostConfirm(row, { name = '', onStage = () => {} } = {
   return { row: fresh, stage, sent };
 }
 
+/* ------------------------------------------------------------ 계산서 출력(PDF) */
+
+/**
+ * 여비계산서를 PDF 로 받는다 — 계산서 화면을 열어 인쇄(PDF)한 것과 같다(src/calpdf.js). 담당자에게 증빙을 보낼 때 그 앞에 붙인다
+ * (2026-10-04 사용자 지정: "확정한 다음에 출력해서 증빙들과 합쳐서 보내야지"). 계산서의 값은 바뀌지 않는다.
+ * 화면이 부르는 리포트가 이 계산서의 것이 아니면 받지 않고 던진다.
+ * @param {object} row 여비계산서 목록의 한 줄
+ * @param {{name?:string, onStage?:Function}} who name 은 목록 화면이 아는 내 이름(출장자가 여럿일 때 내 계산서를 고른다)
+ * @returns {Promise<{bytes: Uint8Array, pages: number}>}
+ */
+export async function tripCalPdf(row, { name = '', onStage = () => {} } = {}) {
+  onStage('계산서 화면을 여는 중...');
+  const { page, cal } = await openCal(row, name);
+  const report = calReport(page.html);
+  if (!report) throw new Error('계산서 화면에서 출력할 리포트를 찾지 못했습니다.');
+  const target = reportTarget(report.param);
+  const mine = cal.travelers.find((t) => t.name === name);
+  if (target.seq !== String(row.seq) || (mine?.trseq && target.trseq !== mine.trseq)) {
+    throw new Error('계산서 화면의 리포트가 이 계산서(내 출장자 번호)의 것이 아니어서 받지 않았습니다.');
+  }
+  return reportPdf(report, { onStage });
+}
+
 /* ------------------------------------------------------------ 사후정산 */
 
 /** 사후정산 입력 화면 주소(출장자 하나). */
@@ -346,6 +370,17 @@ const savedLodges = (fields) => lodgeRowsOf(fields).filter((r) => r.seq && r.del
  */
 export async function tripAfterLodges(seq, trseq) {
   return savedLodges((await afterForm(seq, trseq)).fields);
+}
+
+/**
+ * 사후정산 입력 화면에 지금 있는 숙박 줄과 교통 줄 — 출장 카드의 숙박비 내역(lodgebox.js)이 한 번 읽어 둘 다 담는다. 읽기만 한다.
+ * 교통 줄(trans)은 사후정산에 따로 올린 편이다(저장돼 있고 수단이 적힌 줄만) — 없으면 사전정산의 교통편이 그대로 선다
+ * (2026-10-04 실제 화면 143884: 사후정산 완료, 교통 줄 없음). 사후정산이 완료된 출장의 카드가 이것으로 가는 편·오는 편을 그린다.
+ * @returns {Promise<{lodges: Record<string,string>[], trans: object[]}>} trans 는 src/after.js transRowsOf 의 줄
+ */
+export async function tripAfterRows(seq, trseq) {
+  const { fields } = await afterForm(seq, trseq);
+  return { lodges: savedLodges(fields), trans: transRowsOf(fields).filter((r) => r.seq && r.del !== '1' && r.transport) };
 }
 
 /**

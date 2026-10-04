@@ -248,7 +248,13 @@ t('사전정산을 쓰는 중에는 숙박비 내역을 보이지 않는다(입�
 st.trips.rows[0].pre = '완료';
 st.trips.rows[0].travelers[0].post = '완료';
 await panel.reload();
-t('사후정산이 완료된 출장에도 없다 — 사후정산 칸 자체가 없다', () => assert.equal(box(), null));
+t('사후정산이 완료된 출장에는 보여 주기만 한다 — 숙박 줄과 그 표시는 그대로 서고, 지우는 × 는 없다(다시 읽기는 있다)', () => {
+  assert.equal(doc.querySelector('#atList .at-after-head strong').textContent, '정산 내역');
+  assert.deepEqual(lines().map((l) => [l.seq, l.src, l.del]), [['81558', '증빙', null], ['81570', '손수 작성', null]]);
+  assert.equal(box().querySelector('.at-lodge-count').textContent, '2줄 · 손수 작성 1줄');
+  assert.ok(box().querySelector('button[data-act="lodge-refresh"]'));
+  assert.equal(doc.querySelector('#atList .at-after-drop'), null, '증빙 넣는 곳은 없다');
+});
 
 console.log(`\n통과 ${pass}건`);
 process.exit(0);   // 패널이 걸어 둔 타이머(두 번 누르기)가 남아 있어도 끝낸다

@@ -130,10 +130,10 @@ t('넉 달 뒤의 출장까지 앞으로의 것은 전부 보인다(날짜가 �
 t('사후정산을 완료한 출장(T-D)·증빙을 보낸 출장(T-S)·지난 외근(O-PAST)·4주가 넘은 출장(T-40)은 없다', () => {
   for (const no of ['T-D', 'T-S', 'O-PAST', 'T-40']) assert.ok(!shown().includes(no), no);
 });
-t('머리 줄: 4주 전부터 근태를 올려 둔 가장 늦은 날(넉 달 뒤의 출장)까지이고, 안내 글이 규칙을 말한다. 4주가 켜져 있다', () => {
+t('머리 줄: 4주 전부터 근태를 올려 둔 가장 늦은 날(넉 달 뒤의 출장)까지이고, 안내 글이 규칙을 말한다. 4주·8주는 꺼져 있다(누르면 그 기간을 조회한다)', () => {
   assert.equal(doc.getElementById('atRange').textContent, spanOf(plus(-28), plus(120)));
   assert.equal(hint(), '오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 4주까지');
-  assert.deepEqual(pressed(), ['true', 'false']);
+  assert.deepEqual(pressed(), ['false', 'false']);
 });
 t('날짜 칸에는 그 기간이 깔려 있다 — 종료일은 근태를 올려 둔 가장 늦은 날이다', () => {
   assert.deepEqual([doc.getElementById('atRangeFrom').value, doc.getElementById('atRangeTo').value], [plus(-28), plus(120)]);
@@ -159,19 +159,30 @@ t('정산 상태 딱지는 색으로 가리지 않는다 — 단계마다 다른
   assert.deepEqual([...new Set([...doc.querySelectorAll('#atList .at-trip')].map((n) => n.className))], ['at-trip']);
 });
 
-console.log('다녀온 출장을 언제까지 보일지 — 4주 · 8주(켜진 것을 다시 누르면 안 봄)');
+console.log('4주 · 8주 — 누르면 그 기간을 곧바로 조회한다(2026-10-04 사용자 지정). 켜진 것을 다시 누르면 기본 보기로 돌아온다');
 back(8).click();
 await settle('8주');
-t('8주를 고르면 마흔 날 전에 다녀온 출장(여비계산서 없음)까지 보인다 — 정산이 끝난 것은 여전히 없다', () => {
-  assert.deepEqual(shown(), ['T-FAR', 'O-NEXT', 'T-A', 'T-40']);
-  assert.equal(hint(), '오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 8주까지');
+t('8주를 누르면 8주 전부터 근태를 올려 둔 가장 늦은 날까지의 것 전부가 바로 보인다 — 조회를 따로 누르지 않는다. 정산이 끝난 출장도, 지난 외근도 보인다', () => {
+  assert.deepEqual(shown(), ['T-FAR', 'O-NEXT', 'O-PAST', 'T-A', 'T-S', 'T-D', 'T-40']);
+  assert.equal(hint(), '근태 날짜 기준 · 8주 전부터 전부');
   assert.deepEqual([store[BACK_KEY], pressed(), doc.getElementById('atRange').textContent], [8, ['false', 'true'], spanOf(plus(-56), plus(120))]);
+  assert.deepEqual([doc.getElementById('atRangeFrom').value, doc.getElementById('atRangeTo').value], [plus(-56), plus(120)], '날짜 칸에도 그 기간이 적힌다');
+  assert.match(calls.bt.at(-1), new RegExp(`SDate=${plus(-56)}&EDate=${plus(120)}`));
+});
+back(4).click();
+await settle('4주');
+t('4주를 누르면 4주 전부터로 바뀐다 — 마흔 날 전의 출장은 빠진다', () => {
+  assert.deepEqual(shown(), ['T-FAR', 'O-NEXT', 'O-PAST', 'T-A', 'T-S', 'T-D']);
+  assert.deepEqual([hint(), store[BACK_KEY], pressed(), doc.getElementById('atRange').textContent], ['근태 날짜 기준 · 4주 전부터 전부', 4, ['true', 'false'], spanOf(plus(-28), plus(120))]);
 });
 back(8).click();
-await until(() => shown().length === 2, '안 봄');
-t('켜져 있는 8주를 다시 누르면 꺼진다 — 지난 것은 하나도 없고 기간은 오늘부터다', () => {
-  assert.deepEqual(shown(), ['T-FAR', 'O-NEXT']);
-  assert.deepEqual([hint(), store[BACK_KEY], pressed(), doc.getElementById('atRange').textContent], ['오늘부터 전부', 0, ['false', 'false'], spanOf(TODAY, plus(120))]);
+await settle('8주');
+back(8).click();
+await settle('기본 보기');
+t('켜져 있는 8주를 다시 누르면 기본 보기로 돌아온다 — 지난 것은 정산 중인 출장만, 마지막에 누른 8주까지다', () => {
+  assert.deepEqual(shown(), ['T-FAR', 'O-NEXT', 'T-A', 'T-40']);
+  assert.deepEqual([hint(), store[BACK_KEY], pressed(), doc.getElementById('atRange').textContent],
+    ['오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 8주까지', 8, ['false', 'false'], spanOf(plus(-56), plus(120))]);
 });
 
 console.log('기간을 정해 조회하면 근태 날짜가 그 기간에 걸친 것 전부다');
@@ -188,8 +199,14 @@ t('정산이 끝난 출장도, 지난 외근도 보인다 — 기간 조회는 �
 });
 
 console.log('펴 둔 카드는 방금 정산을 마쳤어도 남는다');
-back(4).click();
-await settle('4주로 돌아옴');
+/** 기본 보기로(정산 중인 출장은 4주까지) — 4주를 눌러 조회하고, 켜진 것을 다시 눌러 돌아온다. */
+const toDefault = async () => {
+  back(4).click();
+  await settle('4주 조회');
+  back(4).click();
+  await settle('기본 보기로 돌아옴');
+};
+await toDefault();
 doc.querySelector('#atList > li:last-child .at-head').click();
 bt[601].post = '완료';   // 그 사이 사후정산이 완료됐다(패널에서 확정했거나 사이트에서 눌렀다)
 {
@@ -254,8 +271,7 @@ t('조회 기간에 한쪽만 걸친 출장은 계산서 목록을 그 출장기
 });
 pager = '<div class="bt-pager"><div>전체 45건 · 1/2 페이지</div></div>';
 bt[603].post = '작성';   // 첫 쪽에서 달라진 것 — 덜 읽은 목록이 담기면 홈이 이 값을 본다
-back(4).click();
-await settle('4주로 돌아옴');
+await toDefault();
 t('계산서 목록이 여러 쪽이면(첫 쪽만 읽는다) 못 찾은 출장을 "정산전"이라고 하지 않는다 — 찾은 것은 그대로 붙는다', () => {
   const c = chips();
   assert.deepEqual([c['T-FAR'], c['T-EDGE'], c['T-NEW']], [['승인', null], ['승인', null], ['신청', '사전정산 완료']]);

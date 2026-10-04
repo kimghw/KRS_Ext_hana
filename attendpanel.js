@@ -22,7 +22,8 @@ import { tripList, tripCreate, tripDocUrl, TRIP_SHELL_URL, tripPreDetail, tripPr
 import { afterNeed, afterPlan, afterSummary, evidenceOf, TRANS_NAME } from './src/after.js';
 import { lodgeAsk, lodgeCap, lodgeSettle, lodgeSame } from './src/after.js';
 import { tripLodgeMax } from './src/trip.js';
-import { createEvidenceStore } from './src/evidence.js';
+import { createEvidenceStore, MARKS_KEY } from './src/evidence.js';
+import { ROUTES_KEY, routeOfPlan, routeOfRows, keepRoute, recallRoute, withRoute } from './src/routes.js';
 import { createSendBox } from './sendbox.js';
 import { createLodgeBox, lodgeAmount } from './lodgebox.js';
 import { wantsCar, carWindow, windowDays, windowLabel, carsInWindow, carPick, carPlaceKey, carPlaceOf, regionOf, MAX_CAR_DAYS } from './src/carfind.js';
@@ -146,16 +147,49 @@ export function createAttendPanel({
     // 가는 편·오는 편에서 고른 교통편(신청서 번호가 열쇠): { go: {t, g}, back: {t, g} }. 사전정산과 다르게 고른 편만 들어 있고,
     // 저장해 두어 패널을 다시 열어도 남는다. 사후정산을 올릴 때 교통비 내역이 된다.
     legs: {},
+    // 출장지마다 지난번에 쓴 교통편(src/routes.js — 출장지에 적은 글 → { transport, trainGrade, path, date }). 저장해 두고, 같은 출장지를
+    // 다시 적으면 아이콘과 사전정산의 KTX 길을 그것으로 먼저 맞춘다(2026-10-04 사용자 지정). transportSet 은 이 신청서에서 교통편
+    // 아이콘을 손댔는가 — 손댔으면 기억으로 덮어쓰지 않는다.
+    routes: {}, transportSet: false,
     // 출장·외근 폼의 차량 조회: key 는 찾은(찾는 중인) 기간, result 는 src/carfind.js 의 carsInWindow 결과.
     // 폼의 기간이 key 와 달라지면 다시 찾는다. booking 은 신청을 보내는 중인 차량, note 는 방금 한 신청의 결과 글이다.
     cars: { key: '', win: null, loading: false, result: null, error: '', booking: '', note: null },
+    // 홈의 WORKSPACE 카드에서 출장 줄의 `보내기`를 눌러 온 부탁: { docNo, send, at, seen } — 신청 내역이 읽히면 그 출장 카드를 펴고
+    // 증빙 송부 칸으로 간다(seek·followSeek). 없으면 null.
+    seek: null,
   };
 
   /** 신청 내역이 비었을 때의 기본 문구(HTML 에 적힌 것). 종류로 걸러서 빈 것이면 다른 문구를 보인다. */
   const EMPTY_TEXT = el.empty.textContent;
 
-  /** 새 신청서. 적어 둔 근무지가 깔려 있다. */
-  const blank = (kind) => ({ ...blankForm(kind, attendToday()), workplace: st.workplace });
+  /** 새 신청서. 적어 둔 근무지가 깔려 있다. 교통편 아이콘은 아직 손대지 않은 것이다. */
+  const blank = (kind) => {
+    st.transportSet = false;
+    return { ...blankForm(kind, attendToday()), workplace: st.workplace };
+  };
+
+  /** 그 폼의 출장지에 기억해 둔 교통편(지난번에 간 길). 없으면 null. */
+  const memoOf = (form) => recallRoute(st.routes, form.place);
+
+  /** 출장지의 교통편을 기억해 둔다 — 바뀐 것이 있을 때만 저장한다. */
+  function keepTripRoute(place, entry) {
+    const next = keepRoute(st.routes, place, entry);
+    if (next === st.routes) return;
+    st.routes = next;
+    chrome.storage.local.set({ [ROUTES_KEY]: next });
+  }
+
+  /**
+   * 출장지가 정해졌을 때 교통편 아이콘을 지난번에 그 출장지로 갈 때 고른 것으로 맞춘다 — 기억이 없으면 기본(기차)으로 돌아간다.
+   * 이 신청서에서 아이콘을 손댔거나 임시저장 문서를 고치는 중이면 건드리지 않는다. 바뀌었으면 참(폼을 새로 그려야 한다).
+   */
+  function recallTransport() {
+    if (st.form.kind !== 'trip' || st.edit || st.transportSet) return false;
+    const next = withRoute(memoOf(st.form));
+    if (String(transportsOf(st.form)) === String(next.transport) && trainGradeOf(st.form) === next.trainGrade) return false;
+    st.form = settle({ ...st.form, ...next });
+    return true;
+  }
 
   // 출장 카드의 증빙 송부 칸. 아래 함수들은 이 뒤에 적혀 있지만 부를 때는 이미 있다.
   const sendBox = createSendBox({
@@ -627,7 +661,7 @@ export function createAttendPanel({
   /** 올릴 것을 한 줄로. 반차 앞에 유연근무를 올려야 하면 그것부터 적는다. */
   function sendSummary() {
     const head = docSummary();
-    return wantsTrip(st.form) ? `${head} → 결재요청 뒤 여비계산서(사전정산): ${describePlan(settlePlan(st.form))}` : head;
+    return wantsTrip(st.form) ? `${head} → 결재요청 뒤 여비계산서(사전정산): ${describePlan(settlePlan(st.form, memoOf(st.form)))}` : head;
   }
 
   /** HR 에 올라가는 신청서만 한 줄로(여비계산서는 빼고). 올린 뒤의 말과 기록에 쓴다. */
@@ -646,10 +680,12 @@ export function createAttendPanel({
    * 여비계산서가 안 만들어진 것은 따로 말해 준다. 돌려주는 글은 상태 줄 끝에 붙는다.
    */
   async function makeTripDoc(form) {
-    const plan = settlePlan(form);
+    const plan = settlePlan(form, memoOf(form));
     try {
       if (!st.me?.emplNo) throw new Error('HR 에서 사번을 확인하지 못했습니다');
       const r = await tripCreate(plan, { emplNo: st.me.emplNo, name: st.me.name, onStage: setStatus });
+      // 이 출장지로 이렇게 갔다고 기억해 둔다 — 다음에 같은 출장지를 적으면 이 교통편·이 길이 먼저다.
+      if (!r.existing) keepTripRoute(form.place, routeOfPlan(plan));
       st.trips = null;
       loadTrips();
       const what = `${describePlan(plan)}${plan.notes.length ? ` (${plan.notes.join(' / ')})` : ''}`;
@@ -872,6 +908,7 @@ export function createAttendPanel({
       : pick ? nextSpan(st.form, pick === 'half' ? pick : Number(pick)) : b.dataset.choice;
     // 갈래는 깔아 주는 값이 있을 수 있다(소통을 고르면 13~14시와 목적이 채워진다).
     // 교통편은 여럿을 함께 켜고 끄며, 기차는 일반석 → 특실 → 꺼짐으로 돈다.
+    if (key === 'transport') st.transportSet = true;   // 손댄 아이콘은 출장지의 기억으로 덮어쓰지 않는다
     st.form = key === 'sub' ? withSub(st.form, value)
       : key === 'transport' ? settle({ ...st.form, ...nextTransport(st.form, value) })
         : settle({ ...st.form, [key]: value });
@@ -921,7 +958,36 @@ export function createAttendPanel({
     }
     // 종료일은 시작일과 며칠간에서(출장·휴가가 아니면 시작일과 같다), 종료 시각은 시작과 몇 시간에서 나온다.
     st.form = settle(st.form);
+    // 적은 출장지가 지난번에 간 곳이면 그때 고른 교통편을 되살린다 — 폼을 새로 그리지 않고 아이콘만 바꾼다(치는 중의 커서가 남는다).
+    if (key === 'place' && recallTransport()) paintTransport();
     paintNeed();
+  }
+
+  /**
+   * 교통편 아이콘을 지금 폼에 맞춘다 — 폼을 새로 그리지 않고 아이콘의 켜짐·특실 표시와, 기차를 고를 때만 필수인 근무지의 "필수" 표시만 바꾼다.
+   * 출장지를 치는 중에 기억해 둔 교통편이 되살아날 때 쓴다(새로 그리면 치던 칸의 커서와 누르던 아이콘이 사라진다).
+   */
+  function paintTransport() {
+    const on = transportsOf(st.form);
+    const first = trainGradeOf(st.form) === 'first';
+    for (const b of el.fields.querySelectorAll('.at-field[data-key="transport"] .at-chip')) {
+      const o = TRANSPORTS.find((x) => x.value === b.dataset.choice);
+      if (!o) continue;
+      const active = on.includes(o.value);
+      const plus = active && first && o.value === 'train';
+      const name = plus ? `${o.label} ${FIRST_LABEL}` : o.label;
+      b.classList.toggle('active', active);
+      b.classList.toggle('first', plus);
+      b.setAttribute('aria-pressed', String(active));
+      b.setAttribute('aria-label', name);
+      b.title = name;
+    }
+    const label = el.fields.querySelector('.at-field[data-key="workplace"] .at-label');
+    const need = fieldsFor(st.form).some((f) => f.key === 'workplace' && f.required);
+    if (label && need !== !!label.querySelector('.at-req')) {
+      if (need) label.insertAdjacentHTML('beforeend', '<em class="at-req">필수</em>');
+      else label.querySelector('.at-req').remove();
+    }
   }
 
   /* ---------------------------------------------------------------- 말로 채우기 */
@@ -948,6 +1014,9 @@ export function createAttendPanel({
       const { form, changed } = applyPatch(st.form, patch, attendToday());
       st.form = form;
       st.filled = new Set(changed);
+      // 말로 교통편을 정했으면 손댄 것이고, 출장지만 정했으면 지난번에 그 출장지로 갈 때 고른 교통편을 되살린다.
+      if (changed.includes('transport') || changed.includes('trainGrade')) st.transportSet = true;
+      else if (changed.includes('place')) recallTransport();
       setFold(true);
       const miss = missingFields(form);
       const names = fieldsFor(form).filter((f) => miss.includes(f.key)).map((f) => f.label);
@@ -1132,6 +1201,72 @@ export function createAttendPanel({
     }).join('');
     ensureAfterDetail();
     ensureLodges();
+    followSeek();
+  }
+
+  /** 홈 카드의 부탁(st.seek)을 얼마 동안 들어주는가 — 신청 내역(HR)과 여비계산서를 읽는 시간보다 넉넉하게. 지나면 잊는다. */
+  const SEEK_TTL_MS = 30_000;
+
+  /**
+   * 홈의 WORKSPACE 카드에서 출장 줄의 `보내기`를 눌러 왔다(2026-10-04 사용자 지정) — 신청 내역에서 그 출장 카드를 펴고 증빙 송부 칸을
+   * 보이게 하며, 보낼 수 있으면 보낼 내용 팝업을 띄운다(카드의 `보내기`를 누른 것과 같다 — 팝업의 보내기를 눌러야 나간다).
+   * 신청 내역 → 여비계산서 → 사전정산의 교통편·보관함이 읽히는 대로 여러 번 그려지므로, 그릴 때마다 이어 간다(followSeek).
+   */
+  function seek({ docNo, send = false } = {}) {
+    st.seek = docNo ? { docNo: String(docNo), send: !!send, at: Date.now(), seen: false } : null;
+    if (st.seek && st.loadedOnce) paintList();
+  }
+
+  /** 홈 카드의 부탁을 한 걸음 이어 간다 — 목록을 그릴 때마다 불린다. 끝났거나 할 수 없게 되면 부탁을 잊는다. */
+  function followSeek() {
+    const want = st.seek;
+    if (!want || !st.loadedOnce) return undefined;
+    const drop = (why = '') => { st.seek = null; if (why) setStatus(why, 'error'); };
+    if (Date.now() - want.at > SEEK_TTL_MS) return drop();
+    const wanted = (x) => x.docNo === want.docNo && isTrip(x);
+    let it = st.items.find(wanted);
+    // 그 카드를 펴 둔 것으로 치는 줄 번호 — 지금 화면에 그려진 것과 다르면 아래에서 펴서 다시 그린다.
+    const was = st.openDoc;
+    if (!it && !st.range && st.all.some(wanted)) {
+      // 정산이 끝나(증빙을 보냈거나 사후정산 완료) 기본 보기에서 빠진 다녀온 출장일 수 있다 — 펴 둔 줄은 남기는 규칙(keep)으로 다시 고른다.
+      st.openDoc = want.docNo;
+      pickItems();
+      it = st.items.find(wanted);
+      if (!it) st.openDoc = was;
+    }
+    if (!it) return drop('홈 카드에서 고른 출장이 지금 보는 신청 내역에 없습니다 — 조회 기간을 넓혀 찾아 주세요.');
+    const shown = shownItems().includes(it);
+    if (!shown && st.edit) return drop('신청서를 고치는 중이라 그 출장 카드를 열지 못했습니다 — 고치기를 마친 뒤 종류 줄 끝의 "내역"에서 찾아 주세요.');
+    if (!shown || was !== it.docNo) {
+      // 그 카드를 편다. 다른 종류만 보는 중이라 가려져 있으면 모든 종류를 보는 "내역"으로 바꾼다(기억해 두지는 않는다).
+      if (!shown) {
+        st.view = 'all';
+        paintKinds();
+        paintForm();
+      }
+      disarm();
+      Object.assign(st, { openDoc: it.docNo, cancelFor: null, cancelThen: null });
+      return paintList();
+    }
+    const trip = tripOf(it);
+    // 여비계산서 목록을 아직 읽는 중이면 다음에 그릴 때 이어 간다. 다 읽었는데 계산서가 없으면 보낼 것이 없다 — 카드가 그렇게 말한다.
+    if (!trip) return !st.trips || tripsBusy ? undefined : drop();
+    const box = [...el.list.querySelectorAll('.at-send')].find((n) => n.dataset.doc === it.docNo);
+    if (!box) return undefined;
+    if (!want.seen) {
+      want.seen = true;
+      box.scrollIntoView?.({ block: 'nearest' });
+    }
+    // 사전정산의 교통편과 보관함을 읽는 중이면 다 읽힌 뒤에 본다 — 그 전에는 보낼 수 있는지 모른다.
+    const a = st.after[trip.seq];
+    if (!a || a.loading || (!a.detail && !a.detailError)) return undefined;
+    st.seek = null;
+    const go = box.querySelector('button[data-act="send-go"]');
+    if (want.send && go && !go.disabled) return sendBox.click(go, sendCtx(it));
+    // 아직 보낼 수 없다 — 까닭은 송부 칸이 말한다. 채울 칸(과제·계정, 받는 사람)이 비어 있으면 그리로 초점을 준다.
+    const empty = [...box.querySelectorAll('input[data-send="account"], input[data-send="person"]')].find((n) => !n.disabled && !n.value.trim());
+    (empty || go)?.focus();
+    return undefined;
   }
 
   /** 출장 신청서인가(여비계산서가 따르는 것). */
@@ -1218,15 +1353,15 @@ export function createAttendPanel({
 
   /**
    * 숙박비 내역(lodgebox.js)에 넘길 그 계산서의 사정 — 출장자 번호, 보관함의 증빙, 이 패널이 올린 줄의 표시(st.lodgeMine).
-   * locked 는 카드가 다른 일을 하는 중인가, lodging 은 숙박이 있는 출장인가다.
+   * locked 는 카드가 다른 일을 하는 중인가, lodging 은 숙박이 있는 출장인가, readonly 는 보여 주기만 하는가(사후정산 완료)다.
    */
-  const lodgeCtx = (trip, { locked = false, lodging = false } = {}) => ({
-    trip, trseq: trseqOf(trip), kept: st.after[trip.seq]?.kept || [], mine: st.lodgeMine?.[trip.seq], locked, lodging,
+  const lodgeCtx = (trip, { locked = false, lodging = false, readonly = false } = {}) => ({
+    trip, trseq: trseqOf(trip), kept: st.after[trip.seq]?.kept || [], mine: st.lodgeMine?.[trip.seq], locked, lodging, readonly,
     // 줄의 `증빙`·`손수 작성`을 누르면 그 줄 아래에 펴지는 내용(lodgeInfoHtml).
     open: st.lodgeOpen[trip.seq] || '', detail: (row, source) => lodgeInfoHtml(trip.seq, row, source),
   });
 
-  /** 열어 둔 출장 카드의 숙박 줄을 한 번 읽어 둔다 — 사후정산을 쓰는 단계일 때만이다(그 전에는 입력 화면이 없다). */
+  /** 열어 둔 출장 카드의 숙박 줄을 한 번 읽어 둔다 — 사후정산을 쓰는 단계이거나 완료한 뒤다(그 전에는 입력 화면이 없다). */
   function ensureLodges() {
     const it = st.items.find((x) => x.docNo === st.openDoc);
     const trip = it ? tripOf(it) : null;
@@ -1235,7 +1370,9 @@ export function createAttendPanel({
     // 숙박비 내역을 보이므로 읽지 않으면 "읽는 중..."이 그대로 남는다. 당일 출장의 대기 단계는 보일 것이 없어 읽지 않는다.
     const writing = stage?.phase === 'post' && !stage.done;
     const waiting = stage?.phase === 'pre' && stage.done && afterNeed(trip).lodging;
-    if (writing || waiting) lodgeBox.ensure(lodgeCtx(trip));
+    // 사후정산이 완료된 출장은 정산 내역을 보여 주기만 한다(doneHtml) — 숙박 줄과, 사후정산에 따로 올린 교통 줄을 읽는다.
+    const done = stage?.phase === 'post' && stage.done;
+    if (writing || waiting || done) lodgeBox.ensure(lodgeCtx(trip));
   }
 
   /**
@@ -1250,9 +1387,9 @@ export function createAttendPanel({
   /**
    * 가는 편·오는 편 두 줄(2026-10-03 사용자 지정) — 편 이름, 교통편 아이콘 셋(고른 것은 아이콘이 파란색, 기차·비행기 특실은 주황색 +),
    * 그 편으로 올라갈 값. 처음에는 사전정산대로 골라져 있고, 사전정산에 없는 편은 아무것도 골라져 있지 않다.
-   * enabled 가 아니면(사후정산을 올릴 때가 아니다) 보여 주기만 한다.
+   * enabled 가 아니면(사후정산을 올릴 때가 아니다) 보여 주기만 한다. none 은 줄이 없는 편에 적는 말이다.
    */
-  function legsHtml(route, enabled) {
+  function legsHtml(route, enabled, none = '고르지 않음') {
     if (!route) return '';
     return `<div class="at-legs">${route.legs.map((l) => {
       const icons = TRANSPORTS.map((o) => transportButton(o, {
@@ -1260,7 +1397,7 @@ export function createAttendPanel({
         attrs: `data-act="leg" data-leg="${l.key}" data-t="${escapeHtml(o.value)}"`,
       })).join('');
       // 사전정산과 다르게 고른 편은 "바꿈"이라고 적는다 — 사후정산을 올리기 전에는 패널만 아는 값이다.
-      const what = l.problem || (l.row ? `${describeTrans(l.row)}${l.source === 'site' ? '' : ' · 바꿈'}` : '고르지 않음');
+      const what = l.problem || (l.row ? `${describeTrans(l.row)}${l.source === 'site' ? '' : ' · 바꿈'}` : none);
       return `<div class="at-leg"><span class="at-leg-name">${l.label} <span class="at-leg-day">${md(l.date)}</span></span>`
         + `<span class="at-chips" role="group" aria-label="${l.label} 교통편">${icons}</span>`
         + `<span class="at-leg-what${l.problem ? ' error' : l.row && l.source !== 'site' ? ' new' : ''}">${escapeHtml(what)}</span></div>`;
@@ -1291,14 +1428,16 @@ export function createAttendPanel({
    * 사전정산을 아직 완료(확정)하지 않았으면 칸의 이름이 "사전정산"이고 `사전정산 완료` 버튼이 선다 — 사후정산을 올리거나 증빙을
    * 담당자에게 보내려면 완료돼 있어야 하기 때문이다. 그때도 증빙은 받는다(넣으면 확정부터 하고 이어서 처리한다 — runAfter).
    * 가는 편·오는 편은 사전정산이 완료된 뒤에 바꾼다(그 전에는 보여 주기만 한다).
+   * 사후정산까지 완료된 출장은 같은 자리에 정산 내역을 보여 주기만 한다(doneHtml).
    */
   function afterHtml(it, trip, stage) {
-    if (!trip || !stage || (stage.phase === 'post' && stage.done)) return '';
+    if (!trip || !stage) return '';
     const a = st.after[trip.seq] || {};
     if (!a.detail) {
       return `<div class="at-after"><p class="at-after-note${a.detailError ? ' error' : ''}">${escapeHtml(
         a.detailError ? `사전정산의 교통편을 읽지 못했습니다: ${a.detailError}` : '사전정산의 교통편을 확인하는 중...')}</p></div>`;
     }
+    if (stage.phase === 'post' && stage.done) return doneHtml(trip, a);
     const route = legsOf(it, trip);
     const pre = stage.phase === 'pre' && !stage.done;
     const need = afterNeed(trip, a.detail, st.legs[it.docNo]);
@@ -1334,7 +1473,23 @@ export function createAttendPanel({
       + (a.error ? `<p class="at-after-note error">${escapeHtml(a.error)}</p>` : '')
       + (a.info ? `<p class="at-after-note">${escapeHtml(a.info)}</p>` : '')
       + (a.result ? afterResultHtml(a.result) : '')
-      + keptHtml(a)
+      + keptHtml(a, locked)
+      + '</div>';
+  }
+
+  /**
+   * 사후정산이 완료된 출장의 정산 내역(2026-10-04 사용자 지정 — 완료된 출장을 펴도 표가 보여야 한다). 가는 편·오는 편과 숙박비 내역을
+   * 보여 주기만 한다. 편은 사후정산에 따로 올린 교통 줄이 있으면 그 줄이고, 없으면 사전정산의 줄이다(그 값이 선다) — 카드에서 골라 둔
+   * 편(st.legs)은 얹지 않는다. 계산서에 실제로 있는 줄만 적는다.
+   * 증빙 넣는 곳은 없다 — 완료된 출장에 넣는 증빙은 아래 증빙 송부 칸이 받는다. data-seq 를 달지 않아 붙여넣기도 이 칸으로 오지 않는다.
+   */
+  function doneHtml(trip, a) {
+    const post = lodgeBox.state.by[trip.seq]?.trans || [];
+    const rows = post.length ? post : a.detail.rows;
+    const need = afterNeed(trip, { transports: rows.map((r) => r.transport) });
+    return `<div class="at-after"><div class="at-after-head"><strong>정산 내역</strong><span class="at-after-why">${escapeHtml(`${need.why} · 완료`)}</span></div>`
+      + legsHtml(legPlan({ trip, rows }), false, post.length ? '사후정산에 없음' : '사전정산에 없음')
+      + lodgeBox.html(lodgeCtx(trip, { lodging: need.lodging, readonly: true }))
       + '</div>';
   }
 
@@ -1342,12 +1497,24 @@ export function createAttendPanel({
    * 보관함에 담아 둔 증빙(당일출장 증명·항공기 증명). 여비계산서에는 붙일 칸이 없어 가지고 있다가 담당자에게 Teams·쪽지로 보낼 때
    * 같이 보낸다(2026-10-03 사용자 지정 — 보내는 것은 따로 만든다). 잘못 담은 것은 × 로 뺀다.
    */
-  function keptHtml(a) {
+  function keptHtml(a, locked = false) {
     if (!a.kept?.length) return '';
+    // 홈의 WORKSPACE 카드에서 넣은 숙박 증빙·항공권은 보관만 돼 있다 — 사후정산에는 여기서 올린다(그때 읽은 기록으로, 다시 읽지 않는다).
+    // 실제 계산서를 바꾸는 누름이라 두 번 눌러야 나간다.
+    const todo = todoOf(a);
+    const goTitle = '홈 카드에서 넣은 증빙을 그때 읽은 기록으로 사후정산에 올립니다 — 이 카드에 넣었을 때와 같습니다';
+    const go = !todo.length ? '' : `<div class="at-leg-go"><p class="at-after-note">홈 카드에서 넣은 증빙 ${todo.length}장은 사후정산에 아직 올리지 않았습니다</p>`
+      + `<button type="button" class="small at-request" data-act="kept-go" title="${goTitle}"${locked ? ' disabled' : ''}>홈에서 넣은 증빙을 사후정산에 올리기</button></div>`;
     return `<div class="at-kept"><p class="at-after-note">보관 중인 증빙 ${a.kept.length}장 — 담당자에게 보낼 때 같이 갑니다</p><ul>${a.kept.map((k) =>
-      `<li><span>${escapeHtml(`${k.label} · ${k.name}`)}</span><button type="button" class="small ghost at-kept-drop" data-act="kept-drop" data-name="${escapeHtml(k.name)}" `
-      + `title="보관함에서 빼기" aria-label="${escapeHtml(k.name)} 보관함에서 빼기">×</button></li>`).join('')}</ul></div>`;
+      `<li><span>${escapeHtml(`${k.label} · ${k.name}${k.todo ? ' · 사후정산에 안 올림' : ''}`)}</span><button type="button" class="small ghost at-kept-drop" data-act="kept-drop" data-name="${escapeHtml(k.name)}" `
+      + `title="보관함에서 빼기" aria-label="${escapeHtml(k.name)} 보관함에서 빼기">×</button></li>`).join('')}</ul>${go}</div>`;
   }
+
+  /**
+   * 보관함의 증빙 가운데 홈의 WORKSPACE 카드에서 넣어 사후정산에 아직 올리지 않은 것(숙박 증빙·항공권). 홈 카드는 읽어서 보관만 하고
+   * (src/intake.js — 읽은 기록 record 와 todo 를 붙여 담는다), 이 카드가 그 기록으로 올리면서 다시 담으면 표시가 없어진다.
+   */
+  const todoOf = (a) => (a?.kept || []).filter((k) => k.todo && k.record);
 
   /**
    * 증빙 송부 칸(sendbox.js)에 넘길 그 출장의 사정 — 여비계산서와 단계, 사후정산 대상인가(사전정산의 교통편을 읽은 뒤에 안다),
@@ -1363,7 +1530,8 @@ export function createAttendPanel({
       need: trip && a.detail ? afterNeed(trip, a.detail, st.legs[it.docNo]) : null, locked: st.busy || !!a.busy,
       refresh: () => loadKept(it.docNo, a).then(paintList),
       save: (onStage) => saveAfter(it, onStage), confirm: (onStage) => confirmPost(it, onStage), again: () => sendCtx(it),
-      hold: a.ask ? '사후정산 칸에서 정산금액을 먼저 정해 주세요' : '',
+      hold: a.ask ? '사후정산 칸에서 정산금액을 먼저 정해 주세요'
+        : todoOf(a).length ? '홈 카드에서 넣은 증빙을 사후정산 칸에서 먼저 올려 주세요' : '',
     };
   }
 
@@ -1511,7 +1679,8 @@ export function createAttendPanel({
     if (a.detail || a.loading || a.detailError) return;
     a.loading = true;
     tripPreDetail(trip.seq)
-      .then((d) => { a.detail = d; }, (err) => { a.detailError = err.message; })
+      // 읽은 교통편 줄은 그 출장지의 교통편으로 기억해 둔다(사이트에서 손으로 고친 것까지 — 다음에 같은 출장지면 이것이 먼저다).
+      .then((d) => { a.detail = d; keepTripRoute(trip.location, routeOfRows(d.rows, trip)); }, (err) => { a.detailError = err.message; })
       .then(() => loadKept(it.docNo, a))
       .finally(() => { a.loading = false; paintList(); });
   }
@@ -1669,8 +1838,9 @@ export function createAttendPanel({
    * 항공권은 그 날짜·시각의 가는 편·오는 편에 앉아 그 편을 비행기로 바꾼다(항공권이 한 편뿐이면 나머지 편은 KTX 정가).
    * 읽지 못한 필수 값이 있으면 올리지 않고 무엇이 비었는지 카드에 적는다. 올린 뒤에는 여비계산서 목록을 다시 읽어 단계를 맞춘다.
    * fileList 가 비었으면 증빙 없이 바꾼 가는 편·오는 편만 올린다("바꾼 교통편을 사후정산에 올리기").
+   * given 은 홈의 WORKSPACE 카드에서 읽어 보관해 둔 증빙이다(todoOf) — 다시 읽지 않고 그때 읽은 기록으로 묶어 올린다.
    */
-  async function runAfter(seq, fileList) {
+  async function runAfter(seq, fileList, { given = [] } = {}) {
     const it = st.items.find((x) => isTrip(x) && tripOf(x)?.seq === seq);
     const trip = it ? tripOf(it) : null;
     if (!trip) return;
@@ -1727,7 +1897,9 @@ export function createAttendPanel({
       }
     }
     if (!files.length && fileList?.length) return;
-    Object.assign(a, { busy: true, error: '', info: '', result: null, stage: files.length ? `증빙 ${files.length}장을 읽는 중...` : '가는 편·오는 편을 묶는 중...' });
+    const fileNames = [...given.map((k) => k.name), ...files.map((f) => f.name)];
+    Object.assign(a, { busy: true, error: '', info: '', result: null,
+      stage: files.length ? `증빙 ${files.length}장을 읽는 중...` : given.length ? `보관해 둔 증빙 ${given.length}장을 묶는 중...` : '가는 편·오는 편을 묶는 중...' });
     paintList();
     const { apiKey, cli } = ai();
     const onStage = (s) => { a.stage = s; paintList(); };
@@ -1744,7 +1916,7 @@ export function createAttendPanel({
       return true;
     };
     try {
-      const records = [];
+      const records = given.map((k) => ({ ...k.record, file: { name: k.name, type: k.type, dataUrl: k.dataUrl } }));
       for (const [i, f] of files.entries()) {
         onStage(`증빙을 읽는 중 (${i + 1}/${files.length}) — ${f.name}`);
         const r = await receiptSmart(f, { trip, me: st.trips?.me || st.me?.name || '' }, { apiKey, useNative: cli });
@@ -1798,16 +1970,16 @@ export function createAttendPanel({
       if (plan.lodge.length) onStage('숙박비 상한액을 확인하는 중...');
       for (const l of plan.lodge) lodgeSettle(Object.assign(l, await tripLodgeMax(trseqOf(row), l.nation, l.currency)));
       if (plan.lodge.some(lodgeAsk)) {
-        a.ask = { plan, row, records: all.filter((r) => /^lodging_/.test(r.docType)), files: files.map((f) => f.name), krw: {} };
+        a.ask = { plan, row, records: all.filter((r) => /^lodging_/.test(r.docType)), files: fileNames, krw: {} };
         setStatus('사후정산을 아직 올리지 않았습니다 — 출장 카드에서 정산금액을 정해 주세요');
         return;
       }
-      await sendAfter(it, trip, a, plan, row, files.map((f) => f.name), onStage);
+      await sendAfter(it, trip, a, plan, row, fileNames, onStage);
     } catch (err) {
       a.error = failed === '사후정산 실패' ? err.message : `${failed}: ${err.message}`;
       setError(err, failed);
       // 사전정산 완료가 실패한 것은 confirmPre 가 이미 기록했다.
-      if (failed === '사후정산 실패') logEvent('trip', false, `여비계산서(사후정산) 실패: ${trip.seq} — ${err.message}`, { seq: trip.seq, files: files.map((f) => f.name) });
+      if (failed === '사후정산 실패') logEvent('trip', false, `여비계산서(사후정산) 실패: ${trip.seq} — ${err.message}`, { seq: trip.seq, files: fileNames });
     } finally {
       a.busy = false;
       a.stage = '';
@@ -1955,37 +2127,43 @@ export function createAttendPanel({
    * 기본 보기의 기간(2026-10-04 사용자 지정) — 다녀온 출장을 보는 가장 먼 날(고른 4주·8주 전, 안 보면 오늘)부터
    * **근태를 올려 둔 가장 늦은 날**까지다. 앞으로 잡힌 것이 없으면 오늘에서 끝난다.
    */
-  function defaultRange() {
+  function defaultRange(weeks = st.back) {
     const today = attendToday();
     const last = st.all.map((it) => it.to || it.from).filter(Boolean).reduce((a, b) => (a > b ? a : b), today);
-    return { from: daysAgo(today, st.back * 7), to: last };
+    return { from: daysAgo(today, weeks * 7), to: last };
   }
+
+  /** 4주·8주를 눌러 조회하는 기간 — 그만큼 전부터 근태를 올려 둔 가장 늦은 날까지다. weeks 로 어느 버튼의 것인지 안다. */
+  const weekRange = (weeks) => ({ ...defaultRange(weeks), weeks });
 
   function paintRange() {
     const custom = !!st.range;
+    const weeks = st.range?.weeks || 0;
     const r = st.range || defaultRange();
     el.range.textContent = spanText(r.from, r.to, attendToday());
-    el.rangeHint.textContent = custom ? '근태 날짜 기준 · 기간 지정'
+    el.rangeHint.textContent = weeks ? `근태 날짜 기준 · ${weeks}주 전부터 전부` : custom ? '근태 날짜 기준 · 기간 지정'
       : st.back ? `오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 ${st.back}주까지` : '오늘부터 전부';
     el.rangeFrom.value = r.from;
     el.rangeTo.value = r.to;
     el.rangeBtn.classList.toggle('active', custom);
-    // 4주·8주는 기본 보기일 때만 켜져 있다 — 기간을 정해 조회하는 중에는 둘 다 꺼지고, 누르면 기본 보기로 돌아온다.
+    // 4주·8주는 그 버튼으로 조회하고 있을 때만 켜져 있다 — 기본 보기와 날짜를 직접 적은 조회에서는 둘 다 꺼져 있다.
     for (const b of el.rangeBox.querySelectorAll('button[data-back]')) {
-      const on = !custom && Number(b.dataset.back) === st.back;
+      const on = Number(b.dataset.back) === weeks;
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', String(on));
     }
   }
 
   /**
-   * 다녀온 출장을 몇 주 뒤까지 보일지(0 = 안 봄) 고르고 기본 보기로 돌아가 다시 읽는다. 고른 값은 저장해 둔다 —
-   * 홈의 WORKSPACE 카드와 현황도 이 값을 따른다.
+   * 4주·8주를 누르면 **그만큼 전부터 근태를 올려 둔 가장 늦은 날까지를 곧바로 조회한다**(2026-10-04 사용자 지정 — 날짜 칸을 채우고
+   * 조회를 누른 것과 같다: 그 기간의 것 전부). 켜져 있는 것을 다시 누르면 기본 보기로 돌아온다. 고른 주 수는 저장해 둔다 — 기본 보기와
+   * 홈의 WORKSPACE 카드·현황이 정산 중인 다녀온 출장을 그 주 수까지 보인다.
    */
-  function setBack(weeks) {
+  function pickWeeks(weeks) {
+    if (st.range?.weeks === weeks) return setRange(null);
     st.back = backWeeksOf(weeks);
     chrome.storage.local.set({ [BACK_KEY]: st.back });
-    return setRange(null);
+    return setRange(weekRange(st.back));
   }
 
   /** 기간을 바꿔 다시 읽는다. null 이면 기본 보기(오늘부터 전부 + 정산 중인 다녀온 출장)로 돌아간다. */
@@ -2025,6 +2203,8 @@ export function createAttendPanel({
     // 신청일로 읽는다: 보여줄 기간보다 여섯 달 앞에 신청한 것부터 오늘 신청한 것까지.
     const { rows, user } = await hrListDocs({ from: monthsAgo(from < today ? from : today, LIST_REQUEST_LOOKBACK_MONTHS), to: today }, { onStage: setStatus });
     st.all = listItems(rows);
+    // 4주·8주로 조회하는 중이면 종료일(근태를 올려 둔 가장 늦은 날)을 방금 읽은 것으로 다시 잡는다.
+    if (st.range?.weeks) st.range = weekRange(st.range.weeks);
     pickItems();
     st.loadedOnce = true;
     st.authFailed = false;
@@ -2078,6 +2258,9 @@ export function createAttendPanel({
     const workplace = form.workplace || st.workplace;
     st.form = edit ? { ...form, workplace } : { ...form, hasFile: false, workplace };
     st.edit = edit || null;
+    // 불러온 폼의 교통편은 아직 손대지 않은 것이다 — 새 신청서로 불러왔으면 그 출장지에 기억해 둔 교통편을 깐다.
+    st.transportSet = false;
+    recallTransport();
     // "내역"에서 불러왔으면 폼이 보여야 한다 — 그 종류의 것만 보기로 돌아온다.
     if (st.view) {
       st.view = '';
@@ -2169,6 +2352,8 @@ export function createAttendPanel({
     const li = target?.closest('li[data-i]');
     const it = li ? shownItems()[+li.dataset.i] : null;
     if (!it || st.busy) return undefined;
+    // 목록을 손수 누르기 시작했으면 홈 카드의 부탁(보내기)은 잊는다 — 뒤늦게 다른 카드가 펴지거나 팝업이 뜨지 않게.
+    st.seek = null;
     const btn = target.closest('button[data-act]');
     if (!btn) {
       // 줄을 누르면 펴고, 다시 누르면 접는다. 한 번에 한 줄만 펴 둔다.
@@ -2228,7 +2413,7 @@ export function createAttendPanel({
       return answerAsk(it, btn);
     }
     if (a.startsWith('send-')) {
-      // 증빙 송부 칸의 버튼(최근에 보낸 세트·받는 사람 고르기, 사후정산 저장, 보내기). `사후정산 저장`은 실제 계산서를 바꾸는
+      // 증빙 송부 칸의 버튼(이전에 보낸 줄·직접 고르기·받는 사람 고르기, 사후정산 저장, 보내기). `사후정산 저장`은 실제 계산서를 바꾸는
       // 일이라 두 번 눌러야 나간다 — 첫 누름에는 무엇을 하는지 적어 보여주기만 한다. `보내기`는 보낼 내용을 팝업으로 띄우고,
       // 팝업의 보내기를 눌러야 나간다(사후정산 저장·확정부터 하는 경우에도 그 팝업이 확인이다).
       const ctx = sendCtx(it);
@@ -2250,6 +2435,17 @@ export function createAttendPanel({
         setStatus(`보관함에서 뺐습니다 — ${btn.dataset.name}`);
         paintList();
       }, (err) => setStatus(`보관함에서 빼지 못했습니다: ${err.message}`, 'error'));
+    }
+    if (a === 'kept-go') {
+      // 홈의 WORKSPACE 카드에서 넣어 둔 증빙(숙박 증빙·항공권)을 사후정산에 올린다. 무엇이 올라가는지 먼저 적어 보여주고, 두 번째에 보낸다.
+      const row = tripOf(it);
+      const todo = row ? todoOf(st.after[row.seq]) : [];
+      if (!todo.length) return undefined;
+      if (!armed(`kept:${it.docNo}`, btn, '한 번 더 → 올리기')) {
+        setStatus(`사후정산에 올릴 증빙 — ${todo.map((k) => `${k.label} ${k.name}`).join(' · ')}`);
+        return undefined;
+      }
+      return runAfter(row.seq, [], { given: todo });
     }
     if (a === 'pre-done') {
       // 사전정산을 완료(확정)한다. 어느 계산서인지 먼저 적어 보여주고, 두 번째에 보낸다.
@@ -2392,8 +2588,8 @@ export function createAttendPanel({
     el.list.addEventListener('dragleave', onAfterDrag);
     el.list.addEventListener('drop', onAfterDrop);
     el.openHr.addEventListener('click', () => chrome.tabs.create({ url: HR_SSO_URL }));
-    // 조회 기간. 버튼이 칸을 편다. 다녀온 출장을 언제까지 보일지(4주·8주)는 누르면 곧바로 기본 보기로 읽고,
-    // 날짜를 직접 정했으면 조회를 눌러 읽는다. 기본 보기에서 켜져 있는 것을 다시 누르면 꺼진다(지난 출장을 보지 않는다).
+    // 조회 기간. 버튼이 칸을 편다. 4주·8주는 누르면 그 기간을 곧바로 조회하고(켜진 것을 다시 누르면 기본 보기로 돌아온다),
+    // 날짜를 직접 정했으면 조회를 눌러 읽는다.
     el.rangeBtn.addEventListener('click', () => {
       const open = el.rangeBox.classList.toggle('hidden') === false;
       el.rangeBtn.setAttribute('aria-expanded', String(open));
@@ -2402,14 +2598,25 @@ export function createAttendPanel({
     el.rangeBox.addEventListener('click', (e) => {
       const b = e.target instanceof HTMLElement ? e.target.closest('button[data-back]') : null;
       if (!b || st.busy) return;
-      const weeks = Number(b.dataset.back);
-      setBack(!st.range && st.back === weeks ? 0 : weeks);
+      pickWeeks(Number(b.dataset.back));
     });
     el.rangeGo.addEventListener('click', () => {
       if (!st.busy) setRange({ from: el.rangeFrom.value, to: el.rangeTo.value });
     });
     // 패널이 닫히면 뒷전에 열어 둔 HR 작업 탭도 치운다.
     window.addEventListener('pagehide', () => { hrCloseWorker().catch(() => {}); });
+    // 홈의 WORKSPACE 카드에서 증빙을 넣었으면(보관함이 바뀌었다 — MARKS_KEY) 펴 둔 출장 카드의 보관함을 다시 읽는다.
+    // 달라진 것이 있을 때만 다시 그린다 — 이 패널이 담은 것은 이미 그려져 있다.
+    chrome.storage.onChanged?.addListener((changes, area) => {
+      if (area !== 'local' || !(MARKS_KEY in changes)) return;
+      const it = st.items.find((x) => x.docNo === st.openDoc);
+      const trip = it ? tripOf(it) : null;
+      const a = trip ? st.after[trip.seq] : null;
+      if (!a || a.busy) return;
+      const shape = () => JSON.stringify((a.kept || []).map((k) => [k.name, !!k.todo]));
+      const before = shape();
+      loadKept(it.docNo, a).then(() => { if (shape() !== before) paintList(); });
+    });
   }
 
   /** 탭이 보일 때. 마지막에 쓰던 종류를 되살리고 신청 내역을 읽는다. */
@@ -2430,7 +2637,9 @@ export function createAttendPanel({
       if (saved?.attendLodgeInfo && typeof saved.attendLodgeInfo === 'object') st.lodgeInfo = { ...saved.attendLodgeInfo, ...st.lodgeInfo };
     }, () => {});
     // 다녀온 출장을 몇 주 뒤까지 보일지 고른 값과, 담아 둔 여비계산서 목록(오늘 읽은 것만 쓴다).
-    const rule = await chrome.storage.local.get([BACK_KEY, STAGES_KEY]);
+    const rule = await chrome.storage.local.get([BACK_KEY, STAGES_KEY, ROUTES_KEY]);
+    // 출장지마다 기억해 둔 교통편(src/routes.js). 그 사이 이 패널이 새로 기억한 것이 있으면 그것이 먼저다.
+    st.routes = { ...(rule?.[ROUTES_KEY] && typeof rule[ROUTES_KEY] === 'object' ? rule[ROUTES_KEY] : {}), ...st.routes };
     st.back = backWeeksOf(rule?.[BACK_KEY]);
     st.stages = stagesFresh(rule?.[STAGES_KEY], attendToday()) ? rule[STAGES_KEY] : null;
     // 증빙 송부 칸이 기억해 둔 것(최근에 보낸 곳, 보낸 기록)을 읽고 Teams MCP 가 닿는지 본다. 기다리지 않는다 — 읽히면 다시 그린다
@@ -2450,5 +2659,5 @@ export function createAttendPanel({
     el.root.classList.add('hidden');
   }
 
-  return { wire, show, hide, reload, authFailed: () => st.authFailed, state: st };
+  return { wire, show, hide, reload, seek, authFailed: () => st.authFailed, state: st };
 }

@@ -422,12 +422,12 @@ console.log('내 예약 모드로 시작 (조기 return 회귀 방지)');
       assert.equal(doc.getElementById('atHistoryBtn'), null);
       assert.equal(doc.getElementById('atRangeBtn').nextElementSibling.id, 'atOpenHr');
     });
-    t('조회 기간은 한 줄이다 — 4주 · 8주 · 시작일 ~ 종료일 · 조회. 처음엔 4주가 켜져 있다(안 봄·2주·지난 1·3·6개월·1년 버튼은 없다)', () => {
+    t('조회 기간은 한 줄이다 — 4주 · 8주 · 시작일 ~ 종료일 · 조회. 처음엔 둘 다 꺼져 있다(안 봄·2주·지난 1·3·6개월·1년 버튼은 없다)', () => {
       const box = doc.getElementById('atRangeBox');
       assert.equal(box.children.length, 1);
       assert.deepEqual([...box.firstElementChild.children].map((n) => n.id || n.dataset.back || n.textContent), ['4', '8', 'atRangeFrom', '~', 'atRangeTo', 'atRangeGo']);
       assert.deepEqual([...box.querySelectorAll('button[data-back]')].map((b) => b.textContent), ['4주', '8주']);
-      assert.deepEqual(pressed(), ['true,true', 'false,false']);
+      assert.deepEqual(pressed(), ['false,false', 'false,false']);
       assert.equal(box.querySelector('button[data-months]'), null);
     });
     doc.getElementById('atRangeBtn').click();
@@ -446,18 +446,23 @@ console.log('내 예약 모드로 시작 (조기 return 회귀 방지)');
     t('한 해를 조회하면 머리 줄에 해를 붙인다 — "10/4 ~ 10/4" 로 보이지 않게', () =>
       assert.equal(doc.getElementById('atRange').textContent, '25/10/4 ~ 26/10/4'));
     back(8).click();
-    t('8주를 누르면 기본 보기로 돌아와 8주까지 보고, 고른 값을 저장한다 — 홈의 WORKSPACE 카드도 이 값을 따른다', () => {
-      assert.deepEqual(head(), [span(ago(56), now), '오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 8주까지']);
+    t('8주를 누르면 8주 전부터 오늘까지를 곧바로 조회한다(조회를 따로 누르지 않는다) — 8주가 켜지고, 고른 값을 저장한다(홈의 WORKSPACE 카드도 이 값을 따른다)', () => {
+      assert.deepEqual(head(), [span(ago(56), now), '근태 날짜 기준 · 8주 전부터 전부']);
+      assert.deepEqual([doc.getElementById('atRangeFrom').value, doc.getElementById('atRangeTo').value], [ymdOf(ago(56)), ymdOf(now)]);
       assert.deepEqual([store.tripBackWeeks, pressed()], [8, ['false,false', 'true,true']]);
-      assert.equal(doc.getElementById('atRangeBtn').classList.contains('active'), false);
+      assert.equal(doc.getElementById('atRangeBtn').classList.contains('active'), true);
     });
     back(8).click();
-    t('켜져 있는 것을 다시 누르면 꺼진다 — 지난 출장을 보지 않고 오늘부터의 것만', () => {
-      assert.deepEqual(head(), [span(now, now), '오늘부터 전부']);
-      assert.deepEqual([store.tripBackWeeks, pressed()], [0, ['false,false', 'false,false']]);
+    t('켜져 있는 것을 다시 누르면 기본 보기로 돌아온다 — 정산 중인 출장은 마지막에 누른 8주까지', () => {
+      assert.deepEqual(head(), [span(ago(56), now), '오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 8주까지']);
+      assert.deepEqual([store.tripBackWeeks, pressed()], [8, ['false,false', 'false,false']]);
+      assert.equal(doc.getElementById('atRangeBtn').classList.contains('active'), false);
     });
     back(4).click();
-    t('4주를 누르면 다시 4주다', () => assert.deepEqual([store.tripBackWeeks, pressed()], [4, ['true,true', 'false,false']]));
+    t('4주를 누르면 4주 전부터를 조회한다', () => {
+      assert.deepEqual(head(), [span(ago(28), now), '근태 날짜 기준 · 4주 전부터 전부']);
+      assert.deepEqual([store.tripBackWeeks, pressed()], [4, ['true,true', 'false,false']]);
+    });
   }
   t('목록이 보이고 격자는 숨는다', () => {
     assert.ok(!doc.getElementById('mineWrap').classList.contains('hidden'));
@@ -1299,6 +1304,57 @@ console.log('근태 탭');
   t('비우고 다시 켜도 고쳐 적은 근무지가 깔린다', () => assert.equal(doc.getElementById('at_workplace').value, '부산 본사'));
 }
 {
+  // 출장지마다 지난번에 쓴 교통편을 기억해 두었다가 같은 출장지를 다시 적으면 먼저 쓴다(2026-10-04 사용자 지정, src/routes.js).
+  const { window } = await boot({ mode: 'attend', attendKind: 'trip', attendWorkplace: '부산', tripRoutes: {
+    '경기도 용인시': { transport: ['train'], trainGrade: 'first', path: ['부산', '수원'], date: '2026-09-09' },
+    제주: { transport: ['plane'], trainGrade: 'standard', path: null, date: '2026-08-01' },
+  } });
+  const doc = window.document;
+  await new Promise((r) => setTimeout(r, 80));
+  const fire = (id, value, ...events) => {
+    const input = doc.getElementById(id);
+    input.value = value;
+    for (const name of events) input.dispatchEvent(new window.Event(name, { bubbles: true }));
+  };
+  const place = (value) => fire('at_place', value, 'input', 'change');
+  fire('at_purpose', '과제 협의', 'input');
+  const box = doc.getElementById('at_settle');
+  box.checked = true;
+  box.dispatchEvent(new window.Event('change', { bubbles: true }));
+  const icons = () => [...doc.querySelectorAll('.at-field[data-key="transport"] .at-chip')].map((b) => [b.classList.contains('active'), b.classList.contains('first')]);
+  const need = () => doc.getElementById('atNeed').textContent;
+  place('경기도 용인시');
+  t('지난번에 간 출장지를 적으면 교통편 아이콘이 그때대로 골라지고(기차 특실), 사전정산의 KTX 는 그때의 길이다 — 요금은 지금 운임표의 값', () => {
+    assert.deepEqual(icons(), [[true, true], [false, false], [false, false]]);
+    assert.match(need(), /KTX 부산↔수원 특실 64,200원 × 2 · 지난번에 쓴 길$/);
+    assert.equal(doc.getElementById('at_place').value, '경기도 용인시', '적은 글은 그대로다');
+  });
+  place('제주');
+  t('다른 출장지로 바꾸면 그 출장지의 것으로 — 비행기로 갔던 곳은 비행기가 골라진다', () => {
+    assert.deepEqual(icons(), [[false, false], [true, false], [false, false]]);
+    assert.match(need(), /제주 · 교통편 내역 없음$/);
+  });
+  place('경기도 화성시');
+  t('기억이 없는 출장지면 기본(기차 일반석)으로 돌아가고 길은 찾아서 짓는다 — 화성은 동탄', () => {
+    assert.deepEqual(icons(), [[true, false], [false, false], [false, false]]);
+    assert.match(need(), /KTX 부산↔동탄 일반석 48,300원 × 2$/);
+  });
+  doc.querySelectorAll('.at-field[data-key="transport"] .at-chip')[2].click();
+  place('제주');
+  t('이 신청서에서 교통편을 손댔으면 출장지를 바꿔도 기억으로 덮어쓰지 않는다', () =>
+    assert.deepEqual(icons(), [[true, false], [false, false], [true, false]]));
+  doc.getElementById('atReset').click();
+  const again = doc.getElementById('at_settle');
+  again.checked = true;
+  again.dispatchEvent(new window.Event('change', { bubbles: true }));
+  fire('at_purpose', '과제 협의', 'input');
+  place('전남 목포시');
+  t('비우면 다시 기억을 따른다 — 바로 가는 KTX 가 없는 목포는 오송에서 갈아타는 길이 적힌다', () => {
+    assert.deepEqual(icons(), [[true, false], [false, false], [false, false]]);
+    assert.match(need(), /KTX 부산↔오송↔목포 일반석 69,500원 × 2$/);
+  });
+}
+{
   // 종류 줄 끝의 "내역" — 모든 종류의 신청 내역을 한 목록으로 보고 폼은 숨긴다. 종류를 고르면 그 종류만 보이고 폼이 돌아온다(2026-10-03 사용자 지정).
   const { window, store } = await boot({ mode: 'attend', attendKind: 'trip' });
   const doc = window.document;
@@ -1351,16 +1407,23 @@ console.log('근태 탭');
   toggle.click();
   doc.querySelector('#atKinds .at-kind[data-kind="out"]').click();
   t('접어 두고 종류를 고르면 펴진다', () => assert.deepEqual([body.hidden, store.attendFormOpen], [false, true]));
-  // 기간을 정해 조회하는 것은 신청 내역을 보려는 것이다 — 그 동안 신청 폼을 접는다(2026-10-03 사용자 지정). 기본 보기로 돌아오면(4주·8주 버튼) 접기 전의 모양이다.
+  // 기간을 정해 조회하는 것은 신청 내역을 보려는 것이다 — 그 동안 신청 폼을 접는다(2026-10-03 사용자 지정). 기본 보기로 돌아오면 접기 전의 모양이다
+  // (4주를 눌러 조회하고, 켜진 것을 다시 누르면 기본 보기다).
   const query = () => {
     doc.getElementById('atRangeFrom').value = '2026-07-01';
     doc.getElementById('atRangeTo').value = '2026-08-31';
     doc.getElementById('atRangeGo').click();
   };
-  const backToDefault = () => doc.querySelector('#atRangeBox button[data-back="4"]').click();
+  const week4 = () => doc.querySelector('#atRangeBox button[data-back="4"]').click();
+  const backToDefault = () => { week4(); week4(); };
   query();
   t('기간을 정해 조회하면 신청 폼이 접힌다 — 접은 것으로 적어 두지는 않는다', () =>
     assert.deepEqual([body.hidden, toggle.getAttribute('aria-expanded'), store.attendFormOpen], [true, 'false', true]));
+  week4();
+  t('4주를 눌러 조회해도 접힌 그대로다 — 이것도 기간 조회다', () => assert.deepEqual([body.hidden, store.attendFormOpen], [true, true]));
+  week4();
+  t('켜진 4주를 다시 눌러 기본 보기로 돌아오면 다시 펴진다', () => assert.deepEqual([body.hidden, toggle.getAttribute('aria-expanded')], [false, 'true']));
+  query();
   backToDefault();
   t('기본 보기로 돌아오면 다시 펴진다', () => assert.deepEqual([body.hidden, toggle.getAttribute('aria-expanded')], [false, 'true']));
   query();

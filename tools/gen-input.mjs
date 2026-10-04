@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
-const SOURCE = new URL('../input.yaml', import.meta.url);
+const SOURCE = new URL('../references/input.yaml', import.meta.url);
 const TARGET = new URL('../src/inputspec.js', import.meta.url);
 
 const TYPES = new Set(['date', 'time', 'integer', 'number', 'string', 'enum', 'boolean']);

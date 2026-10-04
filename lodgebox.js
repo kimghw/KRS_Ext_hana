@@ -1,11 +1,12 @@
 // 신청 내역 출장 카드의 "숙박비 내역" — 사후정산 입력 화면에 **지금 있는** 숙박 줄을 가는 편·오는 편 아래에 한 줄씩 보인다
 // (2026-10-03 사용자 지정: 업체명(길면 줄임)·정산금액, 화면에 세 줄이 있으면 세 줄 다, 지우기와 다시 읽기).
 // 이 패널이 증빙으로 올린 줄만이 아니라 화면에서 손수 적은 줄도 보이고, 어느 쪽인지 줄마다 적는다 — 증빙 없이 적힌 줄은 "손수 작성"이다.
-// 읽고 지우는 길은 src/trip.js(tripAfterLodges·tripAfterLodgeDelete)다. 카드를 그리고 누름을 넘겨 주는 것은 attendpanel.js 다.
+// 읽고 지우는 길은 src/trip.js(tripAfterRows·tripAfterLodgeDelete)다. 카드를 그리고 누름을 넘겨 주는 것은 attendpanel.js 다.
+// 같은 화면의 교통 줄(사후정산에 따로 올린 편)도 읽어 둔다 — 사후정산이 완료된 출장의 카드가 그것으로 가는 편·오는 편을 그린다.
 //
 // 지우기는 실제 계산서의 줄이 없어지는 일이라 두 번 눌러야 나간다 — 두 번 누르기는 attendpanel.js 가 한다(다른 버튼과 같은 길).
 
-import { tripAfterLodges, tripAfterLodgeDelete } from './src/trip.js';
+import { tripAfterRows, tripAfterLodgeDelete } from './src/trip.js';
 import { LOG_KEY } from './src/logbook.js';
 
 const REFRESH_TITLE = '숙박비 내역 다시 읽기 — 사후정산 화면에서 고친 것을 가져옵니다';
@@ -63,10 +64,10 @@ export function lodgeLogged(entries, seq) {
  *   repaint 는 신청 내역을 다시 그리는 길이다
  */
 export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repaint }) {
-  // by 는 계산서마다의 사정이다: rows 는 화면에서 읽은 숙박 줄(아직 못 읽었으면 null), mine 은 저장해 둔 표시,
+  // by 는 계산서마다의 사정이다: rows 는 화면에서 읽은 숙박 줄(아직 못 읽었으면 null), trans 는 같이 읽은 교통 줄, mine 은 저장해 둔 표시,
   // logged 는 활동 기록에 남은 이 계산서의 "사후정산 작성", busy 는 지우는 중인 줄 번호, error 는 읽거나 지우다 난 일이다.
   const box = { by: {} };
-  const of = (seq) => box.by[seq] || (box.by[seq] = { rows: null, mine: {}, logged: [], loading: false, busy: '', error: '' });
+  const of = (seq) => box.by[seq] || (box.by[seq] = { rows: null, trans: [], mine: {}, logged: [], loading: false, busy: '', error: '' });
   const what = (row) => `${row.company || '업체명 없음'} · ${day(row.paydate) || '결제일 ?'} · ${lodgeAmount(row)}`;
 
   async function load(ctx, { quiet = true } = {}) {
@@ -76,8 +77,8 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
     Object.assign(s, { loading: true, error: '' });
     if (!quiet) repaint();
     try {
-      const [rows, saved] = await Promise.all([tripAfterLodges(trip.seq, trseq), chrome.storage.local.get([MINE_KEY, LOG_KEY])]);
-      Object.assign(s, { rows, mine: saved?.[MINE_KEY]?.[trip.seq] || {}, logged: lodgeLogged(saved?.[LOG_KEY], trip.seq) });
+      const [{ lodges: rows, trans }, saved] = await Promise.all([tripAfterRows(trip.seq, trseq), chrome.storage.local.get([MINE_KEY, LOG_KEY])]);
+      Object.assign(s, { rows, trans, mine: saved?.[MINE_KEY]?.[trip.seq] || {}, logged: lodgeLogged(saved?.[LOG_KEY], trip.seq) });
       if (!quiet) setStatus(`숙박비 내역을 다시 읽었습니다 — ${rows.length ? `${rows.length}줄` : '없음'} · 여비계산서 ${trip.seq}`);
     } catch (err) {
       s.error = `숙박비 내역을 읽지 못했습니다: ${err.message}`;
@@ -144,14 +145,15 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
 
   /**
    * 출장 카드의 숙박비 내역. 출장자 번호가 없으면(사후정산을 쓸 단계가 아니다) 빈 글이다.
-   * @param {{trip:object, trseq:string, kept?:object[], mine?:Record<string,string>, locked?:boolean, lodging?:boolean,
+   * @param {{trip:object, trseq:string, kept?:object[], mine?:Record<string,string>, locked?:boolean, lodging?:boolean, readonly?:boolean,
    *          open?:string, detail?:(row:object, source:string) => string}} ctx
    *   trip 은 여비계산서 목록의 한 줄, kept 는 보관함의 증빙, mine 은 이 패널이 올린 줄의 표시(패널이 들고 있는 것),
    *   locked 는 카드가 다른 일을 하는 중인가, lodging 은 숙박이 있는 출장인가(당일 출장은 줄이 있을 때만 보인다),
+   *   readonly 는 보여 주기만 하는가(사후정산이 완료된 출장 — 줄을 지우는 × 가 없다),
    *   open 은 내용을 펴 둔 줄의 번호, detail 은 그 줄 아래에 펼 내용(HTML — 카드가 짓는다)
    */
   function html(ctx) {
-    const { trip, trseq, kept = [], locked = false, lodging = false } = ctx || {};
+    const { trip, trseq, kept = [], locked = false, lodging = false, readonly = false } = ctx || {};
     if (!trip || !trseq) return '';
     const s = of(trip.seq);
     if (!s.rows && !s.error) return lodging ? '<div class="at-lodges"><p class="at-lodge-note">숙박비 내역을 읽는 중...</p></div>' : '';
@@ -161,7 +163,7 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
     const mine = { ...s.mine, ...ctx.mine };
     const sources = rows.map((r) => lodgeSource(r, mine, kept, s.logged));
     const hand = sources.filter((x) => !x).length;
-    const count = !s.rows ? '' : !rows.length ? '사후정산 화면에 아직 없습니다' : `${rows.length}줄${hand ? ` · 손수 작성 ${hand}줄` : ''}`;
+    const count = !s.rows ? '' : !rows.length ? (readonly ? '없음' : '사후정산 화면에 아직 없습니다') : `${rows.length}줄${hand ? ` · 손수 작성 ${hand}줄` : ''}`;
     const head = `<div class="at-lodge-head"><strong>숙박비 내역</strong><span class="at-lodge-count">${escapeHtml(count)}</span>`
       + `<button type="button" class="small ghost at-lodge-refresh${s.loading ? ' spin' : ''}" data-act="lodge-refresh" title="${REFRESH_TITLE}" aria-label="${REFRESH_TITLE}"`
       + `${locked || s.busy || s.loading ? ' disabled' : ''}>${REFRESH_ICON}</button></div>`;
@@ -180,7 +182,7 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
         + `<span class="at-leg-name">숙박 <span class="at-leg-day">${day(r.paydate)}</span></span>`
         + `<span class="at-lodge-company" title="${escapeHtml(`${name}${r.sday ? ` · ${r.sday}박` : ''}`)}">${escapeHtml(name)}</span>`
         + `<span class="at-lodge-total">${escapeHtml(lodgeAmount(r))}</span>${src}`
-        + `<button type="button" class="small ghost at-lodge-del" data-act="lodge-del" data-lodge="${escapeHtml(r.seq)}" title="${escapeHtml(del)}" aria-label="${escapeHtml(del)}"${off}>×</button></div>`
+        + (readonly ? '' : `<button type="button" class="small ghost at-lodge-del" data-act="lodge-del" data-lodge="${escapeHtml(r.seq)}" title="${escapeHtml(del)}" aria-label="${escapeHtml(del)}"${off}>×</button>`) + '</div>'
         + (open ? `<div class="at-lodge-info">${ctx.detail(r, sources[i])}</div>` : '');
     };
     return `<div class="at-lodges" data-seq="${escapeHtml(trip.seq)}">${head}${rows.length ? `<div class="at-lodge-rows">${rows.map(line).join('')}</div>` : ''}`

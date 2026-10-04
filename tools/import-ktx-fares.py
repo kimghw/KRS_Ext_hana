@@ -23,7 +23,7 @@ from pathlib import Path
 
 import xlrd
 
-TARGET = Path(__file__).resolve().parent.parent / 'ktx-fares-official.yaml'
+TARGET = Path(__file__).resolve().parent.parent / 'references' / 'ktx-fares-official.yaml'
 
 HEAD = '''# ktx-fares-official.yaml — 코레일 공식 KTX 운임표에서 가져온 구간 운임(어른 편도 정가, 원).
 #

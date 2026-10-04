@@ -16,7 +16,7 @@
 //
 // 이 파일은 DOM·네트워크 없이 돈다. 사이트 화면의 칸 이름(lodge_*, tr_*, air_*)은 2026-10-03 실제 사후정산 입력 화면 소스에서 확인했다.
 
-import { legsOfRows, ticketsOf, seatTickets, picksWithTickets, legPlan, legTimes } from './travel.js';
+import { legsOfRows, ticketsOf, seatTickets, picksWithTickets, legPlan, legTimesAll, legParts } from './travel.js';
 import { milesOf, isFirstSeat, describeMiles } from './mileage.js';
 
 /** 사후정산 입력 화면의 교통수단 선택지 값(2026-10-03 화면). 사전정산 화면과 달리 한국어 이름이 그대로 값이다. */
@@ -164,6 +164,30 @@ export function lodgeRowsOf(fields) {
   return rows;
 }
 
+/** 사후정산 입력 화면의 교통 줄 칸(tr_ 뒤의 이름) — 화면의 addTr() 가 만드는 것들이다. */
+const TRANS_KEYS = new Set(['seq', 'del', 'date', 'shr', 'ehr', 'dep', 'arr', 'transport', 'grade', 'total', 'currency', 'cocard', 'comment']);
+/** 사후정산 화면의 수단 값(한국어) → 사전정산 화면의 값. 출장 카드가 아이콘으로 아는 것(기차·비행기·버스)만이다. */
+const PRE_OF = { [AFTER_TRANSPORT.train]: 'Train', [AFTER_TRANSPORT.plane]: PRE_PLANE, [AFTER_TRANSPORT.bus]: 'Bus' };
+
+/**
+ * 화면의 칸 목록(src/travel.js formFields 의 결과)에서 지금 있는 교통 줄을 읽는다 — tr_seq 가 줄의 시작이다.
+ * 줄의 모양은 사전정산의 교통편 줄(src/travel.js parseTransRows)과 같다: 수단 값은 사전정산 화면의 것(Train·Airplane·Bus)으로 바꾸고
+ * (그 밖의 수단은 화면의 글 그대로), 요금은 수다. 출장 카드가 두 화면의 줄을 같은 길(legsOfRows·describeTrans)로 그린다.
+ * 지움 표시(del = '1')가 된 줄도 그대로 준다.
+ * @param {[string,string][]} fields
+ * @returns {{seq:string, del:string, date:string, dep:string, arr:string, transport:string, grade:string, total:number, currency:string}[]}
+ */
+export function transRowsOf(fields) {
+  const rows = [];
+  for (const [name, value] of fields || []) {
+    const key = name.startsWith('tr_') ? name.slice(3) : '';
+    if (key === 'seq') rows.push({});
+    if (rows.length && TRANS_KEYS.has(key)) rows.at(-1)[key] = value;
+  }
+  return rows.map((r) => ({ ...r, dep: text(r.dep), arr: text(r.arr), grade: text(r.grade), transport: PRE_OF[r.transport] || r.transport || '',
+    total: Number(String(r.total ?? '').replace(/,/g, '')) || 0 }));
+}
+
 /**
  * 올리려는 줄이 화면에 이미 있는 줄과 같은 것인가 — 결제일·업체명·숙박 일수·정산금액이 모두 같다.
  * 같은 증빙을 두 번 넣었을 때 같은 줄이 겹쳐 올라가지 않게 한다(2026-10-03 실제 계산서에 같은 숙박이 세 줄 올라가 있었다).
@@ -279,12 +303,13 @@ export function afterPlan(records, { trip, detail = {}, picks = {}, workplace = 
       if (!l.row) { notes.push(`${l.label}은 넣지 못했습니다 — ${l.problem}. 사후정산 화면에서 넣어 주세요`); continue; }
       // 출발·도착 시: 항공권이 앉은 편은 항공권의 시각이다. 나머지 편은 사전정산의 줄에 적힌 시각이고, 비어 있으면 출장 출발·도착 시각과
       // 구간의 대략 소요 시간으로 채운다(src/travel.js 의 legTimes — 가는 편은 출발 시각에 떠나고, 오는 편은 도착 시각에 닿는다).
-      const at = l.ticket ? { shr: hourOf(l.ticket.depTime), ehr: hourOf(l.ticket.arrTime) } : legTimes(l.key, l.row, detail);
-      trans.push({
-        date: l.row.date || null, shr: String(at.shr ?? ''), ehr: String(at.ehr ?? ''), dep: text(l.row.dep), arr: text(l.row.arr),
-        transport: AFTER_TRANSPORT[l.pick.t], grade: text(l.row.grade), total: num(l.row.total), currency: l.row.currency || DOMESTIC.currency,
+      // 갈아타는 KTX 편(부산→오송, 오송→목포)은 구간마다 한 줄이다(legParts) — 시각도 구간이 이어지게 채운다(legTimesAll).
+      const at = l.ticket ? [{ shr: hourOf(l.ticket.depTime), ehr: hourOf(l.ticket.arrTime) }] : legTimesAll(l.key, l.row, detail);
+      legParts(l.row).forEach((r, i) => trans.push({
+        date: r.date || null, shr: String(at[i]?.shr ?? ''), ehr: String(at[i]?.ehr ?? ''), dep: text(r.dep), arr: text(r.arr),
+        transport: AFTER_TRANSPORT[l.pick.t], grade: text(r.grade), total: num(r.total), currency: r.currency || DOMESTIC.currency,
         cocard: l.ticket?.cocard ? '1' : '0', comment: l.ticket?.name || '', source: l.ticket?.source || l.label,
-      });
+      }));
     }
     notes.push(...route.notes);
     for (const t of seats.extra) notes.push(`${t.source}: 가는 편·오는 편에 이미 표가 있어 넣지 않았습니다`);
