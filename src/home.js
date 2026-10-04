@@ -1,7 +1,7 @@
-// e-Class 홈(eClassVer4/Home/Index) 맨 위에 "내 예약" 카드를 붙인다.
+// e-Class 홈(eClassVer4/Home/Index) 맨 위에 "WORKSPACE" 카드를 붙인다(예전 이름은 "내 예약").
 //
-// 사이드패널을 열지 않아도 홈에 들어오면 앞으로 한 달 안의 내 회의실·차량 예약이 보이게 한다.
-// 훑기(site/rentcar)와 내 예약 판정(mine)은 사이드패널과 **같은 모듈**을 그대로 쓴다. 다른 점은 둘이다.
+// 사이드패널을 열지 않아도 홈에 들어오면 오늘부터 한 달 안의 내 회의실·차량 예약과 근태(출장·외근·휴가)가
+// 보이게 한다. 훑기(site/rentcar)와 내 예약 판정(mine)은 사이드패널과 **같은 모듈**을 그대로 쓴다. 다른 점은 둘이다.
 //
 //   1) 콘텐츠 스크립트라 페이지와 같은 출처에서 요청한다. 쿠키가 그냥 실리고, 탭 경유 폴백은 없다.
 //   2) 훑은 결과를 chrome.storage 에 담아 둔다. 홈은 하루에도 여러 번 여는 화면이라 그때마다
@@ -9,6 +9,10 @@
 //        - 하루에 한 번: 오늘 읽어 둔 것이 없을 때
 //        - 이 확장으로 예약·취소·수정했을 때: 패널이 이 캐시를 지우고, 카드는 그것을 보고 다시 훑는다
 //        - 새로고침 버튼을 눌렀을 때
+//
+// 근태는 HR(다른 출처)에 있어 여기서 직접 읽지 못한다. 배경(서비스 워커)에게 부탁하면 패널의 현황 탭과 같은 길
+// (src/plans.js)로 읽어 같은 자리(hrPlans)에 담아 준다. 이것도 하루에 한 번이고, 패널이 오늘 읽어 두었으면
+// 그것을 그대로 쓴다. 회의실·차량 훑기와는 따로 돈다 — HR 이 느리거나 막혀도 예약 목록을 붙잡지 않는다.
 //
 // 겉모습은 홈 카드 공통 스타일(src/homecard.js — R&D ERP 현황 카드와 같은 색·칩·아이콘 버튼)을 쓰고,
 // 안쪽 목록은 krs-mine-* 접두어의 자체 스타일만 쓴다 — 사이트 CSS 가 바뀌어도 목록은 읽힌다.
@@ -22,6 +26,9 @@ import { fmtTime, todayStr } from './parse.js';
 import { AuthError } from './net.js';
 import { PORTAL_HOME_URL } from './config.js';
 import { CARD_STYLE, ICON, setChip } from './homecard.js';
+import { PLAN_GROUPS } from './attend.js';
+import { PLANS_KEY, plansFresh, plansToShow, TRIP_LOOKBACK_DAYS } from './plans.js';
+import { BACK_KEY, SENT_KEY, STAGES_KEY, backWeeksOf, settledBy, stagesFresh, stageNote, loadStages as readStages } from './settling.js';
 
 /** 훑은 결과를 담는 storage 키. 패널은 예약·취소 뒤 이 키를 지워 카드에게 알린다. */
 export const CACHE_KEY = 'homeMine';
@@ -32,6 +39,8 @@ export const homeEnabled = (value) => value !== false;
 export const JUMP_KEY = 'homeJump';
 /** 부탁이 이보다 묵으면 패널은 무시한다. 며칠 전 누른 것이 다음에 패널을 열 때 튀어나오면 안 된다. */
 export const JUMP_TTL_MS = 60_000;
+/** 카드에서 숨긴 "다녀온 출장"의 신청서 번호들을 담는 storage 키. 머리 줄의 눈 아이콘(전체 보기)을 켜면 숨긴 것까지 보인다. */
+export const HIDDEN_KEY = 'homeHiddenTrips';
 /** 카드의 루트 요소 id. CDP 검사가 이걸로 찾는다. */
 export const ROOT_ID = 'krsMine';
 /** 패널이 예약·취소를 연달아 하면 알림이 몰려온다. 이만큼 모아서 한 번만 훑는다. */
@@ -119,6 +128,28 @@ export function summarize(dates, days, { name = '', booked = [], failed = [] } =
   return { items: items.map(slim), skippedDates, unread, failed: [...failed] };
 }
 
+/* ------------------------------------------------------------ 근태 */
+
+const clockMinutes = (t) => (/^\d{2}:\d{2}$/.test(t || '') ? +t.slice(0, 2) * 60 + +t.slice(3) : 0);
+
+/**
+ * 읽어 둔 근태에서 카드에 올릴 것만 — 그 기간에 걸친 출장·외근·휴가(PLAN_GROUPS)를 예약과 같은 한 건 모양으로.
+ * 올려 두었거나 결재가 끝난 것만이고(plansIn), 시각이 없는 건(전일 휴가)은 timed 가 거짓이다.
+ * 출장만은 다녀온 뒤 4주까지 남는다(plansToShow) — 다녀온 출장은 여비를 정산해야 해서 눈에 띄어야 한다.
+ * 몇 주까지 남길지(4주·8주·안 봄)는 근태 탭의 신청 내역에서 고른 값을 따르고, 사후정산이 완료됐거나 증빙을 담당자에게 보낸
+ * 출장은 올리지 않는다(2026-10-04 사용자 지정 — rule 은 src/settling.js 의 규칙이다). 그래도 남은 것은 그 줄의 눈 아이콘으로
+ * 한 건씩 숨기고(HIDDEN_KEY), 머리 줄의 눈 아이콘으로 숨긴 것까지 전체를 본다.
+ * @param {{backDays?: number, settled?: Function, note?: (plan: object) => string}} [rule] note 는 다녀온 출장 옆에 적을 여비계산서 단계
+ */
+export function planItems(raw, start, end, rule = {}) {
+  return plansToShow(raw, start, end, rule).filter((p) => p.group).map((p) => ({
+    kind: 'attend', group: p.group, label: p.label, docNo: p.docNo, timed: !!(p.start && p.end),
+    from: { date: p.from, minutes: clockMinutes(p.start) }, to: { date: p.to, minutes: clockMinutes(p.end) },
+    gubun: p.gubun || '', title: p.reason || '', status: p.status || '',
+    past: p.to < start, stage: p.to < start && rule.note ? rule.note(p) : '',
+  }));
+}
+
 /* ------------------------------------------------------------ 훑기 */
 
 /**
@@ -163,17 +194,35 @@ const STYLE = `${CARD_STYLE}
 .krs-mine .krs-mine-item.today { border-left: 3px solid #1f4e9c; }
 .krs-mine .krs-mine-kind { flex: none; margin-top: 1px; padding: 2px 8px; border-radius: 10px; background: #e3edfb; color: #1f4e9c; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .krs-mine .krs-mine-kind.car { background: #e3f3ea; color: #1f7a45; }
+.krs-mine .krs-mine-kind.trip { background: #fdecd8; color: #9a5200; }
+.krs-mine .krs-mine-kind.out { background: #ece7fa; color: #5a3fa6; }
+.krs-mine .krs-mine-kind.leave { background: #fbe5ec; color: #a8325c; }
 .krs-mine .krs-mine-main { flex: 1; min-width: 0; }
 .krs-mine .krs-mine-when { font-weight: 600; font-variant-numeric: tabular-nums; }
 .krs-mine .krs-mine-status { margin-left: 6px; color: #607089; font-size: 11px; }
+.krs-mine .krs-mine-past { color: #a8731f; font-weight: 600; }
 .krs-mine .krs-mine-sub { display: flex; gap: 6px; min-width: 0; margin-top: 2px; color: #607089; font-size: 12px; }
 .krs-mine .krs-mine-room { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .krs-mine .krs-mine-topic { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .krs-mine .krs-mine-topic::before { content: "·"; margin-right: 6px; color: #8798b0; }
+.krs-mine .krs-mine-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .krs-mine .krs-mine-why { flex: none; margin-top: 2px; color: #8798b0; font-size: 11px; white-space: nowrap; }
+.krs-mine .krs-mine-hide { display: flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #8798b0; cursor: pointer; }
+.krs-mine .krs-mine-hide:hover { background: #e3eaf3; color: #1f4e9c; }
+.krs-mine .krs-mine-hide svg { display: block; pointer-events: none; }
+.krs-mine .krs-mine-item.tucked { opacity: .55; }
+.krs-mine .krs-card-btn[aria-pressed="true"] { border-color: #1f4e9c; background: #e3edfb; color: #1f4e9c; }
 .krs-mine .krs-mine-list:not(:empty) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
+.krs-mine .krs-mine-warn:not(:empty) + .krs-mine-warn:not(:empty) { margin-top: 2px; }
 .krs-mine .krs-mine-login { margin-left: 4px; color: #1f4e9c; text-decoration: underline; }
 `;
+
+/** 근태 칩의 풍선말. 휴가는 연차·체력단련이고, 외근에는 같은 신청서로 올리는 교육이 들어간다. */
+const PLAN_CHIP_TITLE = {
+  trip: '오늘부터의 내 출장과, 다녀온 뒤 여비 정산이 덜 끝난 출장 (결재요청·결재완료)',
+  out: '오늘부터의 내 외근·교육 (결재요청·결재완료)',
+  leave: '오늘부터의 내 휴가 — 연차·체력단련 (결재요청·결재완료)',
+};
 
 /** 홈 카드의 공통 겉(homecard.js)을 만들고, 안쪽 목록은 우리 것으로 채운다. */
 function buildStrip(doc) {
@@ -184,21 +233,24 @@ function buildStrip(doc) {
 <div class="col-12">
   <div class="krs-card-panel">
     <div class="krs-card-head krs-mine-head">
-      <span class="krs-card-title krs-mine-title">내 예약</span>
+      <span class="krs-card-title krs-mine-title">WORKSPACE</span>
       <span class="krs-card-chips">
-        <span class="krs-card-chip" title="앞으로의 내 회의실 예약"><span>회의실</span><b data-role="rooms"></b></span>
-        <span class="krs-card-chip" title="앞으로의 내 차량 예약"><span>차량</span><b data-role="cars"></b></span>
+        <span class="krs-card-chip" title="오늘부터의 내 회의실 예약"><span>회의실</span><b data-role="rooms"></b></span>
+        <span class="krs-card-chip" title="오늘부터의 내 차량 예약"><span>차량</span><b data-role="cars"></b></span>
+${PLAN_GROUPS.map((g) => `        <span class="krs-card-chip" title="${PLAN_CHIP_TITLE[g.key]}"><span>${g.label}</span><b data-role="${g.key}"></b></span>`).join('\n')}
       </span>
       <span class="krs-card-note" data-role="note"></span>
       <span class="krs-card-tools">
-        <button type="button" class="krs-card-btn" data-act="refresh" title="새로고침 — 담아 둔 것을 버리고 사이트를 다시 훑습니다" aria-label="새로고침">${ICON.refresh}</button>
-        <button type="button" class="krs-card-btn" data-act="panel" title="예약 패널 열기 — 확장의 사이드 패널에서 예약·취소·수정합니다" aria-label="예약 패널 열기">${ICON.panel}</button>
+        <button type="button" class="krs-card-btn" data-act="all" aria-pressed="false" hidden>${ICON.eye}</button>
+        <button type="button" class="krs-card-btn" data-act="refresh" title="새로고침 — 담아 둔 것을 버리고 사이트와 HR 을 다시 읽습니다" aria-label="새로고침">${ICON.refresh}</button>
+        <button type="button" class="krs-card-btn" data-act="panel" title="예약 패널 열기 — 확장의 사이드 패널에서 예약·근태를 올리고 고칩니다" aria-label="예약 패널 열기">${ICON.panel}</button>
       </span>
     </div>
     <div class="krs-card-body krs-mine-body">
       <div class="krs-mine-bar" data-role="bar" hidden><i data-role="fill"></i></div>
       <ul class="krs-mine-list" data-role="list"></ul>
       <p class="krs-card-warn krs-mine-warn" data-role="warn"></p>
+      <p class="krs-card-warn krs-mine-warn" data-role="planWarn"></p>
     </div>
   </div>
 </div>`;
@@ -206,12 +258,44 @@ function buildStrip(doc) {
   return {
     root,
     rooms: q('rooms'), cars: q('cars'), note: q('note'), bar: q('bar'), fill: q('fill'),
-    list: q('list'), warn: q('warn'),
+    list: q('list'), warn: q('warn'), planWarn: q('planWarn'),
+    plans: Object.fromEntries(PLAN_GROUPS.map((g) => [g.key, q(g.key)])),
     refresh: root.querySelector('[data-act="refresh"]'),
+    showAll: root.querySelector('[data-act="all"]'),
   };
 }
 
+const HIDE_TITLE = '이 출장을 카드에서 숨깁니다 — 머리 줄의 눈 아이콘(전체 보기)으로 다시 볼 수 있습니다';
+const SHOW_TITLE = '숨긴 출장입니다 — 누르면 다시 늘 보입니다';
+
+/** 근태 한 건. 예약과 같은 모양이고, 시각이 없으면(전일·오전·오후 휴가) 그 구분을 적는다. */
+function planHtml(it, i, today) {
+  const sameDay = it.from.date === it.to.date;
+  const at = (d) => `${dayLabel(d.date, today)}${it.timed ? ` ${fmtTime(d.minutes)}` : ''}`;
+  const when = sameDay
+    ? `${dayLabel(it.from.date, today)} ${it.timed ? `${fmtTime(it.from.minutes)}~${fmtTime(it.to.minutes)}` : it.gubun}`.trim()
+    : `${at(it.from)} ~ ${at(it.to)}`;
+  // 며칠짜리 출장·휴가는 그 기간 내내 "오늘"이다.
+  const now = it.from.date <= today && today <= it.to.date;
+  // 지난 출장은 "다녀온 출장"이라고 적는다 — 여비 정산을 올리라는 신호다. 다녀온 뒤 4주(고른 기간) 동안 남아 있고,
+  // 여비계산서가 어느 단계인지 알면 옆에 적는다. 사후정산을 완료했거나 증빙을 보낸 출장은 여기까지 오지 않는다.
+  // 그 밖에 더 볼 일이 없는 것은 줄 끝의 눈 아이콘으로 숨긴다(2026-10-03 사용자 지정). 전체 보기에서는 숨긴 것이 흐리게 보이고,
+  // 그 줄의 눈 아이콘이 다시 보이게 한다.
+  const eye = !it.past ? ''
+    : it.tucked ? `<button type="button" class="krs-mine-hide" data-act="show" data-doc="${escapeHtml(it.docNo)}" title="${SHOW_TITLE}" aria-label="이 출장 다시 보이기">${ICON.eye}</button>`
+      : `<button type="button" class="krs-mine-hide" data-act="hide" data-doc="${escapeHtml(it.docNo)}" title="${HIDE_TITLE}" aria-label="이 출장 숨기기">${ICON.eyeOff}</button>`;
+  return `<li class="krs-mine-item${now ? ' today' : ''}${it.past ? ' past' : ''}${it.tucked ? ' tucked' : ''}" data-i="${i}" title="누르면 예약 패널의 근태 탭을 엽니다">`
+    + `<span class="krs-mine-kind ${it.group}">${escapeHtml(it.label)}</span>`
+    + '<span class="krs-mine-main">'
+    + `<span class="krs-mine-when">${escapeHtml(when)}</span>`
+    + (it.status ? `<span class="krs-mine-status">${escapeHtml(it.status)}</span>` : '')
+    + (it.past ? `<span class="krs-mine-status krs-mine-past">다녀온 출장${it.stage ? ` · ${escapeHtml(it.stage)}` : ''}</span>` : '')
+    + (it.title ? `<span class="krs-mine-sub"><span class="krs-mine-what">${escapeHtml(it.title)}</span></span>` : '')
+    + '</span>' + eye + '</li>';
+}
+
 function itemHtml(it, i, today) {
+  if (it.kind === 'attend') return planHtml(it, i, today);
   const sameDay = it.from.date === it.to.date;
   const when = sameDay
     ? `${dayLabel(it.from.date, today)} ${fmtTime(it.from.minutes)}~${fmtTime(it.to.minutes)}`
@@ -236,6 +320,25 @@ function itemHtml(it, i, today) {
 async function defaultOpenPanel() {
   const r = await chrome.runtime.sendMessage({ type: 'openSidePanel' });
   return r || { ok: false, error: '응답이 없습니다' };
+}
+
+/**
+ * 배경(서비스 워커)에게 근태를 읽어 달라고 한다. HR 은 다른 출처이고 HR 작업 탭을 거쳐야 읽히는데,
+ * 콘텐츠 스크립트에는 탭을 다루는 API 가 없다. 배경은 읽은 것을 storage(PLANS_KEY)에도 담는다.
+ * @returns {Promise<{items: object[], error: string}>}
+ */
+async function defaultLoadPlans({ force = false } = {}) {
+  const r = await chrome.runtime.sendMessage({ type: 'hrPlans', force });
+  return r || { items: [], error: '응답이 없습니다' };
+}
+
+/**
+ * 여비계산서 목록을 읽는 길(src/trip.js 의 tripList). 홈은 eclass 와 같은 출처라 여기서 바로 읽힌다.
+ * 다녀온 출장이 남아 있을 때만 쓰므로 그때 불러온다.
+ */
+async function defaultListTrips(range) {
+  const { tripList } = await import('./trip.js');
+  return tripList(range);
 }
 
 /**
@@ -321,6 +424,8 @@ export function createHomeCard(doc, deps = {}) {
   const scanCars = deps.scanCars || scanCarDays;
   const debounceMs = deps.debounceMs ?? RESCAN_DEBOUNCE_MS;
   const openPanel = deps.openPanel || defaultOpenPanel;
+  const loadPlans = deps.loadPlans || defaultLoadPlans;
+  const listTrips = deps.listTrips || defaultListTrips;
   const visible = deps.visible || (() => doc.visibilityState !== 'hidden');
   const alive = deps.alive || defaultAlive;
 
@@ -330,11 +435,25 @@ export function createHomeCard(doc, deps = {}) {
   if (anchor.mode === 'before') anchor.el.parentElement.insertBefore(ui.root, anchor.el);
   else anchor.el.prepend(ui.root);
 
-  const view = { items: [] };
+  // items 는 회의실·차량 예약, plans 는 근태. 아직 모르면 null 이다 — 못 읽은 것을 0 건이라고 하지 않는다.
+  // all 은 둘을 날짜순으로 섞은, 화면에 그린 그대로의 목록이다. raw 는 읽어 둔 근태 그대로({ items, start, end }) —
+  // 다녀온 출장을 고르는 규칙이 바뀌면 여기서 다시 고른다.
+  const view = { items: null, plans: null, all: [], raw: null };
+  // 다녀온 출장을 고르는 규칙(src/settling.js): 며칠 뒤까지 남기는가, 증빙을 보낸 기록, 읽어 둔 여비계산서 목록(모르면 null).
+  let back = TRIP_LOOKBACK_DAYS;
+  let sent = {};
+  let stages = null;
+  let stageRun = null;     // 지금 도는 여비계산서 목록 읽기
+  let hidden = new Set();  // 숨긴 "다녀온 출장"의 신청서 번호(HIDDEN_KEY)
+  let showAll = false;     // 전체 보기 — 숨긴 출장까지 보는 중인가(이 화면에서만, 기억하지 않는다)
   let running = null;      // 지금 도는 훑기. 한 번에 하나만.
   let rerun = false;       // 도는 중에 다시 훑을 일이 생겼다
   let needRescan = false;  // 안 보이는 사이에 생긴 일. 보이면 훑는다
   let debounce = null;
+  let planRun = null;      // 지금 도는 근태 읽기. 훑기와 따로 돈다.
+  let planRerun = false;
+  let needPlans = false;
+  let planDebounce = null;
   let disposed = false;    // 카드를 뗐다. 그 뒤로는 아무것도 하지 않는다
   const stopper = new AbortController();
 
@@ -343,13 +462,64 @@ export function createHomeCard(doc, deps = {}) {
     ui.refresh.disabled = on;
   };
 
+  /**
+   * 예약과 근태를 한 목록에 날짜순으로 섞어 그리고, 칩에 건수를 적는다. 숨긴 "다녀온 출장"은 빼고 그린다 —
+   * 숨긴 것이 있으면 머리 줄에 눈 아이콘(전체 보기)이 나오고, 켜면 숨긴 것까지 흐리게 보인다. 칩은 숨기지 않은 건수다.
+   */
+  function paint() {
+    const t = today();
+    const items = view.items || [];
+    const every = (view.plans || []).map((p) => ({ ...p, tucked: p.past && hidden.has(p.docNo) }));
+    const tucked = every.filter((p) => p.tucked).length;
+    if (!tucked) showAll = false;
+    const plans = every.filter((p) => showAll || !p.tucked);
+    ui.showAll.hidden = !tucked;
+    ui.showAll.setAttribute('aria-pressed', String(showAll));
+    ui.showAll.title = showAll ? `숨긴 출장 ${tucked}건까지 보는 중 — 누르면 다시 가립니다` : `전체 보기 — 숨긴 출장 ${tucked}건까지 봅니다`;
+    ui.showAll.setAttribute('aria-label', ui.showAll.title);
+    view.all = [...items, ...plans].sort((a, b) =>
+      a.from.date.localeCompare(b.from.date) || a.from.minutes - b.from.minutes);
+    const cars = items.filter((it) => it.kind === 'car').length;
+    setChip(ui.rooms, view.items ? items.length - cars : null);
+    setChip(ui.cars, view.items ? cars : null);
+    for (const g of PLAN_GROUPS) {
+      setChip(ui.plans[g.key], view.plans ? plans.filter((p) => p.group === g.key && !p.tucked).length : null);
+    }
+    ui.list.innerHTML = view.all.map((it, i) => itemHtml(it, i, t)).join('');
+  }
+
   function paintList(items) {
     view.items = items;
-    const t = today();
-    const cars = items.filter((it) => it.kind === 'car').length;
-    setChip(ui.rooms, items.length - cars);
-    setChip(ui.cars, cars);
-    ui.list.innerHTML = items.map((it, i) => itemHtml(it, i, t)).join('');
+    paint();
+  }
+
+  /** 읽어 둔 근태에서 카드에 올릴 것을 지금 규칙(다녀온 출장을 몇 주까지 · 정산이 끝난 것은 뺌)으로 다시 고른다. */
+  function pick() {
+    if (!view.raw) return;
+    view.plans = planItems(view.raw.items, view.raw.start, view.raw.end,
+      { backDays: back, settled: settledBy({ sent, stages }), note: (p) => stageNote(p, stages) });
+    paint();
+  }
+
+  /**
+   * 다녀온 출장이 남아 있는데 여비계산서의 단계를 모르면 목록을 읽어(하루에 한 번) 다시 고른다 — 사후정산이 완료된 것이 빠진다.
+   * 다녀온 출장이 없으면 읽지 않는다. 못 읽어도 말하지 않는다 — 그 출장이 그대로 보일 뿐이다.
+   */
+  async function wantStages(force = false) {
+    if (disposed || !alive() || (stages && !force) || !(view.plans || []).some((p) => p.past)) return;
+    stageRun ||= readStages({ list: listTrips, force, storage, today: today() }).finally(() => { stageRun = null; });
+    const got = await stageRun;
+    if (disposed || !got) return;
+    stages = got;
+    pick();
+  }
+
+  /** 숨긴 출장을 바꿔 담고 다시 그린다. 목록에서 이미 빠진 출장(고른 기간이 지났다)의 번호는 버린다. */
+  async function setHidden(docNos) {
+    const live = new Set((view.plans || []).filter((p) => p.past).map((p) => p.docNo));
+    hidden = new Set(docNos.filter((d) => live.has(d)));
+    paint();
+    await storage.set({ [HIDDEN_KEY]: [...hidden] });
   }
 
   function paintProgress(range, phase, label, date, i, n) {
@@ -474,6 +644,70 @@ export function createHomeCard(doc, deps = {}) {
     return running;
   }
 
+  /**
+   * 근태(출장·외근·휴가)를 읽어 그린다. 회의실·차량 훑기와 따로 돈다.
+   *   오늘 읽어 둔 것이 있다(패널이 읽었든 배경이 읽었든) → 그것만 보여준다
+   *   없다 · force(새로고침)                           → 배경에게 읽어 달라고 한다
+   * 못 읽으면 칩을 0 으로 두지 않고(줄표) 그 사실을 적는다.
+   */
+  function runPlans({ force = false } = {}) {
+    if (disposed || !alive()) return undefined;
+    if (planRun) {
+      if (force) planRerun = true;
+      return planRun;
+    }
+    planRun = (async () => {
+      const saved = await storage.get(['spanDays', PLANS_KEY, HIDDEN_KEY, BACK_KEY, SENT_KEY, STAGES_KEY]);
+      if (disposed) return;
+      hidden = new Set(Array.isArray(saved[HIDDEN_KEY]) ? saved[HIDDEN_KEY] : []);
+      const start = today();
+      back = backWeeksOf(saved[BACK_KEY]) * 7;
+      sent = saved[SENT_KEY] || {};
+      stages = stagesFresh(saved[STAGES_KEY], start) ? saved[STAGES_KEY] : null;
+      const dates = datesFrom(start, spanOf(saved.spanDays));
+      const show = (raw) => {
+        view.raw = { items: raw, start, end: dates[dates.length - 1] };
+        pick();
+      };
+      const cache = saved[PLANS_KEY];
+      const fresh = plansFresh(cache, start, start);
+      if (fresh) show(cache.items);
+      if (fresh && !force) {
+        ui.planWarn.textContent = '';
+        await wantStages();
+        return;
+      }
+      const r = await loadPlans({ force });
+      if (disposed) return;
+      if (!r.error) show(r.items || []);
+      ui.planWarn.textContent = r.error
+        ? `⚠ 근태(출장·외근·휴가)는 읽지 못했습니다: ${r.error}${fresh ? ' (보이는 근태는 먼저 읽어 둔 것입니다)' : ''}`
+        : '';
+      await wantStages(force);
+    })().catch((err) => {
+      // 읽는 사이에 확장이 다시 올려졌으면 예약 쪽이 그 안내를 한다.
+      if (!disposed && alive()) ui.planWarn.textContent = `⚠ 근태(출장·외근·휴가)는 읽지 못했습니다: ${err.message}`;
+    }).finally(() => {
+      planRun = null;
+      if (planRerun && !disposed) {
+        planRerun = false;
+        runPlans({ force: true });
+      }
+    });
+    return planRun;
+  }
+
+  /** 근태가 바뀌었을 수 있다(패널이 담아 둔 것을 지웠다). 보이면 곧 읽고, 안 보이면 보일 때 읽는다. */
+  function wantPlans() {
+    if (disposed) return;
+    if (!visible()) {
+      needPlans = true;
+      return;
+    }
+    clearTimeout(planDebounce);
+    planDebounce = setTimeout(() => runPlans(), debounceMs);
+  }
+
   /** 예약이 바뀌었을 수 있다. 보이면 곧(몰려오는 알림은 모아서) 훑고, 안 보이면 보일 때 훑는다. */
   function wantRescan() {
     if (disposed) return;
@@ -492,11 +726,42 @@ export function createHomeCard(doc, deps = {}) {
     // 이름·기간이 바뀌면 담긴 것은 다른 조건으로 읽은 것이라 더는 맞지 않는다.
     const settings = ['myName', 'justBooked', 'spanDays'].some((k) => k in changes);
     if (gone || settings) wantRescan();
+    // 근태: 패널이 근태를 올리거나 거둬들인 뒤 담아 둔 것을 지웠으면 다시 읽고, 누군가 새로 담았으면 그것을 그린다.
+    // 기간이 바뀌면 담긴 것에서 다시 고른다(HR 을 다시 읽을 일은 아니다).
+    if (PLANS_KEY in changes) {
+      if (changes[PLANS_KEY].newValue === undefined) wantPlans();
+      else runPlans();
+    } else if ('spanDays' in changes) runPlans();
+    // 다녀온 출장을 고르는 규칙이 바뀌었다 — 패널에서 기간(4주·8주·안 봄)을 바꿨거나, 증빙을 보냈거나, 여비계산서 목록을 새로 읽었다.
+    if (BACK_KEY in changes) {
+      back = backWeeksOf(changes[BACK_KEY].newValue) * 7;
+      pick();
+      wantStages().catch(() => {});
+    }
+    if (SENT_KEY in changes) {
+      sent = changes[SENT_KEY].newValue || {};
+      pick();
+    }
+    if (STAGES_KEY in changes) {
+      const value = changes[STAGES_KEY].newValue;
+      stages = stagesFresh(value, today()) ? value : null;
+      pick();
+    }
+    // 다른 창의 홈에서 출장을 숨기거나 다시 보이게 했다.
+    if (HIDDEN_KEY in changes) {
+      hidden = new Set(Array.isArray(changes[HIDDEN_KEY].newValue) ? changes[HIDDEN_KEY].newValue : []);
+      paint();
+    }
   });
   const onVisible = () => {
-    if (needRescan && visible()) {
+    if (!visible()) return;
+    if (needRescan) {
       needRescan = false;
       run({ force: true });
+    }
+    if (needPlans) {
+      needPlans = false;
+      runPlans();
     }
   };
   doc.addEventListener('visibilitychange', onVisible);
@@ -511,12 +776,19 @@ export function createHomeCard(doc, deps = {}) {
     const act = target?.closest('[data-act]')?.dataset.act;
     const li = act ? null : target?.closest('li[data-i]');
     if ((!act && !li) || orphaned()) return;
-    if (act === 'refresh') { run({ force: true }); return; }
+    if (act === 'refresh') { run({ force: true }); runPlans({ force: true }); return; }
     if (act === 'panel') { await askPanel(); return; }
-    const it = view.items[+li.dataset.i];
+    // 다녀온 출장 한 건을 숨기거나 다시 보이게 하고(줄 끝의 눈 아이콘), 숨긴 것까지 전체를 보거나 다시 가린다(머리 줄의 눈 아이콘).
+    const docNo = target.closest('[data-doc]')?.dataset.doc;
+    if (act === 'hide') { await setHidden([...hidden, docNo]); return; }
+    if (act === 'show') { await setHidden([...hidden].filter((d) => d !== docNo)); return; }
+    if (act === 'all') { showAll = !showAll; paint(); return; }
+    const it = view.all[+li.dataset.i];
     if (!it) return;
     // 패널이 어느 날짜·종류를 열지 부탁을 남기고 연다. 이미 열려 있으면 패널이 저장소 변화로 알아챈다.
-    await storage.set({ [JUMP_KEY]: { date: it.from.date, mode: it.kind === 'car' ? 'car' : 'room', at: now() } });
+    // 근태 건은 근태 탭으로 간다 — 취소·변경은 거기서 한다.
+    const mode = it.kind === 'attend' ? 'attend' : it.kind === 'car' ? 'car' : 'room';
+    await storage.set({ [JUMP_KEY]: { date: it.from.date, mode, at: now() } });
     await askPanel();
   });
 
@@ -526,6 +798,7 @@ export function createHomeCard(doc, deps = {}) {
     disposed = true;
     stopper.abort();
     clearTimeout(debounce);
+    clearTimeout(planDebounce);
     offChanged?.();
     doc.removeEventListener('visibilitychange', onVisible);
     ui.root.remove();
@@ -533,8 +806,8 @@ export function createHomeCard(doc, deps = {}) {
 
   return {
     root: ui.root,
-    ready: run(),
-    refresh: (opts) => run({ force: true, ...opts }),
+    ready: Promise.all([run(), runPlans()]),
+    refresh: (opts) => Promise.all([run({ force: true, ...opts }), runPlans({ force: true })]),
     destroy,
     get destroyed() { return disposed; },
   };

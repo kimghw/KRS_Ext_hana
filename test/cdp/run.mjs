@@ -202,7 +202,7 @@ console.log('\n실제 사이트를 읽는다 (로그인 필요)');
     skipped('차량 목록 파싱', why);
     skipped('신청 폼 구조 확인', why);
     skipped('회의실 목록 파싱', why);
-    skipped('홈 내 예약 카드', why);
+    skipped('홈 WORKSPACE 카드', why);
   } else {
     const car = await cli.evaluate(`(() => {
       const grid = document.getElementById('RG_MAIN_ctl00');
@@ -260,7 +260,7 @@ console.log('\n실제 사이트를 읽는다 (로그인 필요)');
     })()`);
     t('회의실 표도 읽는다', () => assert(room.hasGrid, JSON.stringify(room)));
 
-    // 홈의 내 예약 카드 — 콘텐츠 스크립트가 붙어 목록을 그리거나, 못 그린 이유를 말하는지.
+    // 홈의 WORKSPACE 카드 — 콘텐츠 스크립트가 붙어 목록을 그리거나, 못 그린 이유를 말하는지.
     // 훑기는 서른 날이라 시간이 걸린다. 카드가 뜨는 것과 바쁨이 풀리는 것을 따로 기다린다.
     if (extId) {
       await cli.goto(HOME, 25000);
@@ -279,7 +279,7 @@ console.log('\n실제 사이트를 읽는다 (로그인 필요)');
           note: text('note'), rooms: text('rooms'), warn: text('warn'),
         };
       })()`, 200000);
-      t('홈에 내 예약 카드가 붙는다', () =>
+      t('홈에 WORKSPACE 카드가 붙는다', () =>
         assert(strip.mounted, '카드가 없다 — manifest 가 바뀌었으면 확장을 다시 올려야 한다'));
       if (strip.mounted) {
         t('Popup Notice 카드 바로 위에 있다', () => assert(strip.beforeNotice));
@@ -321,7 +321,7 @@ console.log('\n실제 사이트를 읽는다 (로그인 필요)');
         }
       }
     } else {
-      skipped('홈 내 예약 카드', '확장 ID 를 못 찾음');
+      skipped('홈 WORKSPACE 카드', '확장 ID 를 못 찾음');
     }
   }
 

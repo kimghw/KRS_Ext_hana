@@ -39,7 +39,8 @@ export const CAR_GRID = {
   tableId: 'RG_MAIN_ctl00',
   tableClass: 'rgMasterTable',
   detailClass: 'rgDetailTable',
-  main: { name: 1, status: 3 },
+  // note 는 차량 옆의 안내("[임원용 차량]", "[서울본부 전용 차량]" …). 아무나 쓰는 차량은 비어 있다.
+  main: { name: 1, note: 2, status: 3 },
   detail: { purpose: 0, time: 1, owner: 2 },
 };
 

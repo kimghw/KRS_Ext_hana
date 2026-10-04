@@ -35,7 +35,7 @@ argument-hint: "[check|install [<ID>]|ping|test|log [N]|browser|chrome|edge|rest
 | 1 | `node` PATH | 다리가 뜨지 못함 |
 | 2 | `claude` PATH | 호스트가 CLI 를 못 찾음 |
 | 3 | `claude` 로그인 (`~\.claude\.credentials.json`) | 등록은 성공, 쓸 때 실패 → `test` 로만 드러남 |
-| 4 | `native\host.mjs` + `claude-bridge.bat` | 폴더가 덜 복사된 것 |
+| 4 | `native\host.mjs` + `claude-bridge.bat` + 입력 명세(`src\input.js`, `src\inputspec.js` — 다리가 지시문을 여기서 만든다) | 폴더가 덜 복사된 것. 명세가 없으면 다리가 뜨자마자 죽어 `ping` 도 안 된다 |
 | 5 | 레지스트리 등록(설치된 브라우저마다) + 매니페스트의 ID 일치 | 배지 `없음` |
 | 6 | 확장이 그 경로에서 로드 + **브라우저 완전 재시작** (엣지는 창을 닫아도 남는다) | 배지 `없음` |
 

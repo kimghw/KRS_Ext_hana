@@ -1,4 +1,4 @@
-// e-Class 홈의 내 예약 카드 위에 "접수 미확인 공문" 카드를 붙인다.
+// e-Class 홈의 WORKSPACE 카드 위에 "접수 미확인 공문" 카드를 붙인다.
 //
 // DOC Cruiser Monitoring 의 "3) Uncfm. Rcv DOC" — 내 앞으로 왔는데 아직 접수 확인을 하지 않은 공문이다.
 // 그 숫자가 여는 목록(Rcv_Not_Confirm_List.aspx)을 받아 **제목만** 늘어놓고, 누르면 사이트의 제목 링크가
@@ -10,7 +10,7 @@
 // 목록은 요청 한 번(25KB)이라 담아 두지 않고 홈을 열 때마다 받는다. 문서 창에서 접수 확인을 하고 홈으로
 // 돌아오면(창에 초점이 돌아오면) 다시 받아 그 건이 빠진 것을 보여준다.
 //
-// 겉모습은 내 예약 카드와 같은 홈 카드 공통 스타일(src/homecard.js)이고, 안쪽은 krs-uncfm-* 자체 스타일만 쓴다.
+// 겉모습은 WORKSPACE 카드와 같은 홈 카드 공통 스타일(src/homecard.js)이고, 안쪽은 krs-uncfm-* 자체 스타일만 쓴다.
 // **처음에는 머리 한 줄**(이름·건수 칩·읽은 시각)만 보이고, 머리 줄이나 화살표 버튼을 눌러야 제목 목록이 나온다
 // — 홈을 열 때마다 공문 제목이 자리를 차지하지 않게. 못 읽었다는 경고는 접혀 있어도 보인다.
 
@@ -84,8 +84,8 @@ export async function readUnconfirmed(fetchPage = directFetch) {
 /* ------------------------------------------------------------ 자리 찾기 */
 
 /**
- * 카드를 어디에 붙일지. 내 예약 카드가 이미 있으면 그 바로 위, 없으면 내 예약 카드가 붙을 자리다
- * — 내 예약 카드는 그 뒤에 와도 Popup Notice 바로 앞에 끼어들므로 어느 쪽이 먼저든 이 카드가 위에 온다.
+ * 카드를 어디에 붙일지. WORKSPACE 카드가 이미 있으면 그 바로 위, 없으면 WORKSPACE 카드가 붙을 자리다
+ * — WORKSPACE 카드는 그 뒤에 와도 Popup Notice 바로 앞에 끼어들므로 어느 쪽이 먼저든 이 카드가 위에 온다.
  */
 export function findSpot(doc) {
   const mine = doc.getElementById(MINE_ROOT_ID);

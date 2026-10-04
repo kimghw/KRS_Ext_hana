@@ -1,4 +1,4 @@
-// e-Class 홈에 "내 예약" 카드를 붙이는 콘텐츠 스크립트의 시동 부분.
+// e-Class 홈에 "WORKSPACE" 카드(예전 "내 예약")를 붙이는 콘텐츠 스크립트의 시동 부분.
 //
 // 콘텐츠 스크립트는 ES 모듈이 아니라 import 문을 못 쓴다. 그래서 여기서 확장 안의 모듈을
 // 동적으로 불러온다 — manifest 의 web_accessible_resources 가 src/ 를 이 사이트에 열어 둔다.
@@ -17,7 +17,7 @@
 
   import(chrome.runtime.getURL('src/home.js'))
     .then(({ startHome }) => startHome(document))
-    .catch((err) => warn('홈 내 예약 카드를 붙이지 못했습니다', err));
+    .catch((err) => warn('홈 WORKSPACE 카드를 붙이지 못했습니다', err));
 
   // DOC-Cruiser 미회람 문서 열람. 아침에 홈을 열어 카드가 하루 한 번 훑는 그 자리에서 같이 돈다.
   // 카드와는 따로다 — 카드를 꺼 두어도 이 설정(storage 의 docCirculate, 기본 끔)이 켜져 있으면 한다.
@@ -25,7 +25,7 @@
     .then(({ startCirculate }) => startCirculate())
     .catch((err) => warn('미회람 문서 열람을 시작하지 못했습니다', err));
 
-  // DOC-Cruiser 접수 미확인 공문 카드. 내 예약 카드 위에 제목만 늘어놓는다(storage 의 homeUncfm, 기본 켬).
+  // DOC-Cruiser 접수 미확인 공문 카드. WORKSPACE 카드 위에 제목만 늘어놓는다(storage 의 homeUncfm, 기본 켬).
   import(chrome.runtime.getURL('src/unconfirmed.js'))
     .then(({ startUnconfirmed }) => startUnconfirmed(document))
     .catch((err) => warn('접수 미확인 공문 카드를 붙이지 못했습니다', err));

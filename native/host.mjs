@@ -1,47 +1,32 @@
 // 크롬 확장과 로컬 Claude Code CLI 를 잇는 네이티브 메시징 호스트.
 //
-// 확장은 임의의 명령을 보낼 수 없다. 여기서 정해둔 작업(task)만 실행하고
-// 시스템 프롬프트도 이 파일 안에 고정돼 있다. 확장이 보내는 것은 입력 텍스트뿐이다.
+// 확장은 임의의 명령을 보낼 수 없다. 입력 명세(input.yaml)에 적힌 작업(task)만 실행하고
+// 시스템 프롬프트도 그 명세에서 만든 것으로 고정돼 있다. 확장이 보내는 것은 작업 이름과 입력 텍스트뿐이다.
 // 호출마다 native/logs/<날짜>.jsonl 에 한 줄씩 남기고, logs 작업으로 최근 것을 돌려준다.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { TASKS as SPEC_TASKS, systemPrompt } from '../src/input.js';
+
 const MODEL = 'claude-haiku-4-5';
+// 첨부(출장 증빙)를 읽을 때 생각(thinking)에 쓰는 토큰의 상한. CLI 기본값이면 한 장에 25초쯤, 끄면(0) 6초지만 법인카드인지 같은
+// 판단을 틀렸다(2026-10-03 같은 영수증으로 세 번씩 잼) — 가장 작은 값을 준다: 15초쯤이고 판단은 기본값과 같았다.
+const FILE_THINKING_TOKENS = '1024';
+// 메시지에 바로 실을 수 있는 그림 형식과 크기(API 는 그림 하나를 base64 5MB 까지 받는다). 그 밖의 것은 파일로 내려 Read 도구로 읽게 한다.
+const DIRECT_IMAGE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const DIRECT_IMAGE_MAX = 3.5 * 1024 * 1024;
 
 // PATH 에서 찾는다. 다른 곳에 있으면 CLAUDE_BIN 환경변수로 알려주면 된다.
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
-const TASKS = {
-  parse: {
-    system:
-      'You convert Korean meeting-room or company-car booking requests into JSON. ' +
-      'The input names which one it is (찾는 대상). Both use the same keys. ' +
-      'Output ONLY a JSON object. No prose, no markdown, no code fence. ' +
-      'Keys: dateFrom, dateTo (YYYY-MM-DD), hourFrom, hourTo (integers 0-24), ' +
-      'minSeats (integer or null), minHours (number or null), ' +
-      'region ("부산", "서울", or null), summary (one Korean line describing the parsed filter). ' +
-      'If no date is given use today for both dateFrom and dateTo. ' +
-      'If no time is given use hourFrom 9 and hourTo 18. ' +
-      'Cars have no seat data, so minSeats is null for 차량 requests. ' +
-      'Resolve relative dates like 내일 / 이번 주 / 다음 주 against today.',
-    max: 1200,
-  },
-  diagnose: {
-    system:
-      'You diagnose a failed meeting-room reservation on an ASP.NET WebForms intranet site. ' +
-      'The reservation was submitted but a follow-up query did not find it. ' +
-      'The user gives you a digest of what changed in the response. ' +
-      'Output ONLY a JSON object. No prose, no markdown, no code fence. ' +
-      'Keys: verdict ("rejected" | "maybe_saved" | "unknown"), siteMessage (string, "" if none), ' +
-      'cause (one or two Korean sentences), fix (one Korean sentence, "" if none). ' +
-      'Whether it saved was already decided by the re-query — you only explain why. ' +
-      'Do not state guesses as facts.',
-    max: 1200,
-  },
-};
+// 작업과 지시문은 입력 명세(input.yaml → src/inputspec.js)에서 온다. 확장의 API 길(src/ai.js)과 같은 지시문이고,
+// 이 길에는 구조화 출력이 없으므로 JSON 만 내라는 말을 덧붙인다. 돌려준 답은 확장이 같은 명세로 검증한다.
+const TASKS = Object.fromEntries(Object.keys(SPEC_TASKS).map((name) =>
+  [name, { system: systemPrompt(name, { jsonOnly: true }) }]));
 
 /* ------------------------------------------------------------- 호출 기록 */
 
@@ -152,47 +137,137 @@ function stripFence(text) {
 /** 기록에 남길 사정을 붙인 오류. 확장에는 message 만 간다. */
 const fail = (message, detail) => Object.assign(new Error(message), { detail });
 
-function runClaude(task, input) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-p', input,
-      '--output-format', 'json',
-      '--model', MODEL,
-      '--system-prompt', task.system,
-      // 기본 에이전트 프롬프트를 빼면 캐시 토큰이 38K -> 4K 로 줄고 지시도 잘 따른다
-      '--exclude-dynamic-system-prompt-sections',
-      '--disallowedTools', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-      'WebFetch', 'WebSearch', 'Task',
-    ];
+/**
+ * 첨부(출장 증빙)를 임시 폴더에 파일로 내려 둔다. CLI 는 파일을 인자로 받지 않으므로 Read 도구로 읽게 하고, 끝나면 폴더째 지운다.
+ * @returns {{paths: string[], cleanup: Function}}
+ */
+function stageFiles(files) {
+  if (!files.length) return { paths: [], cleanup: () => {} };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krs-receipt-'));
+  const paths = files.map((f, i) => {
+    const ext = (String(f.name || '').match(/\.([a-z0-9]{1,5})$/i) || [])[1] || (f.type === 'application/pdf' ? 'pdf' : 'png');
+    const p = path.join(dir, `receipt-${i + 1}.${ext.toLowerCase()}`);
+    fs.writeFileSync(p, Buffer.from(String(f.dataUrl || '').split(',')[1] || '', 'base64'));
+    return p;
+  });
+  return { paths, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 임시 파일이다 */ } } };
+}
 
+const base64Of = (f) => String(f.dataUrl || '').split(',')[1] || '';
+
+/** 메시지에 바로 실을 수 있는 첨부인가 — PDF 와 API 가 받는 그림 형식, 그림은 크기 한도 안이어야 한다. */
+export const canAttach = (f) => f.type === 'application/pdf' || (DIRECT_IMAGE.has(f.type) && base64Of(f).length * 0.75 <= DIRECT_IMAGE_MAX);
+
+/** 첨부 하나를 메시지의 내용 블록으로 — 그림은 image, PDF 는 document(확장의 API 길 src/ai.js 의 fileBlock 과 같은 모양). */
+const attachBlock = (f) => ({ type: f.type === 'application/pdf' ? 'document' : 'image', source: { type: 'base64', media_type: f.type, data: base64Of(f) } });
+
+/**
+ * claude 를 어떻게 부를지 짓는다(인자·표준 입력·환경). 첨부가 있으면 길이 둘이다.
+ *  - direct: 첨부를 메시지에 바로 싣는다(stream-json 입력). 모델이 한 차례만 돌고 생각도 조금만 한다 — 빠른 길이다
+ *    (2026-10-03 같은 영수증 한 장: 아래 길 77초 → 이 길 15초쯤).
+ *  - 아니면: 첨부를 임시 폴더에 내려 두고 Read 도구로 읽게 한다. 모델이 두 차례 돈다(도구 부르기 + 답) — 전부터 쓰던 길이고,
+ *    바로 싣지 못하는 첨부와 direct 가 안 되는 CLI 에서 쓴다.
+ * @returns {{args: string[], stdin: string, env: object, limitMs: number, cleanup: Function}}
+ */
+export function cliCall(task, input, files = [], { direct = false } = {}) {
+  // 기본 에이전트 프롬프트를 빼면 캐시 토큰이 38K -> 4K 로 줄고 지시도 잘 따른다
+  const common = ['--model', MODEL, '--system-prompt', task.system, '--exclude-dynamic-system-prompt-sections'];
+  if (direct) {
+    const line = JSON.stringify({ type: 'user', message: { role: 'user', content: [...files.map(attachBlock), { type: 'text', text: input }] } });
+    return {
+      args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', ...common,
+        // 그림을 보고 답만 하면 된다 — 사용자 설정(훅·MCP·스킬·플러그인)은 싣지 않고 도구도 주지 않는다.
+        // 세션 기록도 남기지 않는다(영수증 그림이 기록 파일에 쌓이지 않게).
+        '--safe-mode', '--strict-mcp-config', '--no-session-persistence', '--tools', ''],
+      stdin: `${line}\n`, env: { ...process.env, MAX_THINKING_TOKENS: FILE_THINKING_TOKENS }, limitMs: 120_000, cleanup: () => {},
+    };
+  }
+  const { paths, cleanup } = stageFiles(files);
+  const prompt = paths.length ? `${input}\n\n첨부 파일(Read 도구로 열어서 보세요):\n${paths.map((p) => `- ${p}`).join('\n')}` : input;
+  return {
+    args: [
+      '-p', prompt,
+      '--output-format', 'json',
+      ...common,
+      // 첨부가 있을 때만 Read 를 열어 준다 — 그 파일을 보라는 뜻이다. 나머지 도구는 늘 막는다.
+      '--disallowedTools', 'Bash', ...(paths.length ? [] : ['Read']), 'Write', 'Edit', 'Glob', 'Grep',
+      'WebFetch', 'WebSearch', 'Task',
+      ...(paths.length ? ['--allowedTools', 'Read'] : []),
+    ],
+    stdin: '', env: process.env, limitMs: paths.length ? 120_000 : 60_000, cleanup,
+  };
+}
+
+/** CLI 의 출력에서 결과를 꺼낸다 — json 출력은 객체 하나, stream-json 출력은 줄마다 객체이고 마지막 result 줄이 결과다. */
+export function envelopeOf(out) {
+  try {
+    return JSON.parse(out);
+  } catch { /* 줄마다 JSON 인 출력이다 */ }
+  for (const line of String(out).split('\n').reverse()) {
+    try {
+      const o = JSON.parse(line);
+      if (o?.type === 'result') return o;
+    } catch { /* 결과 줄이 아니다 */ }
+  }
+  return null;
+}
+
+/**
+ * 첨부가 모두 바로 실을 수 있는 것이면 빠른 길(direct)로 부르고, 그 길이 안 되면 전처럼 Read 도구로 읽게 해 다시 부른다.
+ * 시간 초과와 실행 실패(hard)는 다시 해도 같으므로 되풀이하지 않는다. attach 는 어느 길로 읽었는지다(기록에 남긴다).
+ */
+async function runClaude(task, input, files = []) {
+  let first = null;
+  if (files.length && files.every(canAttach)) {
+    try {
+      return { ...(await spawnClaude(cliCall(task, input, files, { direct: true }))), attach: 'direct' };
+    } catch (e) {
+      if (e.hard) throw e;
+      first = e;
+    }
+  }
+  try {
+    return { ...(await spawnClaude(cliCall(task, input, files))), ...(files.length ? { attach: 'read' } : {}) };
+  } catch (e) {
+    if (first) e.detail = { ...e.detail, direct: first.message };
+    throw e;
+  }
+}
+
+function spawnClaude({ args, stdin, env, limitMs, cleanup }) {
+  return new Promise((resolve, reject) => {
     // shell 을 쓰면 Windows 에서 인자가 이어붙기만 해서 공백 섞인 프롬프트가 깨진다.
     // claude 는 실제 실행 파일이므로 셸 없이 직접 띄운다.
-    const child = spawn(CLAUDE_BIN, args, { shell: false, windowsHide: true });
+    const child = spawn(CLAUDE_BIN, args, { shell: false, windowsHide: true, env });
 
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('CLI 응답이 60초 안에 오지 않았습니다.'));
-    }, 60_000);
+      cleanup();
+      reject(Object.assign(new Error(`CLI 응답이 ${limitMs / 1000}초 안에 오지 않았습니다.`), { hard: true }));
+    }, limitMs);
 
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(fail(`claude 실행 실패: ${e.message}`, { bin: CLAUDE_BIN, code: e.code }));
+      cleanup();
+      reject(Object.assign(fail(`claude 실행 실패: ${e.message}`, { bin: CLAUDE_BIN, code: e.code }), { hard: true }));
     });
+    // 표준 입력은 곧바로 닫는다 — 프롬프트를 인자로 준 길은 더 들어올 글이 없고, 첨부를 싣는 길은 메시지 한 줄을 쓰고 닫는다.
+    child.stdin.on('error', () => {});
+    child.stdin.end(stdin);
     child.on('close', (code) => {
       clearTimeout(timer);
+      cleanup();
       if (code !== 0) {
         return reject(fail(err.trim().slice(0, 300) || `claude 종료 코드 ${code}`,
           { exitCode: code, stderr: clip(err.trim(), 2000), stdout: clip(out.trim(), 1000) }));
       }
 
-      let env;
-      try {
-        env = JSON.parse(out);
-      } catch {
+      const env = envelopeOf(out);
+      if (!env) {
         return reject(fail('CLI 출력을 해석하지 못했습니다.', { stdout: clip(out.trim(), 2000) }));
       }
       if (env.is_error) {
@@ -222,7 +297,8 @@ export async function handle(msg, { run = runClaude, log = writeLog, tail = tail
   if (msg?.task === 'ping') return { ok: true, pong: true };
   if (msg?.task === 'logs') return { ok: true, entries: tail(msg.limit) };
 
-  const task = TASKS[msg?.task];
+  // 명세에 적힌 이름만 받는다('constructor' 같은 이름이 객체의 내장 속성에 걸리지 않게).
+  const task = typeof msg?.task === 'string' && Object.hasOwn(TASKS, msg.task) ? TASKS[msg.task] : null;
   if (!task) {
     const error = `알 수 없는 작업: ${msg?.task}`;
     log({ task: String(msg?.task), ok: false, error });
@@ -235,11 +311,16 @@ export async function handle(msg, { run = runClaude, log = writeLog, tail = tail
     return { ok: false, error: '입력이 비어 있습니다.' };
   }
 
+  // 첨부(출장 증빙). 모양이 맞는 것만, 여섯 장까지. 기록에는 이름과 크기만 남긴다 — 영수증 그림을 기록 파일에 쌓지 않는다.
+  const files = (Array.isArray(msg.files) ? msg.files : [])
+    .filter((f) => f && typeof f.dataUrl === 'string' && /^data:[^;]+;base64,/.test(f.dataUrl)).slice(0, 6)
+    .map((f) => ({ name: String(f.name || 'file'), type: String(f.type || ''), dataUrl: f.dataUrl }));
   const started = Date.now();
-  const base = { task: msg.task, model: MODEL, input: clip(input, 1500) };
+  const base = { task: msg.task, model: MODEL, input: clip(input, 1500),
+    ...(files.length ? { files: files.map((f) => `${f.name} (${f.type}, ${Math.round((f.dataUrl.length * 3) / 4 / 1024)}KB)`) } : {}) };
   try {
-    const { data, costUsd } = await run(task, input.slice(0, 20000));
-    log({ ...base, ok: true, ms: Date.now() - started, costUsd, data });
+    const { data, costUsd, attach } = await run(task, input.slice(0, 20000), files);
+    log({ ...base, ok: true, ms: Date.now() - started, costUsd, ...(attach ? { attach } : {}), data });
     return { ok: true, data, costUsd };
   } catch (e) {
     log({ ...base, ok: false, ms: Date.now() - started, error: e.message, ...e.detail });

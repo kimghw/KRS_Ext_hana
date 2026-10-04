@@ -206,7 +206,13 @@ function Invoke-Check {
 
   $bat = Join-Path $root 'native\claude-bridge.bat'
   $hostFile = Join-Path $root 'native\host.mjs'
-  Write-Row '다리 파일' ((Test-Path $bat) -and (Test-Path $hostFile)) 'claude-bridge.bat + host.mjs'
+  # host.mjs 는 입력 명세에서 지시문을 만든다(src\input.js → src\inputspec.js). 둘 중 하나라도 없으면
+  # 다리가 뜨자마자 죽어 ping 에도 답하지 못한다.
+  $specFiles = @('src\input.js', 'src\inputspec.js') | ForEach-Object { Join-Path $root $_ }
+  $specMissing = @($specFiles | Where-Object { -not (Test-Path $_) })
+  Write-Row '다리 파일' ((Test-Path $bat) -and (Test-Path $hostFile) -and ($specMissing.Count -eq 0)) $(
+    if ($specMissing.Count) { '입력 명세 없음: ' + (($specMissing | Split-Path -Leaf) -join ', ') + ' — node tools\gen-input.mjs' }
+    else { 'claude-bridge.bat + host.mjs + 입력 명세' })
 
   # 등록은 설치된 브라우저마다 따로 본다. 안 깔린 브라우저 줄은 찍지 않는다 — 실패처럼 보일 뿐이다.
   $installed = Get-InstalledBrowsers

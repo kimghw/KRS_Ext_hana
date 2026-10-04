@@ -142,4 +142,42 @@ console.log('취소 손잡이 — 내 예약에만 붙는 취소 버튼');
     assert.equal(got.reservations.filter((r) => canDelete(r.del)).length, 0));
 }
 
+console.log('\n사이트가 예약 버튼에서 막는 차량 — 확장은 신청 폼 주소를 바로 열므로 따로 읽어 지킨다');
+{
+  const { parseCarGate, reserveCar } = await import('../src/rentcar.js');
+  const gate = parseCarGate(doc);
+  const car = (plate) => got.cars.find((c) => c.name.includes(plate));
+  t('화면의 스크립트(fnview)에서 막는 차량 번호 두 목록과 사이트의 문구를 읽는다', () => {
+    assert.deepEqual([...gate.first], ['24', '18', '38', '42', '55', '56', '59', '65', '75']);
+    assert.deepEqual([...gate.second], ['63'], '서울본부 공용 차량');
+    assert.match(gate.message, /^차량 이용 시 지원팀 .*에게 문의 바랍니다\.$/);
+  });
+  t('차량 옆의 안내를 읽는다 — 아무나 쓰는 차량은 비어 있다', () => {
+    assert.deepEqual([car('181허4309').note, car('62가1698').note, car('308소4997').note, car('223어7393').note, car('192호7954').note],
+      ['', '[임원용 차량]', '[지원팀 사전 협의 후 사용가능]', '[서울본부 전용 차량]', '[협약본부 전용 차량]']);
+  });
+  t('임원용·사전 협의 차량 네 대는 이 사람에게 막혀 있다(checkAuth 가 False) — 사이트의 문구가 까닭으로 달린다', () => {
+    assert.deepEqual(got.cars.filter((c) => c.blocked).map((c) => c.value), ['38', '65', '75', '56']);
+    assert.equal(car('62가1698').blocked, gate.message);
+  });
+  t('막히지 않는 차량 — 안내 없는 차량, 서울본부 전용(checkAuth2 가 True), 목록에 없는 협약본부 전용', () => {
+    assert.deepEqual([car('181허4309').blocked, car('223어7393').blocked, car('192호7954').blocked], ['', '', '']);
+    assert.ok(got.cars.every((c) => c.warn === false));
+  });
+  t('권한이 있으면(checkAuth 가 True) 임원용 차량은 막히지 않지만 사이트가 확인을 받는 차량이라고 알린다. 서울본부 차량은 checkAuth2 가 False 면 막힌다', () => {
+    const granted = extractCars(new JSDOM(html.replaceAll("'False','True');", "'True','False');")).window.document, DATE).cars;
+    const of = (v) => granted.find((c) => c.value === v);
+    assert.deepEqual([of('38').blocked, of('38').warn, of('63').blocked, of('73').blocked], ['', true, gate.message, '']);
+  });
+  t('막는 목록을 못 읽는 화면이면 막지 않는다(없는 것을 지어내지 않는다) — 안내는 그대로 읽힌다', () => {
+    const bare = extractCars(new JSDOM(html.replace(/exceptCarSeqNp/g, 'zzz')).window.document, DATE).cars;
+    assert.deepEqual([bare.filter((c) => c.blocked).length, bare.find((c) => c.value === '38').note], [0, '[임원용 차량]']);
+  });
+  const r = await reserveCar({ carValue: '38', car: '그랜저 (62가1698)', date: DATE, start: '09:00', end: '10:00', title: '', place: '부산시청', blocked: gate.message });
+  t('막힌 차량은 신청을 보내지 않는다 — 폼을 열지도 않고 사이트의 문구로 말한다', () => {
+    assert.deepEqual([r.ok, r.submitted], [false, false]);
+    assert.match(r.message, /^사이트가 이 차량의 신청을 막고 있습니다 — 차량 이용 시 지원팀/);
+  });
+}
+
 console.log(`\n통과 ${pass}건`);

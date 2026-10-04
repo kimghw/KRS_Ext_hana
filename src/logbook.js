@@ -15,6 +15,7 @@ const DATA_MAX = 6000;
 export const KIND_LABEL = {
   open: '열림',
   cli: '다리',
+  'cli-guide': '다리',
   load: '조회',
   scan: '훑기',
   reserve: '예약',
@@ -26,6 +27,9 @@ export const KIND_LABEL = {
   capture: '캡처',
   setting: '설정',
   circulate: '회람',
+  attend: '근태',
+  'attend-ask': '근태채우기',
+  'attend-list': '근태내역',
 };
 
 const pad = (n) => String(n).padStart(2, '0');

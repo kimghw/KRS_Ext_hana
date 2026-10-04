@@ -1,4 +1,4 @@
-// 홈의 접수 미확인 공문 카드: 목록 읽기, 제목만 그리기, 누르면 그 문서 창, 내 예약 카드 위 자리, 설정 따르기.
+// 홈의 접수 미확인 공문 카드: 목록 읽기, 제목만 그리기, 누르면 그 문서 창, WORKSPACE 카드 위 자리, 설정 따르기.
 // 가장 중요한 건 둘이다 — **확장이 문서를 대신 열지 않는 것**(요청은 목록 하나뿐)과,
 // 못 읽은 것을 "공문이 없습니다"로 넘기지 않는 것.
 //
@@ -172,21 +172,21 @@ await ta('모르는 화면이면 알아보지 못했다고 한다', async () =>
 /* ------------------------------------------------------------ 자리 */
 
 console.log('자리 찾기');
-t('내 예약 카드가 있으면 그 바로 위', () => {
+t('WORKSPACE 카드가 있으면 그 바로 위', () => {
   const s = findSpot(homeDoc(HOME_WITH_MINE));
   assert.deepEqual([s.mode, s.el.id], ['before', MINE_ROOT_ID]);
 });
-t('내 예약 카드가 아직 없으면 그 카드가 붙을 자리(Popup Notice 앞)', () => {
+t('WORKSPACE 카드가 아직 없으면 그 카드가 붙을 자리(Popup Notice 앞)', () => {
   const s = findSpot(homeDoc());
   assert.deepEqual([s.mode, s.el.id], ['before', 'divPopupInfo']);
 });
 t('알아보는 자리가 없으면 null', () =>
   assert.equal(findSpot(homeDoc('<html><body><div>다른 화면</div></body></html>')), null));
-await ta('내 예약 카드 위에 붙는다', async () => {
+await ta('WORKSPACE 카드 위에 붙는다', async () => {
   const m = await mount({ doc: homeDoc(HOME_WITH_MINE) });
   assert.equal(m.root.nextElementSibling.id, MINE_ROOT_ID);
 });
-await ta('내 예약 카드가 나중에 Popup Notice 앞에 끼어들어도 이 카드가 위다', async () => {
+await ta('WORKSPACE 카드가 나중에 Popup Notice 앞에 끼어들어도 이 카드가 위다', async () => {
   const m = await mount();
   const mine = m.doc.createElement('div');
   mine.id = MINE_ROOT_ID;

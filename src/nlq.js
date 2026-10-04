@@ -1,5 +1,5 @@
 // API 키 없이 쓰는 규칙 기반 질의 해석기.
-// 흔한 문장은 여기서 처리하고, 키가 있으면 ai.js 가 더 유연하게 해석한다.
+// 흔한 문장은 여기서 처리하고, Claude 가 연결돼 있으면 그쪽이 더 유연하게 해석한다(llm.js).
 
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -78,7 +78,8 @@ function parseHours(text) {
 }
 
 /**
- * 문장을 조회 조건으로 바꾼다. ai.js 의 parseQuery 와 같은 모양을 돌려준다.
+ * 문장을 조회 조건으로 바꾼다. 입력 명세(input.yaml)의 parse 와 같은 모양을 돌려주고, guessed 를 덧붙인다
+ * — 부르는 쪽(llm.js)이 Claude 의 답과 같은 관문에 통과시킨다.
  * @param {string} text
  * @param {string} today 'YYYY-MM-DD'
  */

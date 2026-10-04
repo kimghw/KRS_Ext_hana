@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "jsdom": "^30.0.1"
+    "jsdom": "^30.0.1",
+    "pdf-lib": "^1.17.1",
+    "yaml": "^2.9.1"
   }
 }

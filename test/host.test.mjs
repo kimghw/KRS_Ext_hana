@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 process.env.KRS_HOST_NO_MAIN = '1';
-const { handle, writeLog, tailLogs, pruneLogs } = await import('../native/host.mjs');
+const { handle, writeLog, tailLogs, pruneLogs, cliCall, canAttach, envelopeOf } = await import('../native/host.mjs');
 
 const HOST = fileURLToPath(new URL('../native/host.mjs', import.meta.url));
 
@@ -21,6 +21,81 @@ const ta = async (name, fn) => { await fn(); pass++; console.log('  ok  ' + name
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'krs-bridge-log-'));
 const pad = (n) => String(n).padStart(2, '0');
 const dayName = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.jsonl`;
+
+console.log('첨부 파일(출장 증빙)은 run 에 넘기고 기록에는 이름·크기만 남긴다');
+{
+  const logged = [];
+  const seen = [];
+  const files = [{ name: 'r.png', type: 'image/png', dataUrl: 'data:image/png;base64,AAAA' }, { bad: true }, { name: 'x.txt', type: 'text/plain', dataUrl: 'not-a-data-url' }];
+  const res = await handle({ task: 'receipt', input: '출장 정보', files }, {
+    log: (e) => logged.push(e), run: async (_t, _i, f) => { seen.push(f); return { data: { docType: 'unknown', summary: 's' }, costUsd: 0 }; },
+  });
+  await ta('모양이 맞는 파일(data URL)만 넘어간다', async () => {
+    assert.equal(res.ok, true);
+    assert.deepEqual(seen[0], [{ name: 'r.png', type: 'image/png', dataUrl: 'data:image/png;base64,AAAA' }]);
+  });
+  await ta('기록에는 파일 이름과 크기만 — 그림 자체는 남기지 않는다', async () => {
+    assert.deepEqual(logged.at(-1).files, ['r.png (image/png, 0KB)']);
+    assert.ok(!JSON.stringify(logged.at(-1)).includes('AAAA'));
+  });
+  const plain = await handle({ task: 'parse', input: '내일' }, { log: (e) => logged.push(e), run: async (_t, _i, f) => { seen.push(f); return { data: {} }; } });
+  await ta('첨부가 없으면 빈 목록이 가고 기록에 files 가 없다', async () => {
+    assert.equal(plain.ok, true);
+    assert.deepEqual(seen.at(-1), []);
+    assert.equal('files' in logged.at(-1), false);
+  });
+}
+
+console.log('첨부를 읽히는 두 길 — 메시지에 바로 싣기(빠른 길)와 Read 도구로 읽히기');
+{
+  const task = { system: '지시문' };
+  const png = { name: '영수증.png', type: 'image/png', dataUrl: 'data:image/png;base64,AAAA' };
+  const pdf = { name: '항공권.pdf', type: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERg==' };
+  await ta('바로 싣는 길: 그림은 image, PDF 는 document 블록으로 표준 입력 한 줄에 실리고, 파일 경로도 도구도 없다', async () => {
+    const call = cliCall(task, '출장 정보', [png, pdf], { direct: true });
+    assert.deepEqual(JSON.parse(call.stdin), { type: 'user', message: { role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERg==' } },
+      { type: 'text', text: '출장 정보' },
+    ] } });
+    assert.ok(call.stdin.endsWith('\n'));
+    const flag = (name) => call.args[call.args.indexOf(name) + 1];
+    assert.deepEqual([flag('--input-format'), flag('--output-format'), flag('--system-prompt'), flag('--tools')], ['stream-json', 'stream-json', '지시문', '']);
+    assert.ok(['--safe-mode', '--strict-mcp-config', '--no-session-persistence'].every((f) => call.args.includes(f)), '사용자 설정을 싣지 않고 세션 기록도 남기지 않는다');
+    assert.ok(!call.args.some((a) => /Read 도구|AAAA/.test(a)), '그림은 인자가 아니라 표준 입력으로 간다');
+    assert.equal(call.env.MAX_THINKING_TOKENS, '1024', '생각은 조금만 한다');
+    call.cleanup();
+  });
+  await ta('Read 로 읽히는 길: 파일을 임시 폴더에 내려 그 경로를 프롬프트에 적고 Read 만 열어 준다 — 끝나면 지운다', async () => {
+    const call = cliCall(task, '출장 정보', [png]);
+    const prompt = call.args[call.args.indexOf('-p') + 1];
+    const file = prompt.match(/^- (.+receipt-1\.png)$/m)?.[1];
+    assert.match(prompt, /^출장 정보\n\n첨부 파일\(Read 도구로 열어서 보세요\):/);
+    assert.ok(file && fs.existsSync(file));
+    assert.deepEqual([call.args[call.args.indexOf('--allowedTools') + 1], call.stdin, call.limitMs, call.env.MAX_THINKING_TOKENS], ['Read', '', 120_000, process.env.MAX_THINKING_TOKENS]);
+    call.cleanup();
+    assert.equal(fs.existsSync(file), false);
+  });
+  await ta('첨부가 없으면 전과 같은 인자다 — 프롬프트는 인자로 가고 Read 도 막는다', async () => {
+    const call = cliCall(task, '내일 오후 회의실');
+    assert.deepEqual(call.args.slice(0, 4), ['-p', '내일 오후 회의실', '--output-format', 'json']);
+    assert.ok(call.args.includes('Read') && !call.args.includes('--allowedTools'));
+    assert.deepEqual([call.stdin, call.limitMs], ['', 60_000]);
+  });
+  await ta('바로 실을 수 있는 것은 PDF 와 API 가 받는 그림 형식뿐이다 — 낯선 형식과 너무 큰 그림은 Read 로 읽힌다', async () => {
+    const big = { name: '큰사진.jpg', type: 'image/jpeg', dataUrl: `data:image/jpeg;base64,${'A'.repeat(5 * 1024 * 1024)}` };
+    assert.deepEqual([png, pdf, { ...png, type: 'image/bmp' }, { ...png, type: '' }, big].map(canAttach), [true, true, false, false, false]);
+  });
+  await ta('출력에서 결과를 꺼낸다 — json 은 객체 하나, stream-json 은 마지막 result 줄', async () => {
+    assert.deepEqual(envelopeOf('{"type":"result","result":"{}","is_error":false}'), { type: 'result', result: '{}', is_error: false });
+    const stream = ['{"type":"system","subtype":"init"}', '{"type":"assistant","message":{}}', '{"type":"result","result":"{\\"a\\":1}","total_cost_usd":0.01}', ''].join('\n');
+    assert.deepEqual(envelopeOf(stream), { type: 'result', result: '{"a":1}', total_cost_usd: 0.01 });
+    assert.equal(envelopeOf('bad option: --x'), null);
+  });
+  const logged = [];
+  await handle({ task: 'receipt', input: '출장 정보', files: [png] }, { log: (e) => logged.push(e), run: async () => ({ data: { docType: 'unknown' }, costUsd: 0, attach: 'direct' }) });
+  await ta('어느 길로 읽었는지 기록에 남는다', async () => assert.equal(logged.at(-1).attach, 'direct'));
+}
 
 console.log('무엇을 남기나 (가짜 claude)');
 {
@@ -75,6 +150,32 @@ console.log('무엇을 남기나 (가짜 claude)');
     const r = await handle({ task: 'rm -rf' }, { log });
     assert.equal(r.ok, false);
     assert.equal(logged.at(-1).task, 'rm -rf');
+  });
+  await ta('객체의 내장 속성 이름은 작업이 아니다', async () => {
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      const r = await handle({ task: name, input: 'x' }, { log, run: async () => assert.fail('부르면 안 됨') });
+      assert.equal(r.ok, false, name);
+    }
+  });
+  await ta('근태 채우기(attend)는 정해 둔 작업이다 — 고정된 지시문으로 claude 를 부른다', async () => {
+    let seen = null;
+    const r = await handle({ task: 'attend', input: '오늘은 2026-10-02 (금요일) 입니다.\n새 요청: 내일 외근' }, {
+      log, run: async (task, input) => { seen = { task, input }; return { data: { kind: 'out', reply: '외근' }, costUsd: 0.001 }; },
+    });
+    assert.deepEqual(r, { ok: true, data: { kind: 'out', reply: '외근' }, costUsd: 0.001 });
+    assert.match(seen.task.system, /장소와 목적을 지어내지 않습니다/);
+    assert.match(seen.task.system, /부서소통회/);
+    assert.equal(logged.at(-1).task, 'attend');
+  });
+  await ta('지시문은 입력 명세(input.yaml)에서 만든 것이다 — API 길과 같은 글에 "JSON 만" 이 붙는다', async () => {
+    const { systemPrompt, TASKS } = await import('../src/input.js');
+    for (const name of Object.keys(TASKS)) {
+      let seen = null;
+      await handle({ task: name, input: 'x' }, { log, run: async (task) => { seen = task; return { data: {} }; } });
+      assert.equal(seen.system, systemPrompt(name, { jsonOnly: true }), name);
+      assert.ok(seen.system.startsWith(systemPrompt(name)), `${name}: API 지시문에 덧붙인 것이어야 한다`);
+      assert.match(seen.system, /JSON 객체 하나만 출력합니다/);
+    }
   });
   await ta('빈 입력도 남긴다', async () => {
     const r = await handle({ task: 'parse', input: '  ' }, { log, run: async () => assert.fail('부르면 안 됨') });

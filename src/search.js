@@ -51,7 +51,7 @@ export function freeRuns(slots, minSlots) {
  * 현황을 확신할 수 없는 날(confident=false)은 **결과에서 빼고 따로 알린다.**
  * 못 읽은 날을 조용히 "자리 없음"으로 넘기면 거짓 안내가 된다.
  *
- * @param {object} filter parseQuery 결과
+ * @param {object} filter 입력 명세(input.yaml)의 parse 구조. 관문(src/input.js)을 지난 것이 온다
  * @param {(msg: string, i: number, n: number) => void} onProgress
  * @param {(date: string, hours: object, region: string|null) => Promise} loader
  *        하루치를 가져오는 함수. 기본은 회의실 조회이고, 테스트는 가짜를 넘긴다.

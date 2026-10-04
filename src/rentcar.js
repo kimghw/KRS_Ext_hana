@@ -109,6 +109,46 @@ function carIdxOf(row) {
 }
 
 /**
+ * 사이트가 **예약 버튼에서 막는 차량**(2026-10-03 실제 화면의 fnview 에서 읽었다).
+ *
+ * 목록의 예약 버튼은 `fnview(주소, 차량번호, 날짜, checkAuth, checkAuth2)` 를 부르고, 그 함수가 신청 폼을 열기 전에 가른다:
+ *   - `exceptCarSeqNp` 에 든 차량(임원용·사전 협의 차량)은 checkAuth 가 "False" 면 "…에게 문의 바랍니다" 를 띄우고 **열지 않는다.**
+ *     "True" 여도 "임원용 차량입니다. 일반 업무에 사용할 수 없습니다" 를 확인받는다.
+ *   - `exceptCarSeqNp2` 에 든 차량(서울본부 공용 차량)은 checkAuth2 가 "False" 면 같은 문구로 막는다.
+ * 확장은 그 버튼을 거치지 않고 신청 폼 주소를 바로 열기 때문에, 이것을 따로 읽어 두지 않으면 사이트가 막는 차량을 그냥 신청하게 된다.
+ * 목록은 화면의 스크립트에 적혀 있어 날마다 화면에서 읽는다(박아 두지 않는다). 못 읽으면 빈 목록이다.
+ *
+ * @returns {{first: Set<string>, second: Set<string>, message: string}}
+ */
+export function parseCarGate(doc) {
+  const text = [...(doc?.querySelectorAll?.('script') || [])].map((s) => s.textContent || '').find((t) => /exceptCarSeqNp/.test(t)) || '';
+  const list = (name) => new Set(((text.match(new RegExp(`var\\s+${name}\\s*=\\s*\\[([^\\]]*)\\]`)) || [])[1] || '').match(/\d+/g) || []);
+  const say = (text.match(/exceptCarSeqNp\.includes[\s\S]{0,400}?alert\(\s*["']([^"']+)["']/) || [])[1] || '';
+  return { first: list('exceptCarSeqNp'), second: list('exceptCarSeqNp2'), message: say };
+}
+
+/** 그 줄의 예약 버튼이 fnview 에 넘기는 권한 값(checkAuth, checkAuth2). 버튼이 없으면 null. */
+function carAuthOf(row) {
+  for (const n of row.querySelectorAll('input, a')) {
+    const m = (n.getAttribute('onclick') || '').match(/fnview\(\s*'[^']*'\s*,\s*'(\d+)'\s*,\s*'[^']*'\s*,\s*'(\w+)'\s*,\s*'(\w+)'/);
+    if (m) return { seq: m[1], auth: m[2], auth2: m[3] };
+  }
+  return null;
+}
+
+/**
+ * 사이트가 이 사람에게 그 차량의 신청을 막는가. 막으면 까닭(사이트의 문구), 아니면 빈 글.
+ * 권한이 있어도 사이트가 "일반 업무에 사용할 수 없습니다" 를 확인받는 차량(임원용)은 막지는 않지만 그렇다고 알린다(warn).
+ */
+function carGateOf(gate, auth) {
+  if (!auth) return { blocked: '', warn: false };
+  const why = gate.message || '사이트가 이 차량의 신청을 막아 두었습니다(차량 담당자에게 문의)';
+  if (gate.first.has(auth.seq)) return auth.auth === 'False' ? { blocked: why, warn: false } : { blocked: '', warn: true };
+  if (gate.second.has(auth.seq) && auth.auth2 === 'False') return { blocked: why, warn: false };
+  return { blocked: '', warn: false };
+}
+
+/**
  * 차량 목록과 그날 이용 내역을 읽는다.
  *
  * @returns {{cars: Array, reservations: Array, unreadable: number, ok: boolean, reason: string}}
@@ -121,6 +161,7 @@ export function extractCars(doc, dateStr) {
   const cars = [];
   const reservations = [];
   let unreadable = 0;
+  const gate = parseCarGate(doc);
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -131,7 +172,9 @@ export function extractCars(doc, dateStr) {
     if (!name) continue;
 
     const status = clean(row.cells[CAR_GRID.main.status]?.textContent).replace(/\s*예약\s*$/, '');
-    cars.push({ value: carIdxOf(row) || name, name, label: name, seats: null, status });
+    // note 는 차량 옆의 안내("[임원용 차량]", "[서울본부 전용 차량]" …), blocked 는 사이트가 이 사람에게 신청을 막는 까닭이다.
+    const note = clean(row.cells[CAR_GRID.main.note]?.textContent);
+    cars.push({ value: carIdxOf(row) || name, name, label: name, seats: null, status, note, ...carGateOf(gate, carAuthOf(row)) });
 
     // 바로 뒤 상세 표에 이 차량의 예약들이 들어 있다
     const detail = rows[i + 1]?.querySelector(`table.${CAR_GRID.detailClass}`);
@@ -444,6 +487,11 @@ export async function reserveCar(payload) {
   // 나머지 필수 조건은 폼을 연 뒤 carFormProblems 가 폼의 실제 값까지 보고 판정한다.
   if (!payload.place) {
     return { ok: false, submitted: false, verified: false, message: '행선지는 필수 입력 사항입니다.' };
+  }
+  // 사이트가 예약 버튼에서 막는 차량(임원용·사전 협의 차량 등)은 보내지 않는다. 확장은 신청 폼 주소를 바로 열어서
+  // 그 막음을 지나치게 되므로, 목록에서 읽어 둔 것(extractCars 의 blocked)을 여기서 지킨다.
+  if (payload.blocked) {
+    return { ok: false, submitted: false, verified: false, message: `사이트가 이 차량의 신청을 막고 있습니다 — ${payload.blocked}` };
   }
 
   const form = await openCarForm(payload.carValue, payload.date);

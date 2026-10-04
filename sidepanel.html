@@ -15,20 +15,82 @@
         <h1 id="appTitle">회의실 예약<span class="title-dot">.</span></h1>
       </div>
       <div class="head-tools">
-        <label class="home-toggle" title="e-Class 홈 맨 위에 내 예약 카드를 붙입니다. 끄면 열려 있는 홈에서도 곧바로 사라지고, 홈에서 예약을 훑지도 않습니다.">
+        <label class="home-toggle" title="e-Class 홈 맨 위에 WORKSPACE 카드(내 회의실·차량 예약과 출장·외근·휴가)를 붙입니다. 끄면 열려 있는 홈에서도 곧바로 사라지고, 홈에서 예약·근태를 읽지도 않습니다.">
           <input type="checkbox" id="homeCard" checked />
-          <span>홈에 내 예약</span>
+          <span>홈에 WORKSPACE</span>
         </label>
         <button id="refresh" class="icon refresh" title="새로고침" aria-label="예약 현황 새로고침">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg>
         </button>
       </div>
     </header>
-    <nav class="tabs" role="tablist" aria-label="예약 종류">
+    <nav class="tabs" role="tablist" aria-label="근태·예약 종류">
+      <button id="tabAttend" class="tab" role="tab" aria-selected="false">근태</button>
       <button id="tabRoom" class="tab active" role="tab" aria-selected="true">회의실</button>
       <button id="tabCar" class="tab" role="tab" aria-selected="false">차량</button>
-      <button id="tabMine" class="tab" role="tab" aria-selected="false">내 예약</button>
+      <button id="tabMine" class="tab" role="tab" aria-selected="false" title="WORKSPACE 현황 — 내 회의실·차량 예약과 근태(출장·휴가 …)를 한 목록으로 봅니다">현황</button>
     </nav>
+    <!-- 근태 탭. HR(hr.krs.co.kr)에 신청서를 올리고, 올린 것을 고치거나 무른다. 다른 탭에서는 통째로 숨는다. -->
+    <section id="attend" class="attend hidden" aria-label="근태 신청">
+      <div id="atKinds" class="at-kinds" role="group" aria-label="근태 종류"></div>
+      <!-- 말로 채우기. 회의실·차량의 말로 찾기 칸과 같은 모양이다(반짝이 아이콘 · 입력 · 파란 버튼). -->
+      <div class="at-chat card">
+        <div class="ask-bar">
+          <span class="sparkle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/><path d="m20 2 .7 1.3L22 4l-1.3.7L20 6l-.7-1.3L18 4l1.3-.7L20 2Z"/></svg></span>
+          <input type="text" id="atChatInput" aria-label="말로 근태 폼 채우기" title="문장을 적으면 아래 입력칸에 반영합니다. 목적도 함께 적어 주세요." placeholder="예) 내일 오후 2~4시 부산시청 외근" autocomplete="off" />
+          <button id="atChatGo" class="primary" aria-label="말한 내용으로 폼 채우기">채우기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
+        </div>
+        <!-- Claude 에 닿을 길(로컬 CLI·API 키)이 없을 때만 보인다. 말로 찾기 칸에도 같은 줄이 있다. -->
+        <p class="cli-help" hidden><span>Claude 가 연결되지 않아 규칙으로만 읽습니다.</span><button type="button" class="small cli-guide-copy" title="이 PC 의 Claude Code·Codex 같은 코딩 에이전트에 붙여 넣으면 로컬 Claude CLI 를 연결해 줍니다. 확장 폴더 경로와 확장 ID 가 함께 들어갑니다.">연결 지침 복사</button></p>
+        <ul id="atChatLog" class="at-chat-log" aria-live="polite"></ul>
+      </div>
+      <div id="atForm" class="at-form card hidden">
+        <!-- 제목이 접기 버튼이다(2026-10-03 사용자 지정). 접으면 몸통(atFormBody)이 숨고 제목 줄만 남는다. -->
+        <div class="booking-head">
+          <button type="button" id="atFormToggle" class="at-fold" aria-expanded="true" aria-controls="atFormBody" title="신청 폼 접기/펴기"><strong id="atFormTitle"></strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+          <button id="atReset" class="ghost small">비우기</button>
+        </div>
+        <div id="atFormBody">
+          <div id="atFields" class="at-fields"></div>
+          <p id="atNeed" class="at-need" role="status"></p>
+          <div class="actions at-actions">
+            <button id="atSubmit" class="primary wide">결재요청</button>
+            <button id="atSave" class="ghost wide">임시저장</button>
+            <button id="atEditCancel" class="ghost wide hidden">수정 그만두기</button>
+          </div>
+          <p id="atEditNote" class="edit-note hidden"></p>
+        </div>
+      </div>
+      <div class="statusline"><span id="atStatus" class="status" role="status" aria-live="polite"></span></div>
+      <div class="section-heading at-list-head">
+        <h2>신청 내역 <span id="atCount" class="count"></span><span id="atRange" class="head-date"></span></h2>
+        <button id="atRangeBtn" class="open-inline" type="button" title="조회 기간 정하기" aria-label="조회 기간 정하기" aria-expanded="false" aria-controls="atRangeBox">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 10h16"/></svg>
+        </button>
+        <button id="atOpenHr" class="open-inline" type="button" title="HR 을 새 탭에서 열기" aria-label="HR 을 새 탭에서 열기">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+        </button>
+        <span id="atRangeHint" class="selection-hint">오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 4주까지</span>
+      </div>
+      <!-- 조회 기간 — 한 줄이다(2026-10-04 사용자 지정: 지난 내역(히스토리) 버튼을 빼고 날짜 칸 왼쪽에 4주·8주 버튼).
+           기본 보기는 오늘부터 근태를 올려 둔 가장 늦은 날까지 전부이고, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 4주(또는 8주)까지
+           보인다 — 4주·8주가 그 기간을 고른다(켜진 것을 다시 누르면 지난 출장을 보지 않는다). 홈의 WORKSPACE 카드도 같은 값을 따른다.
+           다른 기간은 날짜 칸에 적고 조회를 누른다(그 기간의 것 전부). -->
+      <div id="atRangeBox" class="at-range card hidden" role="group" aria-label="신청 내역 조회 기간">
+        <div class="at-range-dates">
+          <button type="button" class="small ghost active" data-back="4" aria-pressed="true" title="기본 보기 — 오늘부터 전부, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 4주까지 (켜져 있을 때 다시 누르면 지난 출장을 보지 않습니다)">4주</button>
+          <button type="button" class="small ghost" data-back="8" aria-pressed="false" title="기본 보기 — 오늘부터 전부, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 8주까지 (켜져 있을 때 다시 누르면 지난 출장을 보지 않습니다)">8주</button>
+          <input type="date" id="atRangeFrom" aria-label="조회 시작일" />
+          <span aria-hidden="true">~</span>
+          <input type="date" id="atRangeTo" aria-label="조회 종료일" />
+          <button type="button" id="atRangeGo" class="small primary">조회</button>
+        </div>
+      </div>
+      <div id="atListWrap" class="mine-wrap card">
+        <ul id="atList" class="at-list"></ul>
+        <p id="atEmpty" class="hint hidden">이 기간에 잡힌 근태가 없습니다. 지난 것은 제목 옆 달력 버튼을 눌러 기간을 정해 조회하세요.</p>
+      </div>
+    </section>
     <section class="controls card" aria-label="조회 날짜와 시간">
       <div class="date-bar">
         <label class="date-display" title="날짜 선택">
@@ -70,9 +132,10 @@
       <h2 id="askTitle" class="sr-only">말로 찾는 회의실/차량</h2>
       <div class="ask-bar">
         <span class="sparkle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/><path d="m20 2 .7 1.3L22 4l-1.3.7L20 6l-.7-1.3L18 4l1.3-.7L20 2Z"/></svg></span>
-        <input type="text" id="askInput" aria-label="말로 찾는 회의실/차량" placeholder="claude가 연결되지 않았습니다" title="native/install.ps1 로 다리를 등록하거나, 아래 설정에 API 키를 넣으면 쓸 수 있습니다" autocomplete="off" disabled />
+        <input type="text" id="askInput" aria-label="말로 찾는 회의실/차량" placeholder="claude가 연결되지 않았습니다" title="연결 지침을 복사해 Claude Code·Codex 에 붙여 넣거나, 아래 설정에 API 키를 넣으면 쓸 수 있습니다" autocomplete="off" disabled />
         <button id="askGo" class="primary" aria-label="조건에 맞는 빈 시간 찾기" disabled>찾기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
       </div>
+      <p class="cli-help" hidden><span>Claude Code·Codex 에 붙여 넣으면 연결해 줍니다.</span><button type="button" class="small cli-guide-copy" title="이 PC 의 Claude Code·Codex 같은 코딩 에이전트에 붙여 넣으면 로컬 Claude CLI 를 연결해 줍니다. 확장 폴더 경로와 확장 ID 가 함께 들어갑니다.">연결 지침 복사</button></p>
       <div id="askNote" class="ask-note" role="status" aria-live="polite"></div>
       <ul id="askList" class="ask-list"></ul>
     </section>
@@ -88,7 +151,7 @@
       <div id="mineWrap" class="mine-wrap card hidden">
         <ul id="mineList" class="mine-list"></ul>
         <p id="mineEmpty" class="hint hidden">
-          이 기간에 <strong>내 예약으로 확인된 건</strong>이 없습니다.<br>
+          이 기간에 <strong>내 예약·근태로 확인된 건</strong>이 없습니다.<br>
           사이트는 본인 예약에만 수정·삭제 버튼을 붙이는데, 승인 상태에 따라 그 버튼이 없을 수 있습니다.
           아래 <strong>설정 및 연결</strong>에 이름을 넣으면 예약자 이름으로도 찾습니다.
         </p>
@@ -138,7 +201,7 @@
             <span>인명 검색 카드에 <strong>Teams</strong> 버튼</span>
           </label>
           <!-- 체크박스마다 설명 문단은 두지 않는다. 무엇을 하는지는 줄의 툴팁(title)에 있다. -->
-          <label class="check-row" title="e-Class 홈의 내 예약 카드 위에 DOC-Cruiser 의 접수 미확인 문서(Uncfm. Rcv DOC)를 한 줄로 보여줍니다. 펼치면 제목이 나오고, 제목을 누르면 그 문서 창이 열립니다. 목록만 읽고 문서는 대신 열지 않습니다.">
+          <label class="check-row" title="e-Class 홈의 WORKSPACE 카드 위에 DOC-Cruiser 의 접수 미확인 문서(Uncfm. Rcv DOC)를 한 줄로 보여줍니다. 펼치면 제목이 나오고, 제목을 누르면 그 문서 창이 열립니다. 목록만 읽고 문서는 대신 열지 않습니다.">
             <input type="checkbox" id="homeUncfm" checked />
             <span>홈에 <strong>접수 미확인 공문</strong> 카드</span>
           </label>
@@ -153,9 +216,11 @@
             <div class="details-content">
               <p class="hint">
                 연결되면 API 키 없이 이미 로그인된 Claude Code 를 씁니다.
-                설정 방법은 <code>native/install.ps1</code> 을 보세요.
+                연결되지 않았으면 <strong>연결 지침 복사</strong>를 눌러 Claude Code·Codex 에 붙여 넣으세요 —
+                확장 폴더와 등록 방법이 적혀 있습니다.
               </p>
               <button id="cliCheck" class="ghost small">다시 확인</button>
+              <button id="cliGuide" type="button" class="ghost small cli-guide-copy" hidden>연결 지침 복사</button>
             </div>
           </details>
           <details class="sub">
@@ -171,7 +236,7 @@
         <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg><span>활동 로그</span><span id="logCount" class="summary-detail">기록 없음</span></summary>
         <div class="details-content">
           <p class="hint">
-            예약·취소·수정, 말로 찾기, 조회 실패를 이 브라우저에 최근 500건까지 남깁니다.
+            예약·취소·수정, 근태 신청, 말로 찾기, 조회 실패를 이 브라우저에 최근 500건까지 남깁니다.
             문제가 생기면 <strong>로그 복사</strong>를 눌러 개발자에게 붙여 넣어 주세요.
             로컬 Claude 다리의 기록(<code>native\logs</code>)도 함께 담깁니다.
             회의 주제와 이름이 들어 있습니다.

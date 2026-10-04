@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "KRS WORKSPACE",
-  "version": "0.3.0",
-  "description": "KRS eclass 회의실의 빈 시간을 시간 단위로 조회하고 사이드 패널에서 바로 예약합니다.",
+  "version": "0.4.0",
+  "description": "KRS eclass 회의실·차량을 사이드 패널에서 조회·예약하고, HR 근태 신청서를 올립니다.",
   "permissions": [
     "sidePanel",
     "storage",
@@ -13,7 +13,9 @@
   ],
   "host_permissions": [
     "https://eclass.krs.co.kr/*",
-    "https://api.anthropic.com/*"
+    "https://hr.krs.co.kr/*",
+    "https://api.anthropic.com/*",
+    "http://localhost:5003/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -27,6 +29,12 @@
       "matches": ["https://eclass.krs.co.kr/*"],
       "js": ["home.js", "people.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://eclass.krs.co.kr/*"],
+      "js": ["afterpage.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
@@ -35,7 +43,18 @@
       "matches": ["https://eclass.krs.co.kr/*"]
     }
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_title": "KRS WORKSPACE 패널 열기"
+    "default_title": "KRS WORKSPACE 패널 열기",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
   }
 }

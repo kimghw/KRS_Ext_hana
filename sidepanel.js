@@ -1,12 +1,10 @@
-import { DEFAULT_HOURS, SHELL_URL, LIST_URL, ORIGIN, PORTAL_HOME_URL } from './src/config.js';
+import { DEFAULT_HOURS, ORIGIN, PORTAL_HOME_URL } from './src/config.js';
 import { AuthError } from './src/net.js';
-import { loadDay, scanDays, captureRaw, reserve, cancelReservation } from './src/site.js';
-import {
-  loadCarDay, scanCarDays, reserveCar, cancelCarReservation, openCarForm,
-  CAR_LIST_URL, CAR_SHELL_URL,
-} from './src/rentcar.js';
+import { captureRaw } from './src/site.js';
+import { RUNNERS, runnerOf } from './src/runners.js';
 import { modifyReservation, describeModifyResult } from './src/modify.js';
-import { parseSmart, diagnoseSmart, nativeAvailable, nativeLogs } from './src/llm.js';
+import { parseSmart, diagnoseSmart, nativeProbe, nativeLogs } from './src/llm.js';
+import { bridgeGuide, bridgeRoot } from './src/bridgeguide.js';
 import { createLogbook, formatEntries, buildLogReport, stamp } from './src/logbook.js';
 import { buildSaveDigest } from './src/diagnose.js';
 import { findSlots, MAX_DAYS, widenHours } from './src/search.js';
@@ -23,6 +21,11 @@ import {
 import { ENABLE_KEY as UNCFM_ENABLE_KEY, unconfirmedEnabled } from './src/unconfirmed.js';
 import { fmtTime, todayStr, buildGrid, canDelete } from './src/parse.js';
 import { isFoldedRoom, foldLabels } from './src/roomorder.js';
+import { createAttendPanel } from './attendpanel.js';
+import { hrListDocs } from './src/hr.js';
+import { PLANS_KEY, loadPlans as readPlans, plansToShow } from './src/plans.js';
+import { tripRule, loadStages } from './src/settling.js';
+import { tripList } from './src/trip.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -36,8 +39,8 @@ const el = {
   passenger: $('fPassenger'), carWho: $('carWho'), modify: $('modify'), editNote: $('editNote'),
   stamp: $('stamp'), pickList: $('pickList'),
   ask: $('askInput'), askGo: $('askGo'), askNote: $('askNote'), askList: $('askList'),
-  apiKey: $('apiKey'), apiKeyState: $('apiKeyState'), cliState: $('cliState'), cliCheck: $('cliCheck'),
-  tabRoom: $('tabRoom'), tabCar: $('tabCar'), tabMine: $('tabMine'), appTitle: $('appTitle'),
+  apiKey: $('apiKey'), apiKeyState: $('apiKeyState'), cliState: $('cliState'), cliCheck: $('cliCheck'), cliGuide: $('cliGuide'),
+  tabAttend: $('tabAttend'), tabRoom: $('tabRoom'), tabCar: $('tabCar'), tabMine: $('tabMine'), appTitle: $('appTitle'),
   openPageInline: $('openPageInline'), scheduleTitle: $('scheduleTitle'), scheduleDate: $('scheduleDate'),
   capture: $('capture'), diagOut: $('diagOut'),
   spanDays: $('spanDays'), spanControl: document.querySelector('.span-control'),
@@ -52,8 +55,12 @@ const el = {
 // picks: 누적 선택. [{ room: 행번호, from: 슬롯, to: 슬롯 }]
 const state = { day: null, picks: [], drag: null, loadedAt: 0, timer: null,
   region: null, regions: [], apiKey: '', found: [], cli: false, mode: 'room', extendTarget: null,
+  // 다리 확인이 한 번이라도 끝났는지와, 닿지 않았을 때 브라우저가 댄 까닭(연결 지침에 적는다).
+  cliChecked: false, cliError: '',
   justBooked: [], myName: '', mine: [], editTarget: null, carWho: null,
   foldOpen: false, foundKind: 'room', asking: false,
+  // 현황에 같이 보여줄 근태(출장·휴가 …). HR 에서 읽어 온 것이고, error 는 읽지 못한 까닭이다.
+  plans: { items: [], error: '' },
   // 마지막 조회가 로그인 문제로 끝났다. 로그인이 돌아온 신호(eclass 탭 로딩 끝·패널 다시 보임)에 다시 조회한다.
   authFailed: false };
 
@@ -71,7 +78,7 @@ function logEvent(kind, ok, text, data, opts = {}) {
 }
 
 /**
- * 예약이 바뀌었을 수 있는 일. 끝나면 홈의 내 예약 카드가 담아 둔 것을 지운다 — 카드는 그것을 보고 다시 훑는다.
+ * 예약이 바뀌었을 수 있는 일. 끝나면 홈의 WORKSPACE 카드가 담아 둔 것을 지운다 — 카드는 그것을 보고 다시 훑는다.
  * 성공·실패를 가리지 않는다. 수정은 취소까지만 되고 멈추기도 해서, 실패해도 사이트는 바뀌어 있을 수 있다.
  */
 const CHANGES_SITE = new Set(['reserve', 'cancel', 'extend', 'modify']);
@@ -209,12 +216,32 @@ function agoText(at) {
   const sec = Math.floor((Date.now() - at) / 1000);
   if (sec < 15) return '방금';
   if (sec < 60) return `${sec}초 전`;
-  return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  return `${Math.floor(sec / 86400)}일 전`;
 }
 
-/** 마지막으로 조회한 지 얼마나 됐는지. 현황은 금방 낡으므로 눈에 보이게 둔다. */
+/**
+ * 훑어 둔 것을 언제 읽었는지. 훑기는 하루에 한 번이라 '몇 분 전'보다 시각이 낫다.
+ * 오늘 것이 아니면 날짜도 붙인다(다시 훑는 동안 잠깐 보이는 어제 것).
+ */
+function syncText(at) {
+  if (!at) return '';
+  const d = new Date(at);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return ymdOf(d) === todayStr() ? `동기화 ${hm}` : `동기화 ${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+/**
+ * 마지막으로 조회한 지 얼마나 됐는지. 현황은 금방 낡으므로 눈에 보이게 둔다.
+ * 내 예약은 하루에 한 번 훑어 둔 것을 보여주므로, 그 동기화 시각을 적는다.
+ */
 function paintStamp() {
-  el.stamp.textContent = agoText(state.loadedAt);
+  const mine = isMineMode();
+  el.stamp.textContent = mine ? syncText(state.loadedAt) : agoText(state.loadedAt);
+  el.stamp.title = mine && state.loadedAt
+    ? `${stamp(state.loadedAt)} 에 읽은 것입니다(가장 오래전에 읽은 날 기준). 하루에 한 번만 훑습니다 — ↻ 를 누르면 다시 훑습니다.`
+    : '마지막 조회 시각';
 }
 
 /**
@@ -225,7 +252,8 @@ function applyAuto() {
   clearInterval(state.timer);
   state.timer = setInterval(() => {
     // 내 예약은 하루에 한 번씩 며칠을 훑는다. 60초마다 자동으로 돌릴 일이 아니다.
-    if (document.hidden || el.refresh.disabled || isMineMode()) return;
+    // 근태 탭도 같다 — 신청 내역은 올리거나 ↻ 를 누를 때만 다시 읽는다.
+    if (document.hidden || el.refresh.disabled || isMineMode() || isAttend()) return;
     // 고르는 중이거나 회의주제를 쓰는 중이면 건드리지 않는다.
     // 새로 고치면 선택이 지워져서, 폼을 채우는 사이에 고른 게 날아간다.
     if (state.picks.length || state.drag) return;
@@ -248,7 +276,7 @@ function render(day) {
     el.roomCount.title = `${dayLabel(day.date)} — ${what} 건수를 확인하지 못했습니다`;
   }
   if (!grid.length) {
-    const noun = isCar() ? '차량' : '회의실';
+    const { noun } = currentRunner();
     el.grid.innerHTML = `<p class="hint">${noun} 정보를 찾지 못했습니다. 아래 “페이지 구조 캡처”를 실행해 주세요.</p>`;
     return;
   }
@@ -304,7 +332,7 @@ function render(day) {
 
   el.grid.innerHTML =
     `<div class="table-scroll"><table class="grid${state.foldOpen ? ' show-folded' : ''}"><caption class="sr-only">${escapeHtml(day.date)} 회의실별 예약 현황. 예약 가능한 시간을 선택해 주세요.</caption>` +
-    `<thead><tr><th class="room" scope="col">${isCar() ? '차량' : '회의실'}</th>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
+    `<thead><tr><th class="room" scope="col">${currentRunner().noun}</th>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
     (day.confident
       ? '<div class="legend"><span><i class="f"></i>예약 가능</span><span><i class="b"></i>사용 중</span>' +
         `<span><i class="m"></i>내 예약 ${mineCount}건</span></div>`
@@ -355,49 +383,47 @@ function normalizePicks() {
 /**
  * 선택 하나를 사이트에 보낼 예약 한 건으로 바꾼다.
  *
- * 회의실과 차량은 보내는 값이 다르다. 차량은 회의주제 대신 **행선지가 필수**이고
- * (사이트의 fnSaveCheck 가 그렇게 막는다), 차량 자체는 폼이 아니라 주소(CARIDX)로 정해진다.
+ * 회의실과 차량은 보내는 값이 다르다. 무엇을 보내는지는 그 종류의 실행자(src/runners.js)가 정하고,
+ * 여기서는 화면에서 읽은 값(고른 칸·입력칸)만 넘긴다.
  */
-function pickToPayload(p, title) {
+function pickToPayload(run, p, title) {
   const row = state.day.grid[p.room];
-  const start = fmtTime(row.slots[p.from].start);
-  const end = fmtTime(row.slots[p.to].end);
-
-  if (isCar()) {
-    return {
-      kind: 'car',
-      car: row.room.name,
-      carValue: row.room.value,
-      room: row.room.name,          // 진행 표시와 '내가 넣음' 기록이 room 을 본다
-      date: state.day.date,
-      start,
-      end,
-      title,
-      place: el.place.value.trim(),
-      passenger: el.passenger.value.trim(),
-    };
-  }
-  return {
-    kind: 'room',
-    room: row.room.name,
-    roomValue: row.room.value,
-    region: state.day.region,
+  return run.payload({
+    row: row.room,
     date: state.day.date,
-    start,
-    end,
+    region: state.day.region,
+    start: fmtTime(row.slots[p.from].start),
+    end: fmtTime(row.slots[p.to].end),
     title,
-  };
+    place: el.place.value.trim(),
+    passenger: el.passenger.value.trim(),
+  });
 }
 
-/** 지금 보고 있는 탭에 맞는 예약/취소/재조회. 회의실과 차량이 같은 흐름을 쓰게 한다. */
-const submitOne = (payload) =>
-  (payload.kind === 'car' ? reserveCar(payload) : reserve(payload, state.day));
+/**
+ * 지금 보고 있는 탭의 실행자(회의실 또는 차량). 예약·취소·수정은 **시작할 때 한 번** 집어서 끝까지 그것만 쓴다
+ * — 도는 중에 탭을 옮겨도 남은 단계가 다른 종류의 사이트로 가지 않는다.
+ */
+const currentRunner = () => (isCar() ? RUNNERS.car : RUNNERS.room);
 
-const cancelOne = (record, day) =>
-  (isCar() ? cancelCarReservation(record, day) : cancelReservation(record, day));
+/** 보내기 전에 비어 있으면 안 되는 칸을 본다. 비었으면 말하고 그 칸에 손을 놓는다. */
+function missingInput(run, title, why = '') {
+  const miss = run.missing({ title, place: el.place.value.trim() });
+  if (!miss) return false;
+  setStatus(why && miss.field === 'place' ? `행선지를 입력하세요. ${why}` : miss.message, 'error');
+  (miss.field === 'place' ? el.place : el.title).focus();
+  return true;
+}
 
-const reloadDay = (date = state.day.date) =>
-  (isCar() ? loadCarDay(date, hours()) : loadDay(date, hours(), state.region));
+/**
+ * 일이 도는 동안 다시 읽은 화면. 그 일의 실행자와 같은 탭을 아직 보고 있을 때만 화면 상태(state.day)에 얹는다
+ * — 탭을 옮겼으면 그 탭의 현황을 다른 종류의 것으로 덮지 않는다.
+ */
+async function reloadFor(run, date, region = state.region) {
+  const day = await run.loadDay(date, hours(), region);
+  if (currentRunner() === run && !isMineMode() && !isAttend()) state.day = day;
+  return day;
+}
 
 function paintPicks() {
   for (const td of el.grid.querySelectorAll('td.slot')) {
@@ -532,8 +558,12 @@ function addCancelPick(room, rec) {
   paintPicks();
 }
 
-/** 고른 범위가 내 예약과 맞닿아 있으면 그 예약을 준다(연장 대상). */
+/**
+ * 고른 범위가 내 예약과 맞닿아 있으면 그 예약을 준다(연장 대상).
+ * 이어붙이기를 지원하지 않는 종류(차량)에는 대상이 없다 — 버튼도 뜨지 않는다.
+ */
 function extendTargetFor(pick) {
+  if (!currentRunner().extend) return null;
   const row = state.day?.grid[pick.room];
   if (!row) return null;
   const startMin = row.slots[pick.from].start;
@@ -561,8 +591,8 @@ function explainBlocked(room, slot) {
     setStatus(
       free
         ? `이미 내 예약입니다. 시간을 늘리려면 옆의 빈 칸(${fmtTime(free.start)}~)을 고르세요. `
-          + '시간을 옮기려면 내 예약 탭에서 수정을 누르세요.'
-        : '이미 내 예약입니다. 시간을 옮기려면 내 예약 탭에서 수정을 누르세요.',
+          + '시간을 옮기려면 현황 탭에서 수정을 누르세요.'
+        : '이미 내 예약입니다. 시간을 옮기려면 현황 탭에서 수정을 누르세요.',
       'error',
     );
     return;
@@ -674,14 +704,15 @@ function attachPickList() {
 /* --------------------------------------------- 한 달 미리 훑기 (세 탭 공용) */
 
 /**
- * 패널이 열리면 **오늘부터 한 달**을 한 번 훑어 여기에 담는다.
- * 회의실·차량·내 예약 세 탭이 모두 이 한 벌을 본다 — 탭을 옮기거나 날짜를 넘길 때마다
- * 느린 사이트를 다시 두드리지 않는다.
+ * **오늘부터 한 달**을 하루에 한 번 훑어 여기에 담는다.
+ * 회의실·차량·내 예약 세 탭이 모두 이 한 벌을 본다 — 패널을 열거나 탭을 옮기거나 날짜를 넘길 때마다
+ * 느린 사이트를 다시 두드리지 않는다. 저장소에도 적어 두므로 패널을 닫았다 열어도 오늘 읽은 것은 남는다.
+ * 다시 읽는 것은 날이 바뀌었을 때, 예약·취소로 그 날을 버렸을 때, ↻ 를 눌렀을 때뿐이다.
  *
  * 담긴 값에는 읽은 시각이 붙는다. 캐시로 그린 화면에는 **언제 읽은 것인지** 같이 적는다.
  * 묵은 현황을 지금 것처럼 보여주면 이미 찬 칸을 "예약 가능"으로 칠하게 된다.
  */
-const store = createDayStore();
+const store = createDayStore({ storage: chrome.storage.local });
 
 /**
  * 지역별 회의실 목록.
@@ -702,6 +733,9 @@ function onScanDay(fn) {
 /** 지금 도는 훑기. 한 번에 하나만 돈다 — 둘이 겹치면 같은 날을 두 번 읽는다. */
 let scanning = null;
 
+/** 훑는 차례. 종류마다 한 바퀴씩 돈다. */
+const SCAN_RUNNERS = Object.values(RUNNERS);
+
 /** 진행 막대에 보여줄 것. 회의실·차량 두 바퀴를 한 줄로 합쳐 센다. */
 const scanView = { on: false, label: '', phase: 0, i: 0, n: 0, date: '', at: 0, range: '' };
 
@@ -716,13 +750,19 @@ function paintScanBar() {
   if (on) {
     el.scanNote.textContent = `${label} ${i}/${n}${date ? ` · ${shortLabel(date)}` : ''}`;
     el.scanBar.title = date ? `${date} 읽는 중` : '한 달치를 미리 읽어 둡니다';
-    const done = n ? (phase * n + i) / (n * 2) : 0;
+    const done = n ? (phase * n + i) / (n * SCAN_RUNNERS.length) : 0;
     el.scanFill.style.width = `${Math.round(done * 100)}%`;
     return;
   }
   if (at) {
-    el.scanNote.textContent = `한 달 준비됨 · ${range}`;
-    el.scanBar.title = `${agoText(at)} 읽어 둔 것입니다. 누르면 다시 훑습니다.`;
+    // 막대는 한 달 몫을 말한다. 방금 훑은 것이 예약·취소로 버린 하루뿐이어도, 한 달이 다 담겨 있으면
+    // 그 한 달과 그중 가장 오래전에 읽은 시각을 적는다.
+    const month = monthDates();
+    const whole = store.covers(month);
+    const since = (whole && store.oldest(month)) || at;
+    const shown = whole ? `${shortLabel(month[0])}~${shortLabel(month[month.length - 1])}` : range;
+    el.scanNote.textContent = `한 달 준비됨 · ${shown} · ${syncText(since)}`;
+    el.scanBar.title = `${agoText(since)} 읽어 둔 것입니다. 하루에 한 번만 훑습니다 — 누르면 다시 훑습니다.`;
     el.scanFill.style.width = '100%';
   }
 }
@@ -766,9 +806,10 @@ async function runScan(dates) {
   };
 
   try {
-    // 회의실 방 목록은 지역마다 다르다. 보고 있는 지역으로 훑어야 격자를 캐시로 그릴 수 있다.
-    await phase(0, '회의실', (p) => scanDays(dates, p, { region: state.region, onDay: feed }));
-    await phase(1, '차량', (p) => scanCarDays(dates, p, { onDay: feed }));
+    // 회의실 방 목록은 지역마다 다르다. 보고 있는 지역으로 훑어야 격자를 캐시로 그릴 수 있다(차량은 지역을 보지 않는다).
+    for (const [idx, run] of SCAN_RUNNERS.entries()) {
+      await phase(idx, run.noun, (p) => run.scanDays(dates, p, { region: state.region, onDay: feed }));
+    }
   } finally {
     scanView.on = false;
     scanView.at = Date.now();
@@ -812,9 +853,18 @@ async function ensureDays(dates, { force = false } = {}) {
   return out;
 }
 
-/** 패널이 열리면 곧바로 한 달을 훑어 둔다. 세 탭이 이 한 벌을 나눠 쓴다. */
+/**
+ * 패널이 열리면 한 달이 담겨 있게 한다. 세 탭이 이 한 벌을 나눠 쓴다.
+ * 오늘 이미 훑어 둔 날은 다시 읽지 않는다 — 하루의 첫 번째 열기만 한 달을 훑는다.
+ */
 async function prefetchMonth({ force = false } = {}) {
-  const got = await ensureDays(monthDates(), { force });
+  const dates = monthDates();
+  const got = await ensureDays(dates, { force });
+  // 불러온 것만으로 다 채워졌으면 훑기가 돌지 않아 막대가 비어 있다. 그래도 언제 읽은 것인지는 말한다.
+  if (!scanView.on && !scanView.at && store.covers(dates)) {
+    scanView.at = store.oldest(dates);
+    paintScanBar();
+  }
   if (got.authError) {
     state.authFailed = true;
     if (!el.status.textContent) {
@@ -832,7 +882,7 @@ async function prefetchMonth({ force = false } = {}) {
  * aria-busy 로 잠긴 채 둔다. 예약 버튼도 doc 이 없으면 막는다.
  */
 function cachedDay(date) {
-  const kind = isCar() ? 'car' : 'room';
+  const { kind } = currentRunner();
   const rec = store.get(kind, date);
   if (!rec) return null;
 
@@ -873,10 +923,10 @@ function cachedDay(date) {
  * 살아 있는 조회 결과를 캐시에도 넣는다. 내 예약 목록이 이걸 그대로 쓴다.
  * **markMine 을 입히기 전에** 부른다 — 담기는 것은 사이트가 말한 그대로여야 한다.
  */
-function cacheLiveDay(day) {
-  if (!isCar() && day.region && day.rooms?.length) roomsByRegion.set(day.region, day.rooms);
+function cacheLiveDay(day, run) {
+  if (run.region && day.region && day.rooms?.length) roomsByRegion.set(day.region, day.rooms);
   store.put({
-    kind: isCar() ? 'car' : 'room',
+    kind: run.kind,
     date: day.date,
     // 내 예약은 지역을 가리지 않는다. 지역으로 거르기 전 것을, 베껴서 담는다.
     reservations: (day.reservationsAllRegions || day.reservations || []).map((r) => ({ ...r })),
@@ -894,6 +944,20 @@ function forgetDays(dates, kinds) {
   store.drop(dates, kinds);
 }
 
+/** from 부터 to 까지의 날짜(둘 다 포함). 거꾸로면 from 하루만. */
+function datesBetween(from, to) {
+  const out = [];
+  for (let d = from; d <= to && out.length < 92; d = addDays(d, 1)) out.push(d);
+  return out.length ? out : [from];
+}
+
+/**
+ * 그 예약이 걸친 날짜 전부. 차량은 여러 날에 걸칠 수 있고, 걸친 날마다 같은 건이 담겨 있다.
+ * 취소한 뒤 하루만 버리면 나머지 날에 남은 것이 내 예약 목록에 그날 내내 보인다.
+ */
+const spanDatesOf = (rec) =>
+  (rec?.spanStart?.date && rec?.spanEnd?.date ? datesBetween(rec.spanStart.date, rec.spanEnd.date) : []);
+
 /** 예약 손잡이가 없는 화면(미리 훑어 둔 것)에서 제출을 막는다. */
 function needsLiveDay() {
   if (state.day?.doc) return false;
@@ -906,6 +970,8 @@ function needsLiveDay() {
 let loadSequence = 0;
 
 async function load({ force = false } = {}) {
+  // 근태 탭에는 날짜 격자가 없다. 새로고침·로그인 복귀는 신청 내역을 다시 읽는 것으로 받는다.
+  if (isAttend()) return attend.reload();
   const sequence = ++loadSequence;
   const date = el.date.value || todayStr();
   paintDate();
@@ -918,6 +984,7 @@ async function load({ force = false } = {}) {
   paintPicks();
   paintStamp();
   if (isMineMode()) return loadMine(sequence, { force });
+  const run = currentRunner();
   const h = hours();
   if (h.end <= h.start) {
     el.grid.innerHTML = '';
@@ -939,33 +1006,31 @@ async function load({ force = false } = {}) {
   if (preview) {
     state.day = preview;
     state.loadedAt = preview.readAt;
-    if (!isCar()) fillRegions(preview);
+    if (run.region) fillRegions(preview);
     render(preview);
     paintStamp();
     setStatus(`미리 훑어 둔 현황(${agoText(preview.readAt)}) · 최신인지 확인하는 중...`);
   }
 
   try {
-    const day = isCar()
-      ? await loadCarDay(date, h)
-      : await loadDay(date, h, state.region);
+    const day = await run.loadDay(date, h, state.region);
     if (sequence !== loadSequence) return;
     state.authFailed = false;
     // 담는 게 먼저다. markMine 은 화면용 표시를 예약 줄에 입히는데, 그게 캐시로 새면
     // 다음번에 이름으로 맞춘 건을 "사이트가 본인 것에만 붙인 버튼"으로 읽게 된다.
-    cacheLiveDay(day);
+    cacheLiveDay(day, run);
     state.day = markMine(day);
-    if (!isCar()) fillRegions(day);
+    if (run.region) fillRegions(day);
     render(day);
     state.loadedAt = Date.now();
 
     if (!day.confident) {
       // 예약 여부를 읽지 못한 것을 "예약 없음"으로 보여주면 안 된다.
       setStatus(`예약 여부를 확인할 수 없습니다 — ${day.reason} 아래 “구조 캡처”가 필요합니다.`, 'error');
-      logEvent('load', false, `${isCar() ? '차량' : '회의실'} ${date} 예약 여부를 읽지 못함 — ${day.reason}`,
+      logEvent('load', false, `${run.noun} ${date} 예약 여부를 읽지 못함 — ${day.reason}`,
         { mode: state.mode, region: day.region, hours: h, rooms: day.rooms?.length });
     } else {
-      if (isCar()) {
+      if (run.kind === 'car') {
         const note = day.roomSource === 'table' ? ' · 그날 신청된 차량만 표시됨' : '';
         setStatus(`차량 ${day.rooms.length}대 · 이용 ${day.reservations.length}건${note}`);
       } else {
@@ -983,7 +1048,7 @@ async function load({ force = false } = {}) {
       state.day = null;
     }
     const stale = preview ? ` — 화면은 ${agoText(preview.readAt)} 미리 훑어 둔 것입니다.` : '';
-    logEvent('load', false, `${isCar() ? '차량' : '회의실'} ${date} 조회 실패: ${err.message}`,
+    logEvent('load', false, `${run.noun} ${date} 조회 실패: ${err.message}`,
       { mode: state.mode, region: state.region, hours: h, auth: err instanceof AuthError, portal: err.portal, preview: !!preview });
     if (err instanceof AuthError) {
       state.authFailed = true;
@@ -1056,23 +1121,13 @@ async function submitBooking() {
   if (!state.day || !state.picks.length) return;
   if (needsLiveDay()) return;
 
+  // 이 제출이 끝날 때까지 쓸 실행자. 도는 중에 탭을 옮겨도 남은 건은 같은 종류로 간다.
+  const run = currentRunner();
   const title = el.title.value.trim();
-  // 차량은 사이트가 **행선지**를 요구하고 사용목적은 요구하지 않는다(실제 신청 폼 캡처로 확인).
-  // 회의실은 반대로 회의주제가 있어야 한다. 사이트보다 엄격하게 막으면 사이트에서는
-  // 되는 일이 이 확장에서만 안 된다.
-  if (isCar()) {
-    if (!el.place.value.trim()) {
-      setStatus('행선지를 입력하세요. 사이트가 반드시 요구합니다.', 'error');
-      el.place.focus();
-      return;
-    }
-  } else if (!title) {
-    setStatus('회의주제를 입력하세요.', 'error');
-    el.title.focus();
-    return;
-  }
+  if (missingInput(run, title)) return;
 
-  const jobs = state.picks.filter((p) => p.kind !== 'cancel').map((p) => pickToPayload(p, title));
+  const jobs = state.picks.filter((p) => p.kind !== 'cancel').map((p) => pickToPayload(run, p, title));
+  let day = state.day;
   el.submit.disabled = true;
   el.refresh.disabled = true;
 
@@ -1087,7 +1142,7 @@ async function submitBooking() {
 
       let result;
       try {
-        result = await submitOne(payload);
+        result = await run.reserve(payload, day);
       } catch (err) {
         result = { ok: false, submitted: false, message: err.message };
       }
@@ -1099,7 +1154,7 @@ async function submitBooking() {
         logEvent('reserve', true, what,
           { payload, message: result.message || undefined, owner: result.record?.owner || result.who?.name });
         rememberBooked([{
-          mode: state.mode, date: payload.date, room: payload.room,
+          mode: run.kind, date: payload.date, room: payload.room,
           start: parseInt(payload.start, 10) * 60 + +payload.start.slice(3),
           end: parseInt(payload.end, 10) * 60 + +payload.end.slice(3),
           at: Date.now(),
@@ -1125,7 +1180,7 @@ async function submitBooking() {
       // 다음 건은 새 화면으로 보낸다(방금 넣은 예약도 반영된다)
       if (i < jobs.length - 1) {
         try {
-          state.day = await reloadDay();
+          day = await reloadFor(run, day.date, day.region);
         } catch {
           // 다음 건에서 실패로 잡힌다
         }
@@ -1153,7 +1208,7 @@ async function submitBooking() {
   }
 
   // 넣은 날은 담아 둔 현황이 낡았다. 버려서 다음에 볼 때 다시 읽게 한다.
-  forgetDays([...new Set(jobs.map((j) => j.date))], [state.mode === 'car' ? 'car' : 'room']);
+  forgetDays([...new Set(jobs.map((j) => j.date))], [run.kind]);
 
   // 결과를 먼저 쓰면 아래 조회가 덮어버린다. 새로고침을 끝내고 나서 말한다.
   if (!failed.length) state.picks = [];
@@ -1208,9 +1263,17 @@ async function extendBooking() {
   const target = state.extendTarget;
   const pick = state.picks.find((p) => p.kind !== 'cancel');
   if (!target || !pick || !state.day) return;
+  // 이어붙이기는 취소하고 합쳐 다시 넣는 일이다. 그 길을 지원하는 종류에서만 한다 —
+  // 차량 탭에서 회의실 사이트로 취소·예약을 보내는 일이 없게 여기서도 한 번 더 막는다.
+  const run = currentRunner();
+  if (!run.extend) {
+    setStatus(`${run.noun}은 이어붙이기를 지원하지 않습니다. 현황 탭에서 수정하거나 사이트에서 고쳐 주세요.`, 'error');
+    return;
+  }
   if (needsLiveDay()) return;
 
-  const row = state.day.grid[pick.room];
+  let day = state.day;
+  const row = day.grid[pick.room];
   const addStart = row.slots[pick.from].start;
   const addEnd = row.slots[pick.to].end;
   const merged = { start: Math.min(target.start, addStart), end: Math.max(target.end, addEnd) };
@@ -1221,20 +1284,13 @@ async function extendBooking() {
     return;
   }
 
-  const mk = (from, to) => ({
-    room: row.room.name,
-    roomValue: row.room.value,
-    region: state.day.region,
-    date: state.day.date,
-    start: fmtTime(from),
-    end: fmtTime(to),
-    title,
-  });
+  const { date, region } = day;
+  const mk = (from, to) => run.payload({ row: row.room, date, region, start: fmtTime(from), end: fmtTime(to), title });
 
   el.extend.disabled = true;
   el.submit.disabled = true;
   el.refresh.disabled = true;
-  forgetDays([state.day.date], ['room']);
+  forgetDays([date], [run.kind]);
 
   let result;
   try {
@@ -1248,23 +1304,23 @@ async function extendBooking() {
         restore: '이어붙이기에 실패해 원래 예약을 되살리는 중...',
       }[stage] || '', stage === 'restore' ? 'error' : ''),
 
-      cancel: () => cancelReservation(target, state.day),
+      cancel: () => run.cancel(target, day),
       reserve: async () => {
-        state.day = await loadDay(state.day.date, hours(), state.region);
-        return reserve(mk(merged.start, merged.end), state.day);
+        day = await reloadFor(run, date, region);
+        return run.reserve(mk(merged.start, merged.end), day);
       },
       restore: async () => {
-        state.day = await loadDay(state.day.date, hours(), state.region);
-        return reserve(mk(target.start, target.end), state.day);
+        day = await reloadFor(run, date, region);
+        return run.reserve(mk(target.start, target.end), day);
       },
     });
 
     logEvent('extend', result.ok,
-      `${row.room.name} ${state.day.date} ${fmtTime(target.start)}~${fmtTime(target.end)} → ` +
+      `${row.room.name} ${date} ${fmtTime(target.start)}~${fmtTime(target.end)} → ` +
       `${fmtTime(merged.start)}~${fmtTime(merged.end)}${result.ok ? '' : ` — ${result.message}`}`,
       { title, outcome: modifyOutcome(result) });
     if (result.ok) {
-      rememberBooked([{ mode: state.mode, date: state.day.date, room: row.room.name, start: merged.start, end: merged.end, at: Date.now() }]);
+      rememberBooked([{ mode: run.kind, date, room: row.room.name, start: merged.start, end: merged.end, at: Date.now() }]);
     }
     state.picks = [];
     await load();
@@ -1306,16 +1362,16 @@ async function cancelFromMine(index) {
   setStatus(`취소 중... ${it.room} ${when}`);
 
   try {
-    const car = it.kind === 'car';
-    const day = car
-      ? await loadCarDay(it.from.date, DEFAULT_HOURS)
-      : await loadDay(it.from.date, DEFAULT_HOURS, it.region || state.region);
-    const rec = findLiveRecord(day, it) || it.record;
+    const run = runnerOf(it.kind);
+    if (!run) throw new Error(`취소할 수 없는 종류입니다(${it.kind}).`);
+    const day = await run.loadDay(it.from.date, DEFAULT_HOURS, it.region || state.region);
+    const rec = liveRecordFor(run, day, it);
+    if (!rec) throw new Error(LIVE_RECORD_GONE);
 
-    const r = car ? await cancelCarReservation(rec, day) : await cancelReservation(rec, day);
+    const r = await run.cancel(rec, day);
     logEvent('cancel', r.ok, `${it.room} ${when}${r.ok ? '' : ` — ${r.message}`}`,
       { from: 'mine', kind: it.kind, title: it.title, submitted: r.submitted, message: r.message || undefined });
-    forgetDays([it.from.date]);
+    forgetDays(datesBetween(it.from.date, it.to.date));
     if (r.ok) {
       state.justBooked = state.justBooked.filter((b) =>
         !(b.date === it.from.date && b.room === it.room && b.start < it.to.minutes && b.end > it.from.minutes));
@@ -1339,7 +1395,12 @@ async function cancelPicked() {
   const cancels = state.picks.filter((p) => p.kind === 'cancel');
   if (!cancels.length || !state.day) return;
   if (needsLiveDay()) return;
-  forgetDays([state.day.date], [isCar() ? 'car' : 'room']);
+  const run = currentRunner();
+  let day = state.day;
+  forgetDays(
+    [...new Set([day.date, ...cancels.flatMap((p) => spanDatesOf(p.record))])],
+    [run.kind],
+  );
 
   el.cancelBtn.disabled = true;
   el.refresh.disabled = true;
@@ -1351,16 +1412,16 @@ async function cancelPicked() {
       const p = cancels[i];
       setStatus(`취소 중 ${i + 1}/${cancels.length}...`);
       const rec = p.record || {};
-      const what = `${rec.room || rec.name || '?'} ${state.day.date} ${fmtTime(rec.start)}~${fmtTime(rec.end)}`;
+      const what = `${rec.room || rec.name || '?'} ${day.date} ${fmtTime(rec.start)}~${fmtTime(rec.end)}`;
       let r;
       try {
-        r = await cancelOne(p.record, state.day);
+        r = await run.cancel(p.record, day);
       } catch (err) {
-        logEvent('cancel', false, `${what} — ${err.message}`, { from: 'grid', mode: state.mode });
+        logEvent('cancel', false, `${what} — ${err.message}`, { from: 'grid', mode: run.kind });
         throw err;
       }
       logEvent('cancel', r.ok, `${what}${r.ok ? '' : ` — ${r.message}`}`,
-        { from: 'grid', mode: state.mode, title: rec.title, submitted: r.submitted, message: r.message || undefined });
+        { from: 'grid', mode: run.kind, title: rec.title, submitted: r.submitted, message: r.message || undefined });
       if (r.ok) {
         done++;
       } else {
@@ -1369,7 +1430,7 @@ async function cancelPicked() {
       }
       if (i < cancels.length - 1) {
         try {
-          state.day = await reloadDay();
+          day = await reloadFor(run, day.date, day.region);
         } catch { /* 다음 건에서 잡힌다 */ }
       }
     }
@@ -1401,9 +1462,26 @@ async function cancelPicked() {
 function findLiveRecord(day, it) {
   const from = it.from?.minutes ?? it.start;
   const to = it.to?.minutes ?? it.end;
-  return day.reservations.find((r) =>
-    (r.room === it.room || r.name === it.room) &&
-    r.start < to && r.end > from && canDelete(r.del)) || null;
+  // 차량은 여러 날에 걸친다. 그날 것으로 자른 시각으로는 맞출 수 없어(끝이 다른 날이면 끝 시각이 시작보다 이르다),
+  // 자르기 전의 **원래 구간**이 같은 건을 찾는다.
+  const span = it.record?.spanStart && it.record?.spanEnd ? [it.record.spanStart, it.record.spanEnd] : null;
+  const sameMoment = (a, b) => a.date === b.date && a.minutes === b.minutes;
+  return day.reservations.find((r) => {
+    if (!(r.room === it.room || r.name === it.room) || !canDelete(r.del)) return false;
+    if (span && r.spanStart && r.spanEnd) return sameMoment(r.spanStart, span[0]) && sameMoment(r.spanEnd, span[1]);
+    return r.start < to && r.end > from;
+  }) || null;
+}
+
+const LIVE_RECORD_GONE = '방금 다시 읽은 화면에서 그 예약을 찾지 못했습니다. 이미 취소됐거나 바뀌었을 수 있습니다 — 새로고침한 뒤 다시 해 주세요.';
+
+/**
+ * 취소에 쓸 기록. 새로 읽은 화면에서 찾은 것이 먼저다. 못 찾았을 때 담아 둔 기록을 대신 쓰는 것은
+ * 그 종류의 삭제 손잡이가 화면이 바뀌어도 같은 건을 가리킬 때만이다(실행자의 staleHandle).
+ * 아니면 null — 엉뚱한 건을 지우느니 멈춘다.
+ */
+function liveRecordFor(run, day, it) {
+  return findLiveRecord(day, it) || (run.staleHandle ? it.record : null);
 }
 
 /** 차량/회의실 목록에서 이름으로 값(CARIDX 또는 회의실 값)을 찾는다. */
@@ -1419,6 +1497,13 @@ function rowValueOf(name) {
 function startEdit(index) {
   const it = state.mine?.[index];
   if (!canDelete(it?.record?.del)) return;
+
+  // 수정은 취소하고 다시 넣는 일인데, 다시 넣는 길은 하루 안의 시간만 다룬다. 여러 날에 걸친 건을 여기서 고치면
+  // 되살릴 때 원래 기간을 잃는다(끝 날짜가 사라진다). 시작하지 않고 사이트로 보낸다.
+  if (it.to.date !== it.from.date) {
+    setStatus('여러 날에 걸친 건은 여기서 수정할 수 없습니다(되살릴 때 원래 기간을 잃습니다). 사이트에서 고쳐 주세요.', 'error');
+    return;
+  }
 
   const mode = it.kind === 'car' ? 'car' : 'room';
   el.date.value = it.from.date;
@@ -1474,14 +1559,15 @@ async function runModify() {
   if (!t || !pick || !state.day) return;
   if (needsLiveDay()) return;
 
-  const title = el.title.value.trim() || t.title;
-  const next = pickToPayload(pick, title);
-
-  if (t.kind === 'car' && !el.place.value.trim()) {
-    setStatus('행선지를 입력하세요. 되돌릴 때도 이 값을 씁니다.', 'error');
-    el.place.focus();
+  // 고칠 건의 종류가 실행자를 정한다. 수정을 시작할 때 그 탭으로 옮겨 두었지만, 보고 있는 탭이 아니라 이것을 믿는다.
+  const run = runnerOf(t.kind);
+  if (!run || run !== currentRunner()) {
+    setStatus('수정하던 건과 다른 탭입니다. 현황 탭에서 수정을 다시 눌러 주세요.', 'error');
     return;
   }
+  const title = el.title.value.trim() || t.title;
+  if (missingInput(run, title, '되돌릴 때도 이 값을 씁니다.')) return;
+  const next = pickToPayload(run, pick, title);
 
   // 되돌릴 값은 **원래 자리, 원래 시간** 이다. 다른 회의실/차량을 골랐을 수 있다.
   const backValue = rowValueOf(t.room);
@@ -1508,7 +1594,7 @@ async function runModify() {
     el.refresh.disabled = on;
   };
   busy(true);
-  forgetDays([...new Set([t.date, next.date])], [t.kind]);
+  forgetDays([...new Set([t.date, next.date, ...spanDatesOf(t.record)])], [t.kind]);
 
   let result;
   try {
@@ -1520,17 +1606,14 @@ async function runModify() {
       }[stage] || '', stage === 'restore' ? 'error' : ''),
 
       cancel: async () => {
-        state.day = await reloadDay(t.date);
-        return cancelOne(findLiveRecord(state.day, t) || t.record, state.day);
+        const day = await reloadFor(run, t.date);
+        const rec = liveRecordFor(run, day, t);
+        // 취소를 보내지 않았으므로 원래 예약은 그대로다. modify.js 가 "그대로 두었다"고 말한다.
+        if (!rec) return { ok: false, submitted: false, message: LIVE_RECORD_GONE };
+        return run.cancel(rec, day);
       },
-      reserve: async () => {
-        state.day = await reloadDay(next.date);
-        return submitOne(next);
-      },
-      restore: async () => {
-        state.day = await reloadDay(t.date);
-        return submitOne(back);
-      },
+      reserve: async () => run.reserve(next, await reloadFor(run, next.date)),
+      restore: async () => run.reserve(back, await reloadFor(run, t.date)),
     });
   } finally {
     busy(false);
@@ -1547,7 +1630,7 @@ async function runModify() {
 
   if (result.ok) {
     rememberBooked([{
-      mode: state.mode, date: next.date, room: next.room,
+      mode: run.kind, date: next.date, room: next.room,
       start: state.day.grid[pick.room].slots[pick.from].start,
       end: state.day.grid[pick.room].slots[pick.to].end,
       at: Date.now(),
@@ -1571,7 +1654,10 @@ async function runModify() {
 async function checkCli() {
   el.cliState.textContent = '확인 중';
   el.cliState.className = 'badge';
-  state.cli = await nativeAvailable();
+  const probe = await nativeProbe();
+  state.cli = probe.ok;
+  state.cliError = probe.error;
+  state.cliChecked = true;
   el.cliState.textContent = state.cli ? '연결됨' : '없음';
   el.cliState.className = `badge ${state.cli ? 'on' : 'off'}`;
   paintAskReady();
@@ -1582,7 +1668,7 @@ async function checkCli() {
 
 const ASK_PLACEHOLDER = '말로 찾는 회의실/차량';
 const ASK_OFF_TEXT = 'claude가 연결되지 않았습니다';
-const ASK_OFF_HINT = 'native/install.ps1 로 다리를 등록하거나, 아래 설정에 API 키를 넣으면 쓸 수 있습니다';
+const ASK_OFF_HINT = '연결 지침을 복사해 Claude Code·Codex 에 붙여 넣거나, 아래 설정에 API 키를 넣으면 쓸 수 있습니다';
 
 /**
  * 말로 찾기는 Claude 가 문장을 읽어준다는 전제 위에 서 있다.
@@ -1600,12 +1686,49 @@ function paintAskReady() {
   el.ask.title = ready
     ? (isCar() ? '예) 내일 오후 2시부터 3시간 쓸 차량' : '예) 내일 오후 2시, 8명이 쓸 회의실')
     : ASK_OFF_HINT;
+  // 닿을 곳이 없으면 두 말 칸(말로 찾기·말로 채우기) 아래에 연결 지침 복사 줄을 낸다.
+  // 확인이 끝나기 전에는 내지 않는다 — 패널을 열 때마다 잠깐 떴다 사라진다.
+  const helpless = state.cliChecked && !ready;
+  for (const p of document.querySelectorAll('.cli-help')) p.hidden = !helpless;
+  // 설정의 버튼은 API 키로 쓰고 있어도 CLI 가 없으면 남긴다.
+  el.cliGuide.hidden = !state.cliChecked || state.cli;
+}
+
+/**
+ * 연결 지침을 클립보드에 담는다. 확장은 다리를 스스로 놓지 못하므로, 이 PC 에서 명령을 돌릴 수 있는
+ * 코딩 에이전트(Claude Code·Codex …)에 붙여 넣을 글을 만든다 — 확장 폴더·확장 ID·증상이 같이 들어간다.
+ */
+async function copyCliGuide(btn) {
+  btn.disabled = true;
+  try {
+    const id = chrome.runtime.id || '';
+    const text = bridgeGuide({
+      id, ...(await bridgeRoot(id)), error: state.cliError,
+      version: chrome.runtime.getManifest?.()?.version, userAgent: navigator.userAgent,
+    });
+    const ok = await copyText(text);
+    flash(btn, ok ? '복사됨 ✓' : '복사 실패', ok ? 1800 : 4000);
+    logEvent('cli-guide', ok, ok ? '연결 지침 복사' : '연결 지침 복사 실패');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 const VIA_LABEL = { cli: '로컬 CLI', api: 'API 키', local: '규칙 해석' };
 
 const isCar = () => state.mode === 'car';
 const isMineMode = () => state.mode === 'mine';
+const isAttend = () => state.mode === 'attend';
+
+/** 근태 탭. 화면 조각은 attendpanel.js 가 들고 있고, 여기서는 탭을 오갈 때 보이고 숨기기만 한다. */
+const attend = createAttendPanel({
+  $, escapeHtml, logEvent,
+  ai: () => ({ apiKey: state.apiKey, cli: state.cli }),
+  // 근태를 올리거나 거둬들였으면 현황이 담아 둔 근태는 낡았다. 다음에 현황을 볼 때 다시 읽게 한다.
+  onChanged: () => chrome.storage.local.remove(PLANS_KEY),
+  // 출장·외근 폼의 차량 조회에서 빈 차량을 누르면 그 자리에서 차량을 신청한다.
+  onCar: (pick) => reserveCarPick(pick),
+});
 
 /** 내가 넣은 예약을 며칠간 기억한다. 지난 날짜는 버린다. */
 const BOOKED_KEEP_DAYS = 30;
@@ -1668,20 +1791,22 @@ function applyMode(mode) {
 
   const car = isCar();
   const mineTab = isMineMode();
-  for (const [tab, on] of [[el.tabRoom, !car && !mineTab], [el.tabCar, car], [el.tabMine, mineTab]]) {
+  const attendTab = isAttend();
+  for (const [tab, on] of [[el.tabAttend, attendTab], [el.tabRoom, !car && !mineTab && !attendTab], [el.tabCar, car], [el.tabMine, mineTab]]) {
     tab.classList.toggle('active', on);
     tab.setAttribute('aria-selected', String(on));
   }
 
   const pageName = car ? '차량 이용' : '회의실 예약';
-  el.appTitle.innerHTML = (mineTab ? '내 예약' : pageName) + '<span class="title-dot">.</span>';
+  el.appTitle.innerHTML = (attendTab ? '근태 신청' : mineTab ? '현황' : pageName) + '<span class="title-dot">.</span>';
   const openLabel = `${pageName} 페이지를 새 탭에서 열기`;
   el.openPageInline.title = openLabel;
   el.openPageInline.setAttribute('aria-label', openLabel);
   el.scheduleTitle.childNodes[0].nodeValue =
-    mineTab ? '내 예약 ' : car ? '차량 현황 ' : '회의실 현황 ';
-  document.querySelector('.selection-hint').textContent =
-    mineTab ? '누르면 그 날짜로 갑니다' : '빈 시간을 눌러 예약하세요';
+    mineTab ? 'WORKSPACE 현황 ' : car ? '차량 현황 ' : '회의실 현황 ';
+  // 근태 화면에도 같은 클래스의 안내가 있고 문서에서 먼저 나온다. 예약 현황 쪽 것을 짚어서 고친다.
+  document.querySelector('.schedule .selection-hint').textContent =
+    mineTab ? '누르면 그 날짜·근태로 갑니다' : '빈 시간을 눌러 예약하세요';
 
   // 차량 신청 칸(행선지·동승자)은 차량 탭에서만 뜻이 있다.
   el.carFields.classList.toggle('hidden', !car);
@@ -1692,7 +1817,10 @@ function applyMode(mode) {
   state.editTarget = null;
   el.region.hidden = car || mineTab;
   // 말로 찾기는 회의실·차량 둘 다 쓴다. 내 예약은 이미 지난 것을 보는 화면이라 뜻이 없다.
-  document.querySelector('.ask')?.toggleAttribute('hidden', mineTab);
+  document.querySelector('.ask')?.toggleAttribute('hidden', mineTab || attendTab);
+  // 근태 탭은 날짜 격자도 예약 칸도 쓰지 않는다. 통째로 숨기고 근태 화면만 둔다.
+  document.querySelector('.controls')?.toggleAttribute('hidden', attendTab);
+  document.querySelector('.schedule')?.toggleAttribute('hidden', attendTab);
   // 칸 하나에 로고·입력·버튼이 한 줄로 들어가느라 제목 줄이 없다.
   // 그래서 플레이스홀더가 제목 몫을 하고, 탭별 예문은 툴팁으로 내린다.
   paintAskReady();
@@ -1704,6 +1832,8 @@ function applyMode(mode) {
   el.mineWrap.classList.toggle('hidden', !mineTab);
 
   chrome.storage.local.set({ mode });
+  if (attendTab) return attend.show();
+  attend.hide();
   return load();
 }
 
@@ -1741,6 +1871,34 @@ function mineRowButtons(it, i) {
     + `<button class="mi-cancel" data-cancel="${i}" title="이 예약을 취소합니다">취소</button>`;
 }
 
+/* 근태(출장·휴가 …)도 현황에 같이 보인다. 읽어 담아 두는 일은 src/plans.js 가 한다 — 홈의 WORKSPACE 카드
+   (배경이 대신 읽는다)와 같은 것을 쓰므로, 한쪽이 오늘 읽어 두면 다른 쪽은 HR 을 열지 않는다. */
+const loadPlans = (start, { force = false } = {}) => readPlans(start, { force, listDocs: hrListDocs });
+
+const clockMinutes = (t) => (/^\d{2}:\d{2}$/.test(t || '') ? +t.slice(0, 2) * 60 + +t.slice(3) : 0);
+
+/** 근태 한 건을 예약 목록의 한 줄 모양으로 바꾼다. 시각이 없는 건(전일 휴가)은 timed 가 거짓이다. */
+const planRow = (p) => ({
+  kind: 'attend', label: p.label, room: p.gubun || '', title: p.reason || '', status: p.status, docNo: p.docNo,
+  timed: !!(p.start && p.end), from: { date: p.from, minutes: clockMinutes(p.start) }, to: { date: p.to, minutes: clockMinutes(p.end) },
+});
+
+/** 현황의 근태 한 줄. 취소·수정 버튼은 없다 — 누르면 근태 탭으로 가서 거기서 한다. */
+function planRowHtml(it, i) {
+  const sameDay = it.from.date === it.to.date;
+  const span = (d) => (it.timed ? `${shortLabel(d.date)} ${fmtTime(d.minutes)}` : shortLabel(d.date));
+  const when = sameDay
+    ? `${dayLabel(it.from.date)} ${it.timed ? `${fmtTime(it.from.minutes)}~${fmtTime(it.to.minutes)}` : it.room}`.trim()
+    : `${span(it.from)} ~ ${span(it.to)}`;
+  return `<li data-i="${i}" class="mi-attend" title="누르면 근태 탭으로 갑니다">`
+    + `<span class="mi-kind attend">${escapeHtml(it.label)}</span>`
+    + '<span class="mi-main">'
+    + `<span class="mi-when${sameDay ? '' : ' mi-span'}">${escapeHtml(when)}</span>`
+    + (it.status ? `<span class="mi-status">${escapeHtml(it.status)}</span>` : '')
+    + (it.title ? `<span class="mi-sub"><span class="mi-title">${escapeHtml(it.title)}</span></span>` : '')
+    + '</span></li>';
+}
+
 function renderMine(items, note) {
   state.mine = items;
   el.roomCount.textContent = String(items.length);
@@ -1748,6 +1906,7 @@ function renderMine(items, note) {
   el.mineEmpty.classList.toggle('hidden', items.length > 0);
 
   el.mineList.innerHTML = items.map((it, i) => {
+    if (it.kind === 'attend') return planRowHtml(it, i);
     const sameDay = it.from.date === it.to.date;
     const when = sameDay
       ? `${dayLabel(it.from.date)} ${fmtTime(it.from.minutes)}~${fmtTime(it.to.minutes)}`
@@ -1772,9 +1931,12 @@ function renderMine(items, note) {
 /**
  * 고른 날부터 한 달(고른 기간)간 내 예약만 모은다.
  *
- * 직접 훑지 않고 **세 탭이 함께 쓰는 캐시**에 그 날짜들을 채워 달라고 한다. 패널이 열릴 때
- * 이미 한 달을 미리 훑어 두므로 보통은 기다릴 것이 없다. 아직 훑는 중이면 담기는 대로
+ * 직접 훑지 않고 **세 탭이 함께 쓰는 캐시**에 그 날짜들을 채워 달라고 한다. 한 달은 하루에 한 번
+ * 미리 훑어 두므로 보통은 기다릴 것이 없다. 아직 훑는 중이면 담기는 대로
  * 목록이 차오른다 — 서른 날을 다 기다린 뒤에야 첫 줄이 보이면 아무것도 안 하는 것처럼 보인다.
+ *
+ * **오늘 읽어 둔 날은 다시 읽지 않는다.** 그 사이 격자에서 조회했거나 이 확장으로 예약·취소한 날은
+ * 그때 새로 담기고, 나머지는 ↻(force)를 눌러야 다시 훑는다. 그래서 언제 읽은 것인지(동기화 시각)를 같이 적는다.
  *
  * **못 읽은 날은 결과에서 빼고 몇 일이 빠졌는지 말한다.** 못 읽은 날을 조용히 넘기면
  * "내 예약이 없다"는 거짓말이 된다.
@@ -1788,20 +1950,73 @@ async function loadMine(sequence, { force = false } = {}) {
   el.refresh.disabled = true;
   el.refresh.classList.add('spin');
 
-  /** 지금까지 담긴 것만으로 목록을 그린다. 훑는 동안 여러 번 불린다. */
+  // 다녀온 출장을 고르는 규칙(몇 주까지 남기는가 · 사후정산을 완료했거나 증빙을 보낸 것은 뺌) — 홈 카드·근태 탭과 같은 것을
+  // 저장소에서 읽는다(src/settling.js). 읽히기 전에는 기본 규칙(4주)으로 그린다.
+  let rule = {};
+
+  /**
+   * 지금까지 담긴 것만으로 목록을 그린다. 훑는 동안 여러 번 불린다.
+   * 예약과 근태를 한 목록에 날짜순으로 섞는다. 돌려주는 items 는 예약만이다(건수를 따로 말하려고).
+   */
   const paint = () => {
     const got = collectMine(store.list(dates), { name: state.myName, booked: state.justBooked });
-    renderMine(got.items, `${span} 내 예약 ${got.items.length}건`);
+    // 출장은 다녀온 뒤 4주까지(홈 카드와 같은 규칙 — 고른 기간) — 다녀온 출장의 여비를 정산해야 한다. 정산이 끝난 것은 뺀다(rule).
+    const plans = plansToShow(state.plans.items, start, dates[dates.length - 1], rule).map(planRow);
+    const all = [...got.items, ...plans].sort((a, b) =>
+      a.from.date.localeCompare(b.from.date) || a.from.minutes - b.from.minutes);
+    renderMine(all, `${span} 예약 ${got.items.length}건 · 근태 ${plans.length}건`);
     state.loadedAt = store.oldest(dates);
     paintStamp();
-    return got;
+    return { ...got, plans };
   };
 
   setStatus(store.covers(dates) ? '미리 훑어 둔 내 예약입니다.' : '내 예약을 찾는 중...');
   paint();
 
+  // 근태는 예약 훑기와 따로 읽는다. HR 이 느리거나 막혀도 예약 목록을 붙잡지 않고, 읽히는 대로 끼워 넣는다.
+  let scan = null;
+  let stopped = false;
+  /** 다 훑은 뒤의 목록과 한 줄 요약. 근태가 나중에 읽히면 한 번 더 불린다. */
+  const finish = () => {
+    const { items, skipped, plans } = paint();
+    // 회의실·차량을 따로 훑으므로 못 읽은 기록은 한 날에 둘까지 나온다. 날짜 수로 센다.
+    const skippedDates = new Set(skipped.map((s) => s.date));
+    const unread = dates.filter((d) => !store.get('room', d) || !store.get('car', d));
+    const parts = [`${span} · ${dates.length}일 훑음 · 내 예약 ${items.length}건 · 근태 ${plans.length}건`];
+    if (!state.myName) parts.push('이름을 넣으면 더 정확합니다');
+    if (skippedDates.size) parts.push(`⚠ ${skippedDates.size}일은 확인 불가라 제외`);
+    if (unread.length) parts.push(`⚠ ${unread.length}일은 아예 읽지 못했습니다`);
+    if (state.plans.error) parts.push(`⚠ 근태는 읽지 못했습니다(${state.plans.error})`);
+    parts.push(...scan.failed);
+    const bad = skippedDates.size || unread.length || scan.failed.length || state.plans.error;
+    setStatus(parts.join(' · '), bad ? 'error' : '');
+  };
+  const repaint = () => {
+    if (sequence !== loadSequence || stopped) return;
+    if (scan) finish();
+    else paint();
+  };
+  /** 규칙을 읽어 다시 그린다. 다녀온 출장이 남아 있는데 여비계산서의 단계를 모르면 목록을 읽어(하루에 한 번) 한 번 더 고른다. */
+  let stagesRead = false;
+  const applyRule = async () => {
+    rule = await tripRule();
+    repaint();
+    const due = plansToShow(state.plans.items, start, start, rule).some((p) => p.to < start);
+    if (!due || stagesRead || (rule.stages && !force)) return;
+    stagesRead = true;
+    await loadStages({ list: tripList, force });
+    rule = await tripRule();
+    repaint();
+  };
+  applyRule().catch(() => {});
+  loadPlans(start, { force }).then((plans) => {
+    if (sequence !== loadSequence || stopped) return;
+    state.plans = plans;
+    repaint();
+    applyRule().catch(() => {});
+  });
+
   const off = onScanDay(() => { if (sequence === loadSequence) paint(); });
-  let scan;
   try {
     scan = await ensureDays(dates, { force });
   } finally {
@@ -1817,6 +2032,7 @@ async function loadMine(sequence, { force = false } = {}) {
   const read = store.list(dates);
   state.authFailed = !!scan.authError;
   if (scan.authError && !read.length) {
+    stopped = true;
     el.mineList.innerHTML = '';
     el.mineEmpty.classList.add('hidden');
     el.roomCount.textContent = '';
@@ -1825,30 +2041,20 @@ async function loadMine(sequence, { force = false } = {}) {
     return;
   }
 
-  const { items, skipped } = paint();
-
-  // 회의실·차량을 따로 훑으므로 못 읽은 기록은 한 날에 둘까지 나온다. 날짜 수로 센다.
-  const skippedDates = new Set(skipped.map((s) => s.date));
-  const unread = dates.filter((d) => !store.get('room', d) || !store.get('car', d));
-  const parts = [`${span} · ${dates.length}일 훑음 · 내 예약 ${items.length}건`];
-  if (!state.myName) parts.push('이름을 넣으면 더 정확합니다');
-  if (skippedDates.size) parts.push(`⚠ ${skippedDates.size}일은 확인 불가라 제외`);
-  if (unread.length) parts.push(`⚠ ${unread.length}일은 아예 읽지 못했습니다`);
-  parts.push(...scan.failed);
-  const bad = skippedDates.size || unread.length || scan.failed.length;
-  setStatus(parts.join(' · '), bad ? 'error' : '');
+  finish();
 }
 
-/** 목록에서 한 건을 누르면 그 날짜·종류 화면으로 간다. */
+/** 목록에서 한 건을 누르면 그 날짜·종류 화면으로 간다. 근태 건은 근태 탭으로 간다. */
 function openMineItem(i) {
   const it = state.mine[i];
   if (!it) return;
+  if (it.kind === 'attend') return applyMode('attend');
   el.date.value = it.from.date;
-  applyMode(it.kind === 'car' ? 'car' : 'room');
+  return applyMode(it.kind === 'car' ? 'car' : 'room');
 }
 
 /**
- * 홈의 내 예약 카드가 남긴 "이 날짜로 가 달라"는 부탁을 읽고 지운다.
+ * 홈의 WORKSPACE 카드가 남긴 "이 날짜로 가 달라"는 부탁을 읽고 지운다.
  * 묵은 것은 무시한다 — 며칠 전에 눌러 둔 것이 다음에 패널을 열 때 튀어나오면 안 된다.
  */
 async function takeHomeJump() {
@@ -1860,8 +2066,9 @@ async function takeHomeJump() {
   return jump;
 }
 
-/** 부탁받은 날짜·종류로 간다. 내 예약 목록에서 한 줄을 누른 것과 같다. */
+/** 부탁받은 날짜·종류로 간다. 내 예약 목록에서 한 줄을 누른 것과 같다. 근태 건이면 근태 탭으로 간다. */
 function applyHomeJump(jump) {
+  if (jump.mode === 'attend') return applyMode('attend');
   el.date.value = jump.date;
   return applyMode(jump.mode === 'car' ? 'car' : 'room');
 }
@@ -1899,7 +2106,8 @@ async function runAsk() {
 
   // 물어본 탭을 붙잡아 둔다. 찾는 동안 탭을 옮겨도 결과는 물어본 곳 것이고,
   // 누를 때 그 탭으로 도로 옮겨 준다.
-  const kind = isCar() ? 'car' : 'room';
+  const run = currentRunner();
+  const { kind } = run;
 
   state.asking = true;
   el.askGo.disabled = true;
@@ -1911,21 +2119,21 @@ async function runAsk() {
     const parsed = await parseSmart(text, {
       apiKey: state.apiKey, today: todayStr(), useNative: state.cli, kind,
     });
-    // 차량에는 좌석 수가 없다. 인원 조건을 그대로 두면 모든 차가 걸러진다.
-    const filter = kind === 'car' ? { ...parsed.filter, minSeats: null } : parsed.filter;
+    // 여기 온 조건은 입력 명세의 관문을 지난 것이다. 그 종류가 받지 않는 조건(차량의 좌석 수·지역)은
+    // 관문이 비우고 parsed.note 에 적어 준다 — 인원 조건을 그대로 두면 모든 차가 걸러진다.
+    const { filter } = parsed;
     const via = VIA_LABEL[parsed.via] || parsed.via;
     setAskNote(`[${via}] ${filter.summary} — 후보를 찾는 중...`);
 
     const { results, skipped, dates } = await findSlots(filter, (date, i, n) => {
       setAskNote(`[${via}] ${filter.summary} — ${date} 조회 중 (${i}/${n})`);
-    }, kind === 'car' ? loadCarDay : loadDay);
+    }, run.loadDay);
 
     renderFound(results, skipped, kind);
 
-    const noun = kind === 'car' ? '차량' : '회의실';
+    const { noun } = run;
     const parts = [`[${via}] ${noun} ${dates.length}일 조회 · 빈 시간 ${results.length}건`];
-    if (parsed.filter.guessed) parts.push('날짜·시간을 못 읽어 기본값으로 봤습니다');
-    if (kind === 'car' && parsed.filter.minSeats) parts.push('차량은 좌석 수를 알 수 없어 인원 조건은 뺐습니다');
+    if (parsed.guessed) parts.push('날짜·시간을 못 읽어 기본값으로 봤습니다');
     if (parsed.note) parts.push(parsed.note);
     if (skipped.length) parts.push(`⚠ ${skipped.length}일은 확인 불가라 제외`);
     if (dates.length >= MAX_DAYS) parts.push(`최대 ${MAX_DAYS}일까지만 봅니다`);
@@ -1994,6 +2202,63 @@ async function applyFound(i) {
   state.picks = [{ room: ri, from, to }];
   paintPicks();
   el.title.focus();
+}
+
+/**
+ * 근태 폼의 차량 조회에서 빈 차량을 눌렀을 때(2026-10-03 사용자 지정) — 차량 탭으로 옮기지 않고 **그 자리에서 신청한다.**
+ * 차량 탭의 예약하기와 같은 길(차량 실행자)로 보내고, 같은 것을 남긴다: 활동 기록, 내가 넣은 예약, 내 이름,
+ * 담아 둔 현황 버리기, 안 됐을 때의 까닭. 근태 탭은 그대로 보고 있고, 결과는 근태 폼의 차량 상자가 말한다.
+ *
+ * 여러 날에 걸친 출장이면 끝이 다른 날인 한 건으로 나간다(종료 날짜를 같이 보낸다).
+ * 신청됐는지는 실행자가 다시 조회해 판정한다 — 확인된 것만 ok 다.
+ *
+ * @param {{date:string, endDate:string, start:number, end:number, car:{name:string, value:string}, title:string, place:string}} r src/carfind.js 의 carPick
+ * @returns {Promise<{ok:boolean, submitted:boolean, message:string}>} message 는 안 됐을 때의 까닭(됐으면 사이트가 한 말)
+ */
+async function reserveCarPick(r) {
+  const run = RUNNERS.car;
+  const payload = run.payload({
+    row: r.car, date: r.date, start: fmtTime(r.start), end: fmtTime(r.end), endDate: r.endDate, title: r.title, place: r.place, passenger: '',
+  });
+  const miss = run.missing({ title: payload.title, place: payload.place });
+  if (miss) return { ok: false, submitted: false, message: miss.message };
+
+  let result;
+  try {
+    result = await run.reserve(payload);
+  } catch (err) {
+    result = { ok: false, submitted: false, message: err.message };
+  }
+  const multi = !!payload.endDate;
+  const what = `${payload.room} ${payload.date} ${payload.start}~${multi ? `${payload.endDate} ` : ''}${payload.end}`;
+  // 넣은 날은 담아 둔 현황이 낡았다. 여러 날에 걸친 신청은 걸친 날을 모두 버린다.
+  forgetDays(datesBetween(payload.date, payload.endDate || payload.date), [run.kind]);
+
+  if (result.ok && result.verified) {
+    logEvent('reserve', true, `${what} (근태 폼의 차량 조회)`,
+      { payload, message: result.message || undefined, owner: result.record?.owner || result.who?.name });
+    rememberBooked([{
+      mode: run.kind, date: payload.date, room: payload.room,
+      start: r.start,
+      // 여러 날에 걸친 신청은 첫날에는 그날 끝까지다.
+      end: multi ? 24 * 60 : r.end,
+      at: Date.now(),
+    }]);
+    // 차량 신청 폼은 로그인한 사람의 이름을 적어서 내려준다.
+    if (result.who?.name) rememberName(result.who.name);
+    return { ok: true, submitted: true, message: result.message || '' };
+  }
+
+  const digest = saveDigest(payload, result);
+  logEvent('reserve', false,
+    `${what} (근태 폼의 차량 조회) — ${result.submitted ? '제출했지만 확인 못 함' : '실패'}: ${result.message}`,
+    { payload, submitted: !!result.submitted, verified: result.verified, message: result.message, digest });
+  state.lastFailure = { payload, result };
+  // 됐는지는 이미 재조회로 판정했다. 여기서는 왜 안 됐는지만 읽는다(차량 탭의 예약하기와 같다).
+  const found = (await explainFailure(digest))?.result;
+  const tag = found ? { rejected: '사이트 거부', maybe_saved: '저장됐을 수 있음', unknown: '원인 불분명' }[found.verdict] || '' : '';
+  const detail = found ? ` — ${tag}: ${found.cause}${found.siteMessage ? ` (사이트 문구: "${found.siteMessage}")` : ''}${found.fix ? ` → ${found.fix}` : ''}` : '';
+  return { ok: false, submitted: !!result.submitted, message: `${result.message || '신청하지 못했습니다'}${detail}` };
 }
 
 /* ------------------------------------------------------------- 진단 */
@@ -2148,11 +2413,12 @@ async function runCapture() {
   el.capture.disabled = true;
   el.diagOut.textContent = '캡처 중...';
   try {
-    const list = await captureRaw(isCar() ? CAR_LIST_URL : LIST_URL);
+    const run = currentRunner();
+    const list = await captureRaw(run.listUrl);
     const summary = summarize(list.html, list.finalUrl, list.via);
 
     const bundle = `===== SUMMARY =====\n${JSON.stringify(summary, null, 2)}\n\n===== RAW HTML =====\n${list.html}`;
-    const filename = isCar() ? 'rentcar-capture.txt' : 'meetingroom-capture.txt';
+    const filename = run.captureFile;
     await saveText(bundle, filename);
 
     el.diagOut.textContent =
@@ -2210,6 +2476,8 @@ async function init() {
   el.homeUncfm.checked = unconfirmedEnabled(saved[UNCFM_ENABLE_KEY]);
   el.docCirculate.checked = circulateEnabled(saved[CIRC_ENABLE_KEY]);
   paintCirculate(saved[CIRC_STATE_KEY]);
+  // 오늘 훑어 둔 현황을 먼저 불러온다. 이게 있으면 아래 조회·미리 훑기가 사이트를 다시 두드리지 않는다.
+  await store.restore().catch(() => {});
   // 패널을 연 것도 남긴다. 기록을 읽을 때 어디서 한 판이 시작됐는지가 보인다.
   logEvent('open', true, `패널 열림 · v${chrome.runtime.getManifest?.()?.version ?? '?'}`,
     { mode: saved.mode || 'room' });
@@ -2252,9 +2520,12 @@ async function init() {
     paintAskReady();
   });
   el.openPageInline.addEventListener('click', () => {
-    chrome.tabs.create({ url: isCar() ? CAR_SHELL_URL : SHELL_URL });
+    chrome.tabs.create({ url: currentRunner().shellUrl });
   });
   el.cliCheck.addEventListener('click', checkCli);
+  for (const btn of document.querySelectorAll('.cli-guide-copy')) btn.addEventListener('click', () => copyCliGuide(btn));
+  el.tabAttend.addEventListener('click', () => setMode('attend'));
+  attend.wire();
   el.tabRoom.addEventListener('click', () => setMode('room'));
   el.tabCar.addEventListener('click', () => setMode('car'));
   el.tabMine.addEventListener('click', () => setMode('mine'));
@@ -2282,7 +2553,7 @@ async function init() {
   el.homeCard.addEventListener('change', () => {
     const on = el.homeCard.checked;
     chrome.storage.local.set({ [HOME_ENABLE_KEY]: on });
-    logEvent('setting', true, `e-Class 홈 내 예약 카드 ${on ? '켬' : '끔'}`);
+    logEvent('setting', true, `e-Class 홈 WORKSPACE 카드 ${on ? '켬' : '끔'}`);
   });
   // 인명 검색 카드의 Teams 버튼. 열려 있는 검색 화면은 저장소 변화를 듣고 곧바로 버튼을 떼거나 붙인다.
   el.teamsButton.addEventListener('change', () => {
@@ -2348,13 +2619,15 @@ async function init() {
   applyAuto();
 
   // 리스너를 모두 붙인 뒤에 모드를 맞춘다. applyMode 가 조회까지 해준다.
-  // 홈의 내 예약 카드에서 한 건을 눌러 열렸으면 저장된 모드 대신 그 날짜·종류로 간다.
+  // 홈의 WORKSPACE 카드에서 한 건을 눌러 열렸으면 저장된 모드 대신 그 날짜·종류로 간다.
   const jump = await takeHomeJump();
   const first = jump ? applyHomeJump(jump)
-    : (saved.mode === 'car' || saved.mode === 'mine') ? applyMode(saved.mode) : load();
+    : (saved.mode === 'car' || saved.mode === 'mine' || saved.mode === 'attend') ? applyMode(saved.mode) : load();
   // 패널이 이미 열려 있을 때 홈에서 누르면 저장소 변화로 온다.
   chrome.storage.onChanged?.addListener((changes, area) => {
     if (area !== 'local') return;
+    // 다른 창의 패널이 훑거나 예약·취소로 버린 날을 이 창의 보관소도 따라간다.
+    store.sync(changes);
     // 다른 창의 패널에서 바꿨으면 이 창의 체크박스도 따라간다.
     if (HOME_ENABLE_KEY in changes) el.homeCard.checked = homeEnabled(changes[HOME_ENABLE_KEY].newValue);
     if (TEAMS_ENABLE_KEY in changes) el.teamsButton.checked = teamsEnabled(changes[TEAMS_ENABLE_KEY].newValue);
@@ -2372,8 +2645,9 @@ async function init() {
   // eclass 에 다시 로그인하고 돌아오면 ↻ 없이 이어받는다. 로그인 폼은 끝나면 홈으로 돌아오므로
   // eclass 탭이 다 읽힌 순간이 신호다. 로그인이 풀린 상태일 때만 움직인다(평소 탭 로딩에는 조용히).
   chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
-    if (info.status !== 'complete' || !state.authFailed) return;
-    if (!(tab?.url || '').startsWith(ORIGIN)) return;
+    if (info.status !== 'complete' || !(tab?.url || '').startsWith(ORIGIN)) return;
+    if (isAttend() && attend.authFailed()) attend.reload();
+    if (!state.authFailed) return;
     recoverAfterLogin();
   });
   // 패널이 가려져 있는 사이에 로그인했을 수도 있다. 다시 보이면 한 번 확인한다.

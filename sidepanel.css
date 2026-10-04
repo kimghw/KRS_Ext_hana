@@ -189,6 +189,10 @@ button.pk-del:hover { color: var(--danger); }
 .ask.off .ask-bar button { background: var(--surface-soft); color: var(--muted); opacity: 1; }
 .ask.off .ask-bar input:disabled { color: var(--faint); cursor: not-allowed; }
 .ask.off .sparkle-icon { color: var(--faint); opacity: .55; }
+/* Claude 에 닿을 길이 없을 때 말 칸(말로 찾기·말로 채우기) 아래에 내는 줄 — 한마디와 연결 지침 복사 버튼. */
+.cli-help { display: flex; align-items: center; gap: 8px; margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.cli-help span { flex: 1; min-width: 0; }
+.cli-help button { flex: none; font-size: 13px; color: var(--pick); }
 .ask-note { margin-top: 9px; color: var(--muted); font-size: 14px; }
 .ask-note:empty, .ask-list:empty { display: none; }
 .ask-note.error { color: var(--danger); }
@@ -330,6 +334,9 @@ button.pk-del:hover { color: var(--danger); }
   background: var(--pick-soft); color: var(--pick);
 }
 .mi-kind.car { background: var(--free); color: var(--fg); }
+/* 근태(출장·휴가 …). 예약과 한 목록에 섞이므로 딱지 색으로 가린다. */
+.mi-kind.attend { background: color-mix(in srgb, var(--mine) 28%, var(--surface)); color: var(--fg); }
+.mi-attend .mi-title::before { content: none; }
 .mi-main { display: block; flex: 1; min-width: 0; }
 .mi-when { font-weight: 600; font-variant-numeric: tabular-nums; }
 .mi-span { color: var(--muted); font-weight: 500; font-size: 13px; }
@@ -378,3 +385,417 @@ button.danger:hover { filter: brightness(1.08); }
   font-size: 12px; line-height: 1.5;
 }
 .mi-edit { margin-left: 4px; }
+
+
+/* ------------------------------------------------------------ 근태 */
+
+/* 네 탭이 한 줄에 들어가도록 글자 사이를 조금 줄인다. */
+.tabs .tab { padding: 8px 4px; white-space: nowrap; }
+
+.attend { margin-bottom: 18px; }
+.attend[aria-busy="true"] .at-form, .attend[aria-busy="true"] .at-kinds { opacity: .7; }
+
+.attend .at-kinds { margin-bottom: 12px; }
+/* 여섯 종류를 두 글자 이름으로 한 줄에 둔다. 아주 좁으면 넘치는 칸이 다음 줄로 내려간다 —
+   한 줄을 고집하면 끝 칸이 패널 밖으로 잘린다. */
+.attend .at-kind-row { display: flex; flex-wrap: wrap; gap: 3px; }
+.attend .at-more { width: 100%; min-height: 26px; margin: 4px 0; font-size: 12px; color: var(--faint); }
+.attend .at-kind {
+  flex: 1 0 auto; min-height: 32px; padding: 4px 2px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap;
+}
+.attend .at-kind:hover { background: var(--pick-soft); border-color: var(--pick); }
+.attend .at-kind.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+
+.attend .at-chat { margin-bottom: 12px; padding: 9px 11px; }
+.attend .at-chat-log { list-style: none; margin: 0; padding: 0; }
+.attend .at-chat-log:not(:empty) { margin-top: 9px; }
+.attend .at-say { margin-top: 5px; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.attend .at-say.me { margin-left: 18%; background: var(--pick-soft); color: var(--fg); }
+.attend .at-say.ai { margin-right: 8%; background: var(--surface-soft); color: var(--muted); }
+.attend .at-say.error { color: var(--danger); }
+
+.attend .at-form { padding: 16px; border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
+.attend .at-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 10px; }
+.attend .at-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* 날짜는 한 줄을 다 쓴다 — 그래야 출발·도착이 그 아래에 나란히 선다.
+   시작과 몇 시간으로 받는 종류(beside)는 날짜와 시작이 한 줄에 나란히 서고, 몇 시간 칩이 그 아래 한 줄을 쓴다. */
+.attend .at-field.wide, .attend .at-field.at-check, .attend .at-field.at-date:not(.beside) { grid-column: 1 / -1; }
+.attend .at-field.at-check { flex-direction: row; align-items: center; gap: 8px; }
+.attend .at-field.at-check .at-label { order: 2; }
+.attend .at-label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.attend .at-req { font-style: normal; font-size: 10px; font-weight: 700; color: var(--faint); letter-spacing: .3px; }
+.attend .at-field input:not([type="checkbox"]):not([type="file"]), .attend .at-field select {
+  width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
+  background: var(--surface-soft); font-size: 14px;
+}
+/* 첨부 칸. 고르는 단추는 감추고(탭으로는 닿는다) 점선 상자 전체가 끌어다 놓는 자리이자 누르는 자리다. */
+.attend .at-field.at-file { position: relative; }
+.attend .at-field input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.attend .at-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-height: 64px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px;
+  background: var(--surface-soft); text-align: center; cursor: pointer;
+}
+.attend .at-drop:hover, .attend .at-field.over .at-drop { border-color: var(--pick); background: var(--pick-soft); }
+.attend .at-field input[type="file"]:focus-visible + .at-drop { outline: 2px solid var(--pick); outline-offset: 2px; }
+.attend .at-file { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-file:empty { display: none; }
+.attend .at-drop.picked .at-file { color: var(--fg); font-size: 13px; font-weight: 600; }
+.attend .at-drop-how { color: var(--faint); font-size: 12px; }
+.attend .at-msg { min-height: 0; font-size: 11px; color: var(--faint); }
+.attend .at-msg:empty { display: none; }
+/* 안내(반차가 몇 시부터인지, 유연근무를 먼저 올리는지). 잘못이 아니므로 흐린 색이 아니라 읽히는 색으로 둔다. */
+.attend .at-msg.note { font-size: 12px; line-height: 1.5; color: var(--muted); }
+
+/* 날짜·시각 칸은 이름을 칸 안 왼쪽에 적는다 — 이름 줄을 따로 두지 않아 한 줄씩 줄어든다.
+   이름은 칸 위에 얹고(눌러도 칸이 받는다), 칸은 이름 글자 수(--lab)만큼 왼쪽을 비운다. */
+.attend .at-field.inl { position: relative; }
+.attend .at-field.inl .at-label { position: absolute; left: 11px; top: 0; height: 40px; pointer-events: none; }
+.attend .at-field.inl input:not([type="checkbox"]):not([type="file"]), .attend .at-field.inl select {
+  padding-left: calc(19px + var(--lab, 2) * 13px);
+}
+
+/* 비어 있는 필수칸. 바탕은 다른 칸과 같은 회색으로 두고 윤곽선만 파랗게 두른다(색 바탕은 뺐다 — 2026-10-02 사용자 지정). */
+.attend .at-field.need input:not([type="checkbox"]):not([type="file"]), .attend .at-field.need select { border-color: var(--pick); }
+.attend .at-field.need .at-drop { border-color: var(--pick); }
+.attend .at-field.need .at-msg, .attend .at-field.need .at-req { color: var(--pick); font-weight: 600; }
+/* 값은 있는데 맞지 않는 칸. */
+.attend .at-field.bad input:not([type="checkbox"]):not([type="file"]), .attend .at-field.bad select { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.attend .at-field.bad .at-msg { color: var(--danger); }
+/* 말로 채워 넣은 칸. 무엇이 바뀌었는지 보이게 초록 테두리를 둔다. */
+.attend .at-field.filled:not(.bad) input:not([type="checkbox"]):not([type="file"]), .attend .at-field.filled:not(.bad) select {
+  background: var(--free); border-color: var(--free-line);
+}
+
+.attend .at-need { margin: 12px 0 2px; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.attend .at-need:empty { display: none; }
+.attend .at-need.todo { color: color-mix(in srgb, var(--mine) 70%, var(--fg)); font-weight: 600; }
+.attend button.armed { background: var(--danger); color: #fff; }
+.attend button.armed:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
+
+.attend .at-list-head { margin-top: 20px; }
+.attend .at-list { list-style: none; margin: 0; padding: 0; }
+.attend .at-list li { margin-bottom: 6px; border: 1px solid var(--line); border-radius: 11px; font-size: 14px; }
+.attend .at-list li:last-child { margin-bottom: 0; }
+.attend .at-list li.editing { border-color: var(--pick); background: var(--pick-soft); }
+/* 증빙(이미지·PDF)을 출장 줄 위로 끌고 왔을 때 — 놓으면 그 출장의 사후정산으로 간다 */
+.attend .at-list li.over { border-color: var(--pick); background: var(--pick-soft); box-shadow: inset 0 0 0 1px var(--pick); }
+/* 한 건은 두 줄이다 — 상태·요약 한 줄, 내용 한 줄. 줄 전체가 버튼이고 누르면 아래가 펴진다. */
+.attend .at-head { display: block; width: 100%; min-height: 0; padding: 9px 12px; border-radius: 10px; background: transparent; text-align: left; font-size: 14px; }
+.attend .at-head:hover { background: var(--pick-soft); }
+.attend .at-head:active:not(:disabled) { transform: none; }
+.attend .at-row { display: flex; align-items: baseline; gap: 8px; }
+.attend .at-st { flex: none; padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; background: var(--busy); color: var(--muted); }
+.attend .st-1 .at-st { background: color-mix(in srgb, var(--mine) 28%, var(--surface)); color: var(--fg); }
+.attend .st-2 .at-st, .attend .st-3 .at-st { background: var(--pick-soft); color: var(--pick); }
+.attend .st-5 .at-st { background: var(--free); color: var(--fg); }
+/* 이미 지난 결재완료 건은 회색으로 가라앉힌다 — 앞으로 올 일정이 눈에 먼저 들어오게. */
+.attend .past.st-5 .at-st { background: var(--busy); color: var(--muted); }
+.attend .st-4 .at-st { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+.attend .at-sum { min-width: 0; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attend .at-reason, .attend .at-reject { display: block; margin-top: 1px; color: var(--muted); font-size: 13px; }
+.attend .at-reason { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attend .at-reason:empty { display: none; }
+/* 편 줄은 줄이지 않고 다 보여준다. */
+.attend li.open .at-sum, .attend li.open .at-reason { white-space: normal; overflow-wrap: anywhere; }
+.attend .at-reject { overflow-wrap: anywhere; }
+.attend .at-more-box { padding: 0 12px 10px; }
+.attend .at-reject { color: var(--danger); }
+.attend .at-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* 그 상태에서 할 일이 없는 건은 버튼 줄이 비어 있다 — 금만 남지 않게 접는다(버튼 줄이 여비계산서 줄 위로 올라와 눈에 띈다). */
+.attend .at-acts:empty { display: none; }
+.attend button.at-warn { background: transparent; color: var(--danger); }
+.attend button.at-warn:hover { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.attend button.at-warn.armed { background: var(--danger); color: #fff; }
+.attend .at-cancel { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 10px; background: var(--surface-soft); border-radius: 9px; }
+.attend .at-cancel input { flex: 1; min-height: 34px !important; font-size: 13px; }
+.attend .at-cancel .at-help { flex-basis: 100%; margin: 0; }
+
+/* 공용 카드와 버튼은 그대로 두고, 좁은 근태 화면 안의 읽는 순서와 행동 무게만 맞춘다. */
+.attend .at-help { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.attend .booking-head { align-items: flex-start; gap: 8px; margin-bottom: 16px; }
+/* 폼 제목이 접기 버튼이다. 접으면 화살표가 눕고 제목 줄만 남는다. */
+.attend .at-fold { min-height: 0; padding: 2px 0; gap: 4px; background: transparent; color: var(--pick); }
+.attend .at-fold:hover { background: transparent; }
+.attend .at-fold svg { width: 16px; height: 16px; color: var(--muted); transition: transform .16s ease; }
+.attend .at-form.folded .at-fold svg { transform: rotate(-90deg); }
+.attend .at-form.folded .booking-head { margin-bottom: 0; }
+/* 종류 줄 끝의 "내역"(모든 종류 보기)은 종류 버튼과 모양이 같고 왼쪽에 틈을 둔다 */
+.attend .at-kind.at-view { margin-left: auto; }
+/* 여비계산서 단계 아이콘 색: 회색 = 미작성·대기, 녹색 = 작성 중, 파랑 = 완료 (2026-10-03 사용자 지정) */
+.attend .at-tripline button.at-tripbtn svg { stroke-width: 1.9; }
+.attend .at-tripline button.at-tripbtn.none { color: var(--faint); }
+.attend .at-tripline button.at-tripbtn.doing { color: #2e9e5b; }
+/* 특실(기차, 출장 카드에서는 비행기도)의 아이콘 색(주황 — 2026-10-04 사용자 지정). */
+.attend { --first: #e8710a; }
+@media (prefers-color-scheme: dark) { .attend { --first: #ff9f43; } }
+.attend .at-tripline button.at-tripbtn.done { color: var(--pick); }
+/* 사후정산 — 열린 출장 카드 안의 증빙 칸. 넣는 즉시 읽어서 올린다. */
+.attend .at-after { margin-top: 8px; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; }
+.attend .at-after-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.attend .at-after-head strong { color: var(--fg); }
+.attend .at-after-why { color: var(--muted); }
+.attend .at-after-head button.at-web { margin-left: auto; min-height: 28px; padding: 4px 8px; color: var(--muted); }
+.attend .at-after-head button.at-web svg { width: 14px; height: 14px; pointer-events: none; }
+/* 사전정산을 아직 완료(확정)하지 않은 출장 카드의 `사전정산 완료` 버튼 — 머리 줄 오른쪽 끝에 선다. */
+.attend .at-after-head button.at-pre-done { margin-left: auto; min-height: 28px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+.attend .at-after-drop { display: block; position: relative; margin-top: 6px; cursor: pointer; }
+.attend .at-after-drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+/* 증빙 넣는 곳 — 안내문이 아니라 넣는 자리로 보이게 파란 점선·아이콘·굵은 이름을 준다(2026-10-03 사용자 지정). */
+/* 높이는 처음의 절반쯤이다(같은 날 사용자 지정) — 이름과 넣는 길이 한 줄, 그 아래에 무엇을 넣는지 한두 줄. */
+.attend .at-after-drop .at-drop { gap: 2px; min-height: 0; padding: 7px 10px; border: 1.5px dashed color-mix(in srgb, var(--pick) 55%, var(--line)); background: var(--pick-soft); }
+.attend .at-drop-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0 8px; }
+.attend .at-drop-lead { display: inline-flex; align-items: center; gap: 5px; color: var(--pick); font-size: 13px; font-weight: 650; }
+.attend .at-drop-lead svg { width: 16px; height: 16px; }
+.attend .at-after-drop .at-file { color: var(--fg); }
+/* 좁은 패널에서 마지막 낱말 하나만 다음 줄로 떨어지지 않게 줄을 고르게, 낱말 사이에서 나눈다. */
+.attend .at-after-drop .at-file, .attend .at-after-drop .at-drop-how { text-wrap: balance; word-break: keep-all; }
+.attend .at-after-drop:hover .at-drop, .attend .at-after-drop.over .at-drop { border-color: var(--pick); background: color-mix(in srgb, var(--pick) 16%, var(--surface)); }
+.attend .at-after-drop input[type="file"]:focus-visible + .at-drop { outline: 2px solid var(--pick); outline-offset: 2px; }
+/* 파일을 끄는 동안 — 놓을 칸이 어디인지 패널에 들어오자마자 보인다. */
+.attend.dragging .at-after-drop .at-drop, .attend.dragging .at-field.at-file .at-drop { border-color: var(--pick); outline: 2px solid var(--pick); outline-offset: 2px; }
+.attend .at-after-drop.busy { opacity: .6; pointer-events: none; }
+.attend .at-after-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-after-note.error { color: var(--danger); }
+.attend .at-after-note.ok { color: var(--fg); font-weight: 600; }
+.attend .at-after-rows, .attend .at-after-notes { margin: 6px 0 0; padding-left: 16px; font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-after-notes { color: var(--muted); }
+.attend .at-after-docs { margin: 6px 0 0; padding-left: 16px; font-size: 12px; color: var(--fg); overflow-wrap: anywhere; }
+/* 사후정산 칸 안의 목록(읽은 증빙·올린 내역·알림)은 신청 내역의 줄(li)이 아니다 — 줄의 테두리·글자 크기를 물려받지 않게 한다. */
+.attend .at-after li { margin: 0; border: 0; border-radius: 0; font-size: 12px; }
+/* 읽은 증빙(문서)과 그것으로 올린 줄을 가르는 이름표, 그리고 올린 숙박 줄 한 묶음 — 사이트의 칸 이름 : 값. */
+.attend .at-after-label { margin: 8px 0 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+.attend .at-lodged { margin-top: 2px; }
+.attend .at-lodged dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 4px 0 0; padding: 6px 8px; font-size: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
+.attend .at-lodged dt { color: var(--muted); white-space: nowrap; }
+.attend .at-lodged dd { margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.attend .at-lodged.same dd { color: var(--muted); }
+/* 올리기 전에 묻는 것 — 외화 문서의 원화 결제 금액, 상한액을 넘는 숙박비를 어느 금액으로 정산할지. */
+.attend .at-after-ask { margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--pick) 55%, var(--line)); border-radius: 8px; background: var(--surface); }
+.attend .at-after-ask .at-after-note { margin: 0; color: var(--fg); }
+.attend .at-after-ask ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.attend .at-after-ask li + li { margin-top: 8px; }
+.attend .at-after-ask li p { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-ask-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.attend .at-ask-row input.at-ask-krw { flex: 1; min-width: 90px; max-width: 140px; min-height: 28px; padding: 3px 8px; text-align: right; }
+.attend .at-ask-row button, .attend .at-after-ask button.at-ask-drop { min-height: 28px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+.attend .at-after-ask button.at-ask-drop { margin-top: 8px; color: var(--muted); }
+/* 보관 중인 증빙 — 여비계산서에 붙일 칸이 없어 가지고 있다가 담당자에게 보낼 때 같이 갈 파일들. × 로 뺀다. */
+.attend .at-kept { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.attend .at-kept .at-after-note { margin: 0; }
+.attend .at-kept ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.attend .at-kept li { display: flex; align-items: center; gap: 6px; }
+.attend .at-kept li span { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.attend .at-kept button.at-kept-drop { flex: none; width: 22px; min-height: 22px; padding: 0; color: var(--muted); }
+/* 출장 카드의 가는 편·오는 편 — 편 이름 · 교통편 아이콘 셋 · 그 편으로 올라갈 값. 좁으면 값이 다음 줄로 내려간다. */
+.attend .at-legs { display: grid; gap: 4px; margin-top: 8px; }
+.attend .at-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
+.attend .at-leg-name { flex: none; min-width: 72px; color: var(--fg); font-weight: 600; }
+.attend .at-leg-day { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.attend .at-leg .at-chips { flex: none; flex-wrap: nowrap; gap: 3px; }
+.attend .at-leg .at-chip.at-icon { width: 30px; min-height: 30px; border-radius: 8px; }
+.attend .at-leg .at-chip.at-icon svg { width: 17px; height: 17px; }
+.attend .at-leg .at-chip.at-icon.first::after { top: 0; right: 2px; font-size: 11px; }
+.attend .at-leg-what { flex: 1 1 130px; min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.attend .at-leg-what.new { color: var(--fg); font-weight: 600; }
+.attend .at-leg-what.error { color: var(--danger); }
+.attend .at-leg-go { margin-top: 6px; }
+.attend .at-leg-go button { min-height: 30px; font-size: 12px; }
+/* 출장 카드의 숙박비 내역(lodgebox.js) — 사후정산 화면에 지금 있는 숙박 줄. 가는 편·오는 편과 같은 줄 모양이다:
+   이름·결제일 · 업체명(좁으면 줄임표) · 정산금액 · 어디서 온 줄인가(증빙 / 손수 작성) · 지우기. */
+.attend .at-lodges { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.attend .at-lodge-head { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 12px; }
+.attend .at-lodge-head strong { color: var(--fg); }
+.attend .at-lodge-count { color: var(--muted); }
+.attend .at-lodge-head button.at-lodge-refresh { margin-left: auto; min-height: 24px; padding: 2px 6px; color: var(--muted); }
+.attend .at-lodge-head button.at-lodge-refresh svg { width: 14px; height: 14px; pointer-events: none; }
+.attend .at-lodge-head button.at-lodge-refresh.spin svg { animation: spin .8s linear infinite; }
+/* 줄들이 칸을 같이 쓴다(subgrid) — 금액과 표시가 줄마다 같은 자리에 선다. */
+.attend .at-lodge-rows { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; gap: 0 8px; }
+.attend .at-lodge { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 28px; font-size: 12px; }
+.attend .at-lodge.busy { opacity: .5; }
+.attend .at-lodge .at-leg-name { min-width: 0; }
+.attend .at-lodge-company { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.attend .at-lodge-total { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.attend .at-lodge-src { justify-self: start; padding: 1px 6px; border-radius: 999px; font-size: 11px; white-space: nowrap; color: var(--pick); background: var(--pick-soft); }
+.attend .at-lodge-src.hand { color: var(--muted); background: var(--line); }
+/* 표시(증빙·손수 작성)는 누르는 것이다 — 누르면 그 줄 아래에 올린 내용이 펴진다. 알약 모양은 그대로 두고 단추의 기본 크기만 걷는다. */
+.attend .at-lodge button.at-lodge-src { min-height: 20px; gap: 3px; font-weight: 500; line-height: 1.4; }
+.attend .at-lodge button.at-lodge-src::after { content: ""; width: 4px; height: 4px; margin: -2px 1px 0 2px; border-right: 1.2px solid currentColor; border-bottom: 1.2px solid currentColor; transform: rotate(45deg); opacity: .75; }
+.attend .at-lodge button.at-lodge-src[aria-expanded="true"]::after { margin-top: 3px; transform: rotate(-135deg); }
+.attend .at-lodge button.at-lodge-src:hover { background: color-mix(in srgb, var(--pick) 20%, var(--surface)); }
+.attend .at-lodge button.at-lodge-src.hand:hover { background: color-mix(in srgb, var(--muted) 28%, var(--surface)); }
+.attend .at-lodge-info { grid-column: 1 / -1; margin: 0 0 6px; padding: 2px 8px 8px; border-left: 2px solid color-mix(in srgb, var(--pick) 45%, var(--line)); }
+.attend .at-lodge-info .at-after-label:first-child { margin-top: 2px; }
+.attend .at-lodge button.at-lodge-del { justify-self: end; width: 22px; min-height: 22px; padding: 0; color: var(--muted); }
+.attend .at-lodge button.at-lodge-del.armed { width: auto; padding: 0 7px; color: #fff; font-size: 11px; font-weight: 600; }
+.attend .at-lodge-note { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-lodge-note.error { color: var(--danger); }
+.attend .booking-head strong { min-width: 0; overflow-wrap: anywhere; }
+.attend #atReset { flex: none; }
+.attend .at-field input, .attend .at-field select { min-width: 0; font-variant-numeric: tabular-nums; }
+.attend .at-file { overflow-wrap: anywhere; }
+.attend .at-need { padding: 10px 12px; border-radius: 9px; background: var(--surface-soft); }
+.attend .at-need.todo { background: color-mix(in srgb, var(--mine) 12%, var(--surface)); }
+.attend .at-need.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+/* 결재요청과 임시저장은 한 줄에 두 칸이다. 수정 그만두기는 그 아래 한 줄을 다 쓴다. */
+.attend .at-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); margin-top: 12px; gap: 8px; }
+.attend .at-actions button.wide { margin-top: 0; white-space: normal; line-height: 1.3; }
+.attend .at-actions #atEditCancel { grid-column: 1 / -1; }
+.attend #atSave { border: 1px solid var(--line); }
+.attend .statusline { margin: 12px 0 0; }
+.attend .status:not(:empty) { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.attend .status.error:not(:empty) { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.attend[aria-busy="true"] .status:not(:empty), .attend:has(#atListWrap[aria-busy="true"]) .status:not(:empty) { border-color: var(--pick); color: var(--pick); background: var(--pick-soft); }
+.attend .at-list-head { justify-content: flex-start; gap: 6px; }
+.attend .at-list-head h2 { flex: 1; min-width: 0; }
+.attend .at-list-head .head-date { display: block; margin: 3px 0 0; color: var(--faint); font-size: 12px; font-weight: 400; }
+.attend .at-list-head .selection-hint { flex-basis: 100%; }
+.attend .at-list-head .count { vertical-align: baseline; }
+.attend .at-acts button { min-height: 34px; font-size: 12px; padding: 6px 10px; }
+.attend button.at-request:not(.armed) { color: var(--pick); background: var(--pick-soft); font-weight: 600; }
+.attend button.at-request:hover:not(:disabled):not(.armed) { background: color-mix(in srgb, var(--pick) 18%, var(--surface)); }
+/* HR 웹 화면에서 열기. 글자 버튼 옆의 아이콘 하나다. 아이콘을 눌러도 버튼이 받게 한다. */
+.attend .at-acts button.at-web { padding: 6px 9px; color: var(--muted); }
+.attend .at-acts button.at-web svg { width: 16px; height: 16px; pointer-events: none; }
+.attend .at-acts button.at-warn { margin-left: auto; }
+.attend .at-acts button.at-warn ~ button { margin-left: 0; }
+.attend .at-cancel input { flex-basis: 100%; }
+.attend .at-cancel button { width: 100%; min-height: 36px; }
+
+/* 칩으로 고르는 칸 — 갈래(외근·교육, 연차·체력단련), 구분(전일·오전·오후), 며칠간(1D~5D + 달력). */
+.attend .at-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.attend .at-chip {
+  min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); font-size: 14px; font-weight: 600; color: var(--fg); white-space: nowrap;
+}
+.attend .at-chip:hover { background: var(--pick-soft); border-color: var(--pick); }
+.attend .at-chip.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+/* 며칠간 — 좁은 칩 다섯(1D~5D)과 끝나는 날 달력이 한 줄이다. 달력이 칩 오른쪽 남은 폭을 다 쓴다.
+   패널이 아주 좁아 달력에 날짜가 다 안 들어갈 폭이면 달력만 다음 줄로 내려간다. */
+.attend .at-days .at-chips { gap: 4px; }
+.attend .at-days .at-chip { flex: none; padding: 8px 9px; }
+.attend .at-days .at-chips input[type="date"] { flex: 1 1 120px; width: auto; min-width: 0; }
+.attend .at-field.need .at-chip:not(.active) { border-color: var(--pick); }
+/* 몇 시간 — 1H~8H 와 30분을 더하는 칩이 한 줄이다. 30분 칩은 맨 오른쪽에 다른 색(초록)을 칠해 둔다. */
+.attend .at-span .at-chips { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)) auto; gap: 4px; }
+.attend .at-span .at-chip { padding: 8px 0; font-size: 13px; }
+.attend .at-span .at-plus { grid-column: 9; padding: 8px 8px; background: var(--free); border-color: var(--free-line); }
+.attend .at-span .at-plus:hover { background: var(--free-hover); border-color: var(--free-line); }
+.attend .at-span .at-plus.active { background: #1f9d61; border-color: #1f9d61; color: #fff; }
+/* 여비계산서 사전정산을 켜면 나오는 한 줄 — 출장지 · 근무지 · 교통편 아이콘(기차·비행기·버스). */
+.attend .at-group { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.attend .at-icons .at-chips { flex-wrap: nowrap; gap: 3px; }
+/* 교통편 아이콘 — 고르면 버튼이 아니라 **아이콘의 색**이 바뀐다(2026-10-03 사용자 지정). 안 고른 것은 흐린 회색, 고른 것은 파랑,
+   특실(기차를 한 번 더 누른 것 — 출장 카드에서는 비행기도)은 주황색이고 오른쪽 위에 "+" 가 붙는다. 여럿이 함께 켜질 수 있다. 신청 폼과 출장 카드의 가는 편·오는 편이 같이 쓴다. */
+.attend .at-chip.at-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--faint); }
+.attend .at-chip.at-icon svg { width: 20px; height: 20px; pointer-events: none; }
+.attend .at-chip.at-icon:hover { background: var(--surface); border-color: var(--line); color: var(--muted); }
+.attend .at-chip.at-icon.active, .attend .at-chip.at-icon.active:hover { background: var(--surface); border-color: var(--line); color: var(--pick); }
+.attend .at-chip.at-icon.active svg { stroke-width: 2; }
+.attend .at-chip.at-icon.first, .attend .at-chip.at-icon.first:hover { color: var(--first); }
+.attend .at-chip.at-icon.first::after { content: "+"; position: absolute; top: 1px; right: 3px; font-size: 13px; font-weight: 800; line-height: 1; color: var(--first); }
+/* 보여 주기만 하는 아이콘(사후정산을 올릴 때가 아닌 카드)은 잠긴 버튼보다 덜 흐리게 둔다 — 고른 색이 읽혀야 한다. */
+.attend .at-leg .at-chip.at-icon:disabled { opacity: .7; }
+/* 출장 폼의 체크박스 둘(여비계산서 사전정산 · 차량 조회)은 한 줄에 나란히 선다. 좁으면 차량 조회가 다음 줄로 내려간다. */
+.attend .at-group.at-opts { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+/* 차량 조회를 켰을 때의 근무지(좁게) · 행선지 한 줄 — 출장지·근무지 줄이 없는 폼(외근, 사전정산을 끈 출장)에서만 나온다. */
+.attend .at-group.at-carwhere { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+/* 차량 조회 — 폼의 날짜·시간에 빈 차량. 머리 줄(기간 · 다시 조회) 아래에 차량마다 한 줄이고, 빈 차량의 줄만 눌린다(누르면 그 자리에서 신청한다). */
+.attend .at-cars { grid-column: 1 / -1; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; }
+.attend .at-cars-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.attend .at-cars-head strong { color: var(--fg); }
+.attend .at-cars-when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.attend .at-cars-head button.at-web { margin-left: auto; min-height: 28px; padding: 4px 8px; color: var(--muted); }
+.attend .at-cars-head button.at-web svg { width: 14px; height: 14px; pointer-events: none; }
+/* 차량은 네 줄쯤만 보이고 나머지는 스크롤로 본다(2026-10-03 사용자 지정) — 줄 36px × 4 + 틈 4px × 3. 빈 차량이 앞에 서므로 먼저 보인다. */
+.attend .at-cars-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; max-height: 156px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.attend .at-car {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 13px; text-align: left;
+}
+.attend button.at-car.free { border-color: var(--free-line); background: var(--free); color: var(--fg); cursor: pointer; }
+.attend button.at-car.free:hover:not(:disabled) { background: var(--free-hover); }
+/* 신청을 보내는 동안에는 다른 차량을 누를 수 없다. */
+.attend button.at-car.free:disabled { opacity: .6; cursor: default; }
+.attend .at-car-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attend .at-car-state { flex: 0 1 auto; min-width: 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.attend .at-car.free .at-car-state { color: var(--fg); font-weight: 600; }
+.attend .at-car.busy .at-car-name { color: var(--muted); font-weight: 400; }
+/* 비어 있지만 여기서는 고를 수 없는 차량(다른 근무지의 차량, 임원용·사전 협의 차량) — 눌리지 않고, 오른쪽에 까닭이 적힌다. */
+.attend .at-car.locked { border-style: dashed; }
+.attend .at-car.locked .at-car-name { color: var(--muted); font-weight: 400; }
+.attend .at-car.mine .at-car-state { color: var(--pick); font-weight: 600; }
+.attend .at-cars-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.attend .at-cars-note:first-child { margin-top: 0; }
+.attend .at-cars-note.error { color: var(--danger); }
+/* 방금 한 신청의 결과(됐다)와, 누르기 전에 적어야 할 것(행선지). */
+.attend .at-cars-note.ok { color: var(--fg); font-weight: 600; }
+.attend .at-cars-note.need { color: var(--pick); font-weight: 600; }
+
+/* 신청 내역의 출장 줄에 붙는 여비계산서 단계 딱지와, 편 줄 안의 여비계산서 한 줄(단계 · 바로 가기). */
+.attend .at-trip { flex: none; margin-left: auto; padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; background: var(--pick-soft); color: var(--pick); }
+.attend .at-trip.post:not(.done) { background: color-mix(in srgb, var(--mine) 28%, var(--surface)); color: var(--fg); }
+.attend .at-trip.done { background: var(--free); color: var(--fg); }
+/* 여비계산서 줄은 신청서의 버튼 줄(변경·취소신청) 아래에 선다 — 금을 그어 신청서의 일과 여비계산서의 일을 가른다. */
+.attend .at-tripline { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-tripline button.at-web { flex: none; min-height: 30px; padding: 5px 9px; color: var(--muted); }
+.attend .at-tripline button.at-web svg { width: 16px; height: 16px; pointer-events: none; }
+
+/* 신청 내역의 조회 기간. */
+.attend .open-inline.active { color: var(--pick); border-color: var(--pick); background: var(--pick-soft); }
+.attend .at-range { margin: 0 0 10px; padding: 10px; }
+/* 한 줄이다: 4주 · 8주 · 시작일 ~ 종료일 · 조회. 좁은 패널에서도 한 줄에 들도록 칸의 여백과 글자를 줄였다. */
+.attend .at-range-dates { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.attend .at-range-dates input { flex: 1; min-width: 0; min-height: 34px; padding: 4px 4px 4px 6px; border: 1px solid transparent; border-radius: 9px; background: var(--surface-soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.attend .at-range-dates input::-webkit-calendar-picker-indicator { margin: 0; padding: 0 0 0 2px; }
+.attend .at-range-dates button { flex: none; min-height: 34px; padding: 4px 10px; }
+/* 다녀온 출장을 언제까지 보일지(4주·8주) — 기본 보기에서 고른 것이 파랗다. */
+.attend .at-range-dates button[data-back] { padding: 4px 7px; border: 1px solid var(--line); font-size: 13px; }
+.attend .at-range-dates button[data-back].active { color: var(--pick); border-color: var(--pick); background: var(--pick-soft); font-weight: 600; }
+
+/* 출장 카드의 증빙 송부 칸(sendbox.js) — 과제·계정과 받는 사람을 고르고, 보관함의 증빙을 PDF 하나로 묶어 보낸다. */
+.attend .at-send { margin-top: 8px; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; font-size: 12px; }
+.attend .at-send-head { display: flex; align-items: baseline; gap: 8px; }
+.attend .at-send-head strong { flex: none; color: var(--fg); }
+.attend .at-send-how { color: var(--muted); overflow-wrap: anywhere; }
+.attend .at-send-note { margin: 6px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.attend .at-send-note.error { color: var(--danger); }
+.attend .at-send-note.ok { color: var(--fg); font-weight: 600; }
+.attend .at-send ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.attend .at-send li { display: flex; align-items: center; gap: 6px; margin: 0; border: 0; border-radius: 0; font-size: 12px; }
+.attend .at-send-files li span { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
+.attend .at-send button.at-kept-drop { flex: none; width: 22px; min-height: 22px; padding: 0; color: var(--muted); }
+.attend .at-send-add { display: block; position: relative; margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); background: var(--surface); cursor: pointer; }
+.attend .at-send-add input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.attend .at-send-add:hover { border-color: var(--pick); }
+.attend .at-send-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.attend .at-send-row .at-label { flex-basis: 100%; font-size: 12px; }
+.attend .at-send-row .at-chip { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+.attend .at-send-row input[type="text"] { flex: 1 1 140px; min-width: 0; min-height: 32px !important; font-size: 13px; }
+.attend .at-send-hits { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+.attend .at-send-hits:empty { display: none; }
+.attend .at-send-hits li.none { color: var(--muted); }
+.attend .at-send-hits li.error { color: var(--danger); }
+.attend .at-send-picked { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border: 1px solid var(--pick); border-radius: 999px; background: var(--pick-soft); color: var(--fg); }
+/* 보내기를 누르면 뜨는 팝업(sendbox.js) — 누구에게 무슨 글이 가는지 그대로 보이고, 팝업의 보내기를 눌러야 나간다. */
+.attend .at-pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(0 0 0 / 38%); }
+.attend .at-pop-card { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 440px; max-height: calc(100vh - 32px); overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 22%); font-size: 13px; }
+.attend .at-pop-card h3 { margin: 0; font-size: 15px; }
+.attend .at-pop-to { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.attend .at-pop-to dt { color: var(--muted); }
+.attend .at-pop-to dd { margin: 0; color: var(--fg); overflow-wrap: anywhere; }
+.attend .at-pop-body { display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; border-radius: 9px; background: var(--surface-soft); color: var(--fg); overflow-wrap: anywhere; }
+.attend .at-pop-body strong { margin-bottom: 3px; }
+.attend .at-pop-note { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.attend .at-pop-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+.attend .at-pop-btns button { min-height: 34px; padding: 6px 14px; font-size: 13px; }
+.attend .at-pop-btns button.ghost { border: 1px solid var(--line); }
+/* 버튼 줄: 사후정산을 아직 완료하지 않은 출장이면 `사후정산 저장`이 `보내기` 왼쪽에 선다 */
+.attend .at-send-btns { display: flex; gap: 6px; margin-top: 8px; }
+.attend .at-send-btns button { min-height: 34px; font-size: 12px; }
+.attend .at-send-go { flex: 1; }
+.attend .at-send-save { flex: none; padding: 4px 12px; }
+.attend .at-send-save:not(.armed) { border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-weight: 600; }

@@ -1,8 +1,9 @@
-// 한 달 미리 훑기가 기대는 두 가지를 확인한다.
+// 한 달 미리 훑기가 기대는 세 가지를 확인한다.
 //
-//   1) 보관소가 **언제 읽었는지**로 신선/묵음을 가른다 — 묵은 현황을 지금 것처럼 보여주면
-//      이미 찬 칸을 "예약 가능"으로 칠하게 된다.
-//   2) 훑기가 남기는 하루 기록만으로 **격자를 그릴 수 있다** — 예약 목록만 담으면
+//   1) 보관소가 **언제 읽었는지**로 신선/묵음을 가른다 — 오늘 읽은 것은 그날 하루를 쓰고
+//      (훑기는 하루에 한 번), 묵은 현황을 지금 것처럼 보여주지 않게 읽은 시각을 붙여 둔다.
+//   2) 담은 것이 **저장소에 남아** 패널을 닫았다 열어도 다시 훑지 않는다.
+//   3) 훑기가 남기는 하루 기록만으로 **격자를 그릴 수 있다** — 예약 목록만 담으면
 //      빈 회의실이 몇 곳인지 알 수 없어 캐시가 쓸모없어진다.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,13 +12,25 @@ import { createRequire } from 'node:module';
 const require = createRequire(process.env.JSDOM_BASE || import.meta.url);
 const { JSDOM } = require('jsdom');
 
-import { createDayStore, MONTH_DAYS, STALE_MS } from '../src/monthcache.js';
+import { createDayStore, MONTH_DAYS, RETRY_MS, DAY_KEY_PREFIX } from '../src/monthcache.js';
 import { extractSchedule, parseRooms, parseSelectedRegion, buildGrid } from '../src/parse.js';
 import { extractCars } from '../src/rentcar.js';
 import { datesFrom } from '../src/mine.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
+/** 저장소에 적는 일은 기다리지 않고 흘려보낸다. 그것이 끝날 틈을 준다. */
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+/** chrome.storage.local 흉내. disk 가 패널을 닫아도 남는 쪽이다. */
+function fakeStorage(disk = {}) {
+  return {
+    disk,
+    get: async () => ({ ...disk }),
+    set: async (obj) => { Object.assign(disk, structuredClone(obj)); },
+    remove: async (keys) => { for (const k of [].concat(keys)) delete disk[k]; },
+  };
+}
 
 const room = (date, extra = {}) => ({ kind: 'room', date, reservations: [], confident: true, reason: '', ...extra });
 const car = (date, extra = {}) => ({ kind: 'car', date, reservations: [], confident: true, reason: '', ...extra });
@@ -38,10 +51,10 @@ console.log('보관소 기본');
   });
 }
 
-console.log('신선도 — 묵으면 다시 읽어야 한다');
+console.log('신선도 — 오늘 읽은 것은 그날 하루를 쓴다 (훑기는 하루에 한 번)');
 {
-  let now = 1_000_000;
-  const store = createDayStore({ staleMs: 60_000, now: () => now });
+  let now = new Date(2026, 8, 16, 9, 0).getTime();
+  const store = createDayStore({ now: () => now });
   store.put(room('2026-09-16'));
   store.put(car('2026-09-16'));
 
@@ -49,11 +62,30 @@ console.log('신선도 — 묵으면 다시 읽어야 한다');
   t('신선하면 훑을 것이 없다', () => assert.deepEqual(store.missing(['2026-09-16']), []));
   t('신선하면 covers 가 참', () => assert.equal(store.covers(['2026-09-16']), true));
 
-  now += 61_000;
-  t('묵으면 다시 훑을 날이 된다', () => assert.deepEqual(store.missing(['2026-09-16']), ['2026-09-16']));
+  now = new Date(2026, 8, 16, 23, 59).getTime();
+  t('몇 시간이 지나도 같은 날이면 다시 훑지 않는다', () =>
+    assert.deepEqual(store.missing(['2026-09-16']), []));
+
+  now = new Date(2026, 8, 17, 0, 1).getTime();
+  t('날이 바뀌면 다시 훑을 날이 된다', () => assert.deepEqual(store.missing(['2026-09-16']), ['2026-09-16']));
   t('묵어도 꺼내 볼 수는 있다 (언제 읽었는지와 함께)', () =>
     assert.ok(store.get('room', '2026-09-16').at > 0));
-  t('기본 신선도는 10분', () => assert.equal(STALE_MS, 10 * 60_000));
+}
+
+console.log('확인 불가로 읽힌 날은 하루를 기다리지 않는다 — 잠깐의 실패가 종일 남으면 안 된다');
+{
+  let now = new Date(2026, 8, 16, 9, 0).getTime();
+  const store = createDayStore({ now: () => now });
+  store.put(room('2026-09-16', { confident: false, reason: '날짜를 옮기지 못했습니다.' }));
+  store.put(car('2026-09-16'));
+
+  now += 9 * 60_000;
+  t('바로 다시 두드리지는 않는다', () => assert.deepEqual(store.missing(['2026-09-16']), []));
+  now += 2 * 60_000;
+  t('10분이 지나면 다시 읽을 날이 된다', () =>
+    assert.deepEqual(store.missing(['2026-09-16']), ['2026-09-16']));
+  t('제대로 읽힌 쪽은 그대로 신선하다', () => assert.equal(store.fresh('car', '2026-09-16'), true));
+  t('다시 읽어 보는 간격은 10분', () => assert.equal(RETRY_MS, 10 * 60_000));
 }
 
 console.log('회의실·차량 둘 다 있어야 그 날을 읽은 것이다');
@@ -113,6 +145,91 @@ console.log('예약·취소로 낡아진 날은 버린다');
 
   store.drop(['2026-09-16']);
   t('종류를 안 찍으면 둘 다', () => assert.equal(store.size(), 0));
+}
+
+console.log('저장소 — 패널을 닫았다 열어도 오늘 읽은 것은 남는다');
+{
+  const D = '2026-09-16';
+  let now = new Date(2026, 8, 16, 9, 0).getTime();
+  const storage = fakeStorage({ myName: '홍길동' });
+
+  const first = createDayStore({ storage, now: () => now });
+  first.put(room(D, { rooms: [{ name: '제1회의실' }] }));
+  first.put(car(D));
+  await settle();
+  t('하루치가 한 칸씩 적힌다', () => {
+    assert.ok(storage.disk[`${DAY_KEY_PREFIX}room|${D}`]);
+    assert.ok(storage.disk[`${DAY_KEY_PREFIX}car|${D}`]);
+  });
+
+  // 패널을 닫았다 다시 열었다
+  now = new Date(2026, 8, 16, 15, 0).getTime();
+  const second = createDayStore({ storage, now: () => now });
+  t('불러오기 전에는 비어 있다', () => assert.deepEqual(second.missing([D]), [D]));
+  const restored = await second.restore();
+  t('오늘 읽은 것을 되살린다', () => assert.equal(restored, 2));
+  t('되살린 날은 다시 훑지 않는다', () => assert.deepEqual(second.missing([D]), []));
+  t('읽은 시각은 그때 그대로다 (다시 연 시각이 아니다)', () =>
+    assert.equal(second.get('room', D).at, new Date(2026, 8, 16, 9, 0).getTime()));
+  t('방 목록도 같이 돌아온다', () => assert.equal(second.get('room', D).rooms.length, 1));
+
+  second.drop([D], ['room']);
+  await settle();
+  t('버린 날은 저장소에서도 지워진다', () => {
+    assert.equal(storage.disk[`${DAY_KEY_PREFIX}room|${D}`], undefined);
+    assert.ok(storage.disk[`${DAY_KEY_PREFIX}car|${D}`]);
+  });
+
+  // 다음 날 연다
+  now = new Date(2026, 8, 17, 8, 0).getTime();
+  const third = createDayStore({ storage, now: () => now });
+  const kept = await third.restore();
+  await settle();
+  t('어제 읽은 것은 되살리지 않는다', () => {
+    assert.equal(kept, 0);
+    assert.equal(third.size(), 0);
+  });
+  t('저장소에서도 치운다', () =>
+    assert.equal(Object.keys(storage.disk).filter((k) => k.startsWith(DAY_KEY_PREFIX)).length, 0));
+  t('다른 설정은 건드리지 않는다', () => assert.equal(storage.disk.myName, '홍길동'));
+}
+
+console.log('저장소가 말을 안 들어도 메모리의 것은 쓴다');
+{
+  const broken = {
+    get: async () => { throw new Error('context invalidated'); },
+    set: async () => { throw new Error('quota'); },
+    remove: async () => { throw new Error('quota'); },
+  };
+  const store = createDayStore({ storage: broken });
+  store.put(room('2026-09-16'));
+  store.drop(['2026-09-17']);
+  await settle();
+  t('담은 것은 그대로 꺼낸다', () => assert.ok(store.get('room', '2026-09-16')));
+  const none = await createDayStore().restore();
+  t('저장소 없이 만든 보관소는 되살릴 것이 없다', () => assert.equal(none, 0));
+}
+
+console.log('다른 창의 패널이 담거나 버린 것을 따라간다');
+{
+  const D = '2026-09-16';
+  let now = new Date(2026, 8, 16, 9, 0).getTime();
+  const store = createDayStore({ now: () => now });
+  store.put(room(D));
+  const mine = store.get('room', D);
+
+  store.sync({ [`${DAY_KEY_PREFIX}car|${D}`]: { newValue: { ...car(D), at: now } }, myName: { newValue: 'x' } });
+  t('저쪽이 담은 날이 들어온다', () => assert.equal(store.fresh('car', D), true));
+  t('보관소 칸이 아닌 것은 무시한다', () => assert.equal(store.size(), 2));
+
+  store.sync({ [`${DAY_KEY_PREFIX}room|${D}`]: { newValue: { ...room(D), at: now - 5000, reservations: [{ room: '옛것' }] } } });
+  t('더 새것을 쥐고 있으면 지킨다', () => assert.equal(store.get('room', D), mine));
+
+  store.sync({ [`${DAY_KEY_PREFIX}room|${D}`]: { oldValue: mine } });
+  t('저쪽이 버린 날은 여기서도 버린다', () => {
+    assert.equal(store.get('room', D), null);
+    assert.deepEqual(store.missing([D]), [D]);
+  });
 }
 
 console.log('훑기가 남기는 하루로 격자를 그릴 수 있어야 한다 (실제 회의실 페이지)');
