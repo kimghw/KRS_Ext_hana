@@ -4,7 +4,8 @@
 #   ktx-fares.yaml (이 파일)  고치거나 더할 구간만 적는다 — **여기 적은 구간이 공식 표의 같은 구간을 이긴다.**
 #                             그리고 역을 찾는 길잡이(places·airports), 갈아타는 역(transfers), 주말 요일.
 #
-# - 고친 뒤에는 `node tools/gen-travel.mjs` 로 src/travelspec.js 를 다시 만든다(확장은 YAML 을 읽지 못한다).
+# - 고친 뒤에는 `node tools/gen-travel.mjs`(npm run gen)로 src/travelspec.js 를 다시 만든다(확장은 YAML 을 읽지 못한다).
+#   두 파일을 합친 결과 — 확장이 실제로 쓰는 값 — 는 같이 만들어지는 references/review.md 에서 표로 본다.
 # - 운임은 **어른 편도 정가**(원)다. standard = 일반실, first = 특실(운임 + 특실 요금). 모르는 값은 적지 않는다(null) — 짐작으로 채우지 않는다.
 # - 구간은 방향이 없다(a↔b). 역 이름은 KTX 역 이름 그대로 적는다.
 #
@@ -26,9 +27,12 @@ version: 1
 weekend_days: [금, 토, 일]
 
 # 고치거나 더할 구간. 비어 있으면 공식 표 그대로다. 한 줄에 한 구간:
-#   - { a: 서울, b: 부산, standard: 54400, first: 78900 }                       공식 표의 값을 바꾼다
-#   - { a: 서울, b: 강릉, standard: 27600, first: null, note: "KTX-이음" }       공식 표에 없는 구간을 더한다
+#   - { a: 서울, b: 부산, standard: 54400, first: 78900, note: "까닭" }          공식 표의 값을 바꾼다
+#   - { a: 서울, b: 강릉, standard: 27600, first: null, hours: 2, note: "KTX-이음" }   공식 표에 없는 구간을 더한다
 #   - { a: 서울, b: 부산, standard: 54400, first: 78900, weekend: { standard: 56000, first: 81200 } }   주말 운임이 따로 있을 때
+# 공식 표에 없는 역이 든 구간은 소요 시간을 셈할 길(times.links)이 없다 — 그 줄에 hours 를 같이 적는다(안 적으면 생성기가 멈춘다).
+# note 에는 왜 고쳤는지·어디서 본 값인지를 남긴다 — 검토표(review.md)의 "손으로 고친 구간"에 같이 적힌다.
+# 운임은 100원 단위이고 특실은 일반실보다 커야 한다(생성기가 본다). 고친 뒤 찍히는 "바뀐 것" 줄로 뜻대로 들어갔는지 확인한다.
 routes: []
 
 # 출장지·근무지에 적은 글에서 탈 역을 찾는 길잡이. 글에 역 이름이 들어 있으면 그 역이고("부산 본사" → 부산),

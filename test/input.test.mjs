@@ -26,7 +26,9 @@ t('명세의 모양이 틀리면 생성기가 거부한다', () => {
   broken.tasks.parse.fields.region.type = 'place';
   broken.tasks.parse.checks.push({ left: 'dateFrom', op: '>', right: 'nowhere', message: 'x' });
   broken.tasks.parse.variants.car.clear.summary = '필수 칸을 비운다';
+  Object.assign(broken.tasks.attend.fields.days, { min: 31, max: 1 });
   const errors = checkSpec(broken).join('\n');
+  assert.match(errors, /days: min\(31\)이 max\(1\)보다 큽니다/);
   assert.match(errors, /region: 모르는 형 place/);
   assert.match(errors, /없는 칸\(dateFrom, nowhere\)/);
   assert.match(errors, /모르는 비교 >/);

@@ -4,10 +4,12 @@
 # ktx-fares-official.yaml 을 통째로 다시 쓴다. 운임이 바뀌어 코레일이 새 표를 올리면 이것을 다시 돌린다.
 # 손으로 고친 구간은 ktx-fares.yaml 에 따로 있어서 이것을 다시 돌려도 지워지지 않는다.
 #
-#   uv run --with xlrd tools/import-ktx-fares.py <내려받은 xls> [--basis 2026-09-01] [--source <엑셀 주소>]
+#   uv run --with xlrd tools/import-ktx-fares.py <내려받은 xls> [--basis 2026-09-01] [--source <엑셀 주소>] [--dry-run]
 #   node tools/gen-travel.mjs            # 이어서 src/travelspec.js 를 다시 만든다
 #
 # --basis(운임 기준일)·--source(엑셀을 받은 주소)를 주지 않으면 지금 파일에 적힌 값을 그대로 둔다.
+# --dry-run 은 쓰지 않고 지금 파일과 무엇이 다른지만 말한다 — 코레일이 표를 바꿨는지 볼 때 쓴다(`/refdata ktx --dry-run`).
+# 내려받기부터 생성기까지 한 번에 하는 길은 `node tools/refdata.mjs ktx` 다.
 #
 # 고르는 규칙
 # - **특실이 있는 시트만** 읽는다(KTX·KTX-산천이 다니는 노선). 특실 칸이 없는 시트(KTX-이음이 다니는 강릉·중앙·중부내륙·동해선 —
@@ -92,12 +94,44 @@ def option(name):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv and sys.argv.index(name) + 1 < len(sys.argv) else ''
 
 
+def current():
+    """지금 파일에 적힌 구간 {(두 역, 가나다 순): (일반실, 특실)}. 파일이 없으면 비어 있다."""
+    if not TARGET.exists():
+        return {}
+    found = re.finditer(r'^\s*- \{ a: (.+?), b: (.+?), standard: (\d+), first: (\d+) \}$', TARGET.read_text(encoding='utf-8'), re.M)
+    return {tuple(sorted((m.group(1), m.group(2)))): (int(m.group(3)), int(m.group(4))) for m in found}
+
+
+def diff(before, routes):
+    """지금 파일과 새로 읽은 표가 다른 곳 — 새로 들어온 구간(+), 운임이 바뀐 구간(~), 빠진 구간(-)."""
+    after = {tuple(sorted((a, b))): (standard, first) for _, a, b, standard, first in routes}
+    fare = lambda v: f'일반실 {v[0]:,} · 특실 {v[1]:,}'
+    out = [f'+ {a}↔{b} {fare(v)}' for (a, b), v in after.items() if (a, b) not in before]
+    out += [f'~ {a}↔{b} {fare(before[(a, b)])} → {fare(v)}' for (a, b), v in after.items() if (a, b) in before and before[(a, b)] != v]
+    out += [f'- {a}↔{b} {fare(v)}' for (a, b), v in before.items() if (a, b) not in after]
+    return out
+
+
+SHOWN = 40   # 운임이 통째로 바뀐 날에는 수백 줄이다 — 여기까지만 찍는다
+
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8')   # 윈도우 콘솔(cp1252·cp949)에서도 한글 안내가 깨지지 않게
     if len(sys.argv) < 2 or sys.argv[1].startswith('--'):
-        sys.exit('쓰는 법: uv run --with xlrd tools/import-ktx-fares.py <KTX 운임표 xls> [--basis YYYY-MM-DD] [--source <주소>]')
+        sys.exit('쓰는 법: uv run --with xlrd tools/import-ktx-fares.py <KTX 운임표 xls> [--basis YYYY-MM-DD] [--source <주소>] [--dry-run]')
     rows, skipped = read(sys.argv[1])
     routes = pick(rows)
+    changed = diff(current(), routes)
+    if changed:
+        print(f'지금 {TARGET.name} 과 다른 구간 {len(changed)}개:')
+        print('\n'.join(changed[:SHOWN]))
+        if len(changed) > SHOWN:
+            print(f'… 외 {len(changed) - SHOWN}개')
+    else:
+        print(f'지금 {TARGET.name} 과 구간·운임이 모두 같습니다({len(routes)}구간).')
+    if '--dry-run' in sys.argv:
+        print('쓰지 않았습니다(--dry-run).')
+        return
     lines = [
         HEAD,
         f'basis: "{option("--basis") or kept("basis")}"',

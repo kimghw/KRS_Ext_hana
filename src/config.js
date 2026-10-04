@@ -111,13 +111,14 @@ export const DELETE = {
  *
  * 확인된 것: 주소와 질의 문자열. 2026-09-16 목록 fixture 의 예약 버튼 onclick 에
  *   fnview('Admin_View_New.aspx?CARIDX=32&SDATE=2026-09-16', ...) 로 박혀 있다.
- * 확인 못 한 것: **이 페이지의 폼 구조 전체.** 한 번도 캡처된 적이 없다.
- *   그래서 필드 이름을 여기에 박아두지 않고 src/carform.js 가 문서를 보고 찾아낸다.
+ * 폼 구조: 처음에는 캡처가 없어 필드 이름을 여기에 박아두지 않고 src/carform.js 가 문서를 보고 찾아내게 했다.
+ *   그 뒤 실제 폼을 받았고(test/fixtures/rentcar-form-2026-09-16.html — test/carform-real.test.mjs 가 그것으로 검증한다),
+ *   아래 후보 이름은 대부분 틀린 것으로 드러났다(진짜는 txtTitle·txtPlace·txtDriver). 감지기는 이름이 아니라 내용으로 찾으므로 그대로 둔다.
  */
 export const CAR_RESERVE_URL = `${ORIGIN}/intra/intranet/VSDotnet/RentCar/Admin_View_New.aspx`;
 
 /**
- * 신청 폼 필드 이름 **후보**. 확인된 이름이 아니다.
+ * 신청 폼 필드 이름 **후보**. 확인된 이름이 아니다(실제 폼과 맞는 것은 DDL_CARNAME 하나뿐이다 — 위 주석).
  *
  * 출처는 차량 목록 페이지에 죽은 채로 남아 있는 스크립트(fnSave/fnCancel)다.
  * 목록 페이지에는 정작 이 입력칸들이 없다 — 스크립트만 남고 마크업은 신청 페이지로 갔다.

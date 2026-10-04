@@ -733,8 +733,8 @@ Claude 가 조건을 해석해 날짜를 하루씩 조회하고, 조건에 맞�
 
 ### 입력 명세 (`input.yaml`) — 말은 구조로 바뀐 뒤에만 실행 쪽으로 간다
 
-Claude 가 말을 읽어 돌려주는 것은 세 가지입니다 — 회의실·차량 **조회 조건**(`parse`), 근태 **폼 조각**(`attend`),
-예약 실패 **원인 설명**(`diagnose`). 각각 어떤 칸을 어떤 형으로 내야 하는지, 어떤 규칙으로 읽는지가
+Claude 가 읽어 돌려주는 것은 네 가지입니다 — 회의실·차량 **조회 조건**(`parse`), 근태 **폼 조각**(`attend`),
+출장 **증빙 한 장의 기록**(`receipt`), 예약 실패 **원인 설명**(`diagnose`). 각각 어떤 칸을 어떤 형으로 내야 하는지, 어떤 규칙으로 읽는지가
 **`references/input.yaml` 한 곳**에 적혀 있습니다.
 
 ```
@@ -752,6 +752,7 @@ Claude 가 말을 읽어 돌려주는 것은 세 가지입니다 — 회의실·
 확장은 YAML 을 읽지 못하므로 `input.yaml` 을 고친 뒤에는 생성물을 다시 만듭니다. 둘이 어긋나면 테스트가 잡습니다.
 
 ```
+npm run gen                       # 두 생성기를 한 번에(아래 여비 쪽 생성물도 같이)
 node tools/gen-input.mjs          # input.yaml → src/inputspec.js
 node tools/gen-input.mjs --check  # 쓰지 않고 어긋났는지만 본다
 ```
@@ -770,14 +771,28 @@ node tools/gen-input.mjs --check  # 쓰지 않고 어긋났는지만 본다
 확장은 YAML 을 읽지 못하므로 고친 뒤에는 생성물을 다시 만듭니다. 둘이 어긋나면 테스트가 잡습니다.
 
 ```bash
-node tools/gen-travel.mjs          # 네 YAML → src/travelspec.js
-node tools/gen-travel.mjs --check  # 쓰지 않고 어긋났는지만 본다
-uv run --with xlrd tools/import-ktx-fares.py <코레일 KTX 운임표 xls>   # 공식 운임표 → ktx-fares-official.yaml (그 뒤 gen-travel)
+npm run gen                        # 두 생성기를 한 번에(= node tools/refdata.mjs gen)
+npm run check                      # 쓰지 않고 어긋났는지만 본다
+node tools/gen-travel.mjs          # 네 YAML → src/travelspec.js + references/review.md
+node tools/refdata.mjs             # 참조 데이터 현황(기준일·가져온 날·원본과 맞춰 본 날·생성물 일치)과 다음 할 일
+node tools/refdata.mjs ktx         # 코레일 엑셀을 받아 공식 운임표를 다시 가져오고 생성물까지 다시 만든다(--dry-run 은 달라졌는지만)
 ```
 
+- **값이 맞는지 볼 때는 [`references/review.md`](references/review.md)** — 확장이 실제로 쓰는 값(공식 표에 손으로 고친 것을 얹고 소요 시간을
+  셈한 결과)을 사람이 읽는 표로 낸 생성물입니다. 맨 위에 출처·기준일·가져온 날이 있고, 손으로 고친 구간은 따로 모여 있습니다.
+  무엇을 어느 파일에서 고치는지는 [`references/README.md`](references/README.md) 에 있습니다.
+- **생성기가 다시 만들 때 무엇이 바뀌었는지 말해 줍니다** — `KTX 부산 ↔ 서울: 일반실 54,400 … → 일반실 56,000 … 손으로 고침`,
+  `ktx-fares.places.고양: "서울" → "행신"`. 생성물(JSON)의 diff 를 읽지 않아도 고친 것이 뜻대로 들어갔는지 볼 수 있습니다.
+- **틀린 값은 생성기가 받지 않습니다** — 100원 단위가 아닌 운임(자릿수를 잘못 적은 5440), 일반실보다 크지 않은 특실, 운임표에 없는 역,
+  같은 구간 두 번, 규칙의 빠진 칸.
+- **밖에서 가져오는 것은 `/refdata` 스킬**(`.claude/skills/refdata`)에 절차가 있습니다 — 코레일 KTX 운임표(`ktx` — 받아서 가져오기까지 자동),
+  항공 마일리지 표(`mileage` — 항공사 페이지가 자동 접근을 막아 사람이 맞춰 보고 `checked` 에 날짜를 적는다), 사이트 화면 캡처(`capture`).
+
 **KTX 요금을 고치려면** `ktx-fares.yaml` 의 `routes` 에 그 구간을 한 줄 적고 `node tools/gen-travel.mjs` 를 돌립니다 —
-`- { a: 서울, b: 부산, standard: 54400, first: 78900 }`. 방향은 가리지 않고, 공식 표에 없는 구간(KTX-이음 노선 등)도 같은 모양으로 더합니다.
-공식 표를 다시 가져와도 여기 적은 것은 지워지지 않습니다.
+`- { a: 서울, b: 부산, standard: 54400, first: 78900, note: "까닭" }`. 방향은 가리지 않고, 공식 표에 없는 구간(KTX-이음 노선 등)도 같은 모양으로 더합니다
+(공식 표에 없는 역이면 소요 시간을 셈할 길이 없으니 그 줄에 `hours: 2` 처럼 같이 적습니다 — 안 적으면 생성기가 그렇게 말하고 멈춥니다).
+공식 표를 다시 가져와도 여기 적은 것은 지워지지 않습니다. 고친 구간은 검토표의 "손으로 고친 구간"에 `note` 와 함께 따로 모입니다
+(실제 운임을 기대값으로 적어 둔 테스트가 있는 구간 — 서울·대전·오송↔부산 등 — 을 고치면 그 테스트의 기대값도 같이 고칩니다).
 
 **구간의 대략 소요 시간**은 생성기가 구간마다 운임 옆에 `hours`(시간 단위)로 붙입니다 — 여비계산서 교통편 줄의 출발·도착 시각이 됩니다.
 넉넉히 올려 잡은 값입니다: 서울↔부산처럼 KTX 가 2시간 30분 ~ 3시간 20분이면 4시간, 가장 짧아도 1시간.
@@ -950,7 +965,10 @@ ID 는 **불러온 폴더 경로에서 나옵니다.** 폴더를 옮기면 ID �
 | `references/input.yaml` | **LLM 입력 명세(단일 출처)** — 작업마다 낼 칸·형·규칙, 그 구조를 받는 코드 |
 | `tools/gen-input.mjs` | `input.yaml` → `src/inputspec.js` 생성기 (명세의 모양도 검사) |
 | `references/travel-rules.yaml` · `references/ktx-fares.yaml` | **여비 규칙·KTX 운임(단일 출처)** — 식수·일비·출장기간 구분, 구간 운임 |
-| `tools/gen-travel.mjs` | 네 YAML(규칙 · KTX 운임 둘 · 항공 마일리지 표) → `src/travelspec.js` 생성기 (규칙·운임표·마일리지 표의 모양도 검사) |
+| `tools/gen-travel.mjs` | 네 YAML(규칙 · KTX 운임 둘 · 항공 마일리지 표) → `src/travelspec.js` 와 검토표 `references/review.md` 생성기 (규칙·운임표·마일리지 표의 모양과 값도 검사하고, 무엇이 바뀌었는지 말해 준다) |
+| `references/review.md` | 생성물. 확장이 실제로 쓰는 값(운임 전 구간·도시→역·규칙·마일리지)과 출처·기준일을 사람이 읽는 표로 낸 것 — 원본과 맞춰 볼 때 본다 |
+| `references/README.md` | 참조 데이터 안내 — 어느 파일을 누가 고치는지, 고치는 순서, 아직 코드에 있는 참조 값 |
+| `tools/refdata.mjs` · `.claude/skills/refdata` | 참조 데이터 현황 점검과 밖에서 가져오기(`/refdata` 스킬) — 코레일 KTX 운임표 받기·가져오기(`tools/import-ktx-fares.py`), 항공 마일리지 표 맞춰 보기, 생성물 다시 만들기 |
 | `src/travel.js` · `src/trip.js` | 여비계산서(사전정산) — 셈·화면 읽기·저장 요청 짓기(`travel.js`), eclass 와 말하기(`trip.js`) · 사전정산 완료(확정) · 사후정산 올리기·확정(`trip.js`) |
 | `src/routes.js` | 출장지마다 지난번에 쓴 교통편(아이콘 · KTX 로 간 길)을 기억했다가 다음에 먼저 쓰는 규칙 — 무엇을 기억하고(만든 사전정산 · 사이트에서 읽은 교통편 줄) 무엇을 되살리는지. 저장은 패널이 `chrome.storage`(`tripRoutes`)에 한다 |
 | `src/after.js` | 여비계산서(사후정산) — 증빙 기록을 숙박비·교통비·항공 마일리지로 묶고 조건(비행기 또는 1박)·필수 값을 가린다, 사후정산 폼 칸 짓기 |
@@ -991,6 +1009,7 @@ ID 는 **불러온 폴더 경로에서 나옵니다.** 폴더를 옮기면 ID �
 
 ```
 npm i                           # jsdom, yaml (둘 다 개발용 — 확장에는 들어가지 않는다)
+npm test                        # 아래 전부를 한 번에(30초 남짓). 하나만 볼 때는 아래 줄을 따로 돌린다
 node test/logic.test.mjs        # 시간/날짜 파싱, 슬롯 계산, 내 예약 판정
 node test/search.test.mjs       # 문장 해석 → 예약 가능 목록
 node test/llm.test.mjs          # 로컬 CLI → API 키 → 규칙 폴백, 명세와 다른 답은 다음 길로
@@ -1263,7 +1282,7 @@ HTTP 500  Text property cannot be set. 문자열이 유효한 DateTime으로 인
 후보를 차례로 시도하고 `LB_DATE` 로 성공을 판정합니다. 오늘 날짜는 기본값이라 항상 동작하고,
 다른 날짜는 `◀ ▶` 를 눌러봐야 확인됩니다. 실패하면 조용히 틀리지 않고 **확인 불가**로 표시됩니다.
 
-**차량 신청·취소를 실제로 보내 본 적은 없습니다.** 신청 폼 구조는 실제 캡처와 CDP 로 확인했고
+**차량 신청·취소는 2026-09-30 에 한 번 실제로 보내 봤습니다.** 신청 폼 구조는 실제 캡처와 CDP 로 확인했고
 (`test/carform-real.test.mjs`, `test/cdp/run.mjs`), 보낼 값과 필수 조건도 사이트의
 `fnSaveCheck()` 와 맞춰 두었고, **2026-09-30 에 신청 → 확인 → 취소까지 실제로 한 바퀴
 돌려봤습니다**(사이트 응답: "예약이 완료 되었습니다", 재조회로 확인, 곧바로 취소).

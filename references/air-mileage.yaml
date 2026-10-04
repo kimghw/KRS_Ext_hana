@@ -21,6 +21,10 @@
 
 version: 1
 basis: "2026-10-04"
+# 값을 맞춰 볼 원본(위 "값의 출처"의 그 페이지)과, 사람이 그 페이지를 직접 열어 이 표와 맞춰 본 날(YYYY-MM-DD).
+# 아직 맞춰 보지 못했으면 null 이다 — 검토표(review.md)에 "아직 원본과 맞춰 보지 못함"으로 적힌다. 맞춰 보는 길은 `/refdata mileage`.
+source: "https://www.koreanair.com/kr/ko/skypass/earn-miles/koreanair/overview"
+checked: null
 
 # 항공권의 좌석 등급 글에 이 말이 들어 있으면 first(특실·비즈니스)로 본다(영문은 대소문자를 가리지 않는다).
 first_seats: [프레스티지, 비즈니스, 일등, 퍼스트, 특실, prestige, business, first]

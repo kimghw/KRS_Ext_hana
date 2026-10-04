@@ -4479,6 +4479,8 @@ export const KTX_FARES = {
 export const AIR_MILEAGE = {
   "version": 1,
   "basis": "2026-10-04",
+  "source": "https://www.koreanair.com/kr/ko/skypass/earn-miles/koreanair/overview",
+  "checked": null,
   "first_seats": [
     "프레스티지",
     "비즈니스",

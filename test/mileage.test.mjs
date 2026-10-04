@@ -40,6 +40,12 @@ t('틀린 표는 생성기가 잡는다 — 모르는 공항, 같은 구간 두 
     ['air-mileage.yaml: airports 가 비어 있습니다', 'air-mileage.yaml: first_seats 는 비어 있지 않은 글의 목록입니다', 'air-mileage.yaml: airlines 가 비어 있습니다']);
   assert.deepEqual(checkMileage(null), ['air-mileage.yaml: 내용이 없습니다']);
 });
+t('표에는 맞춰 볼 원본(source)과 사람이 맞춰 본 날(checked — 아직이면 null)을 적는다', () => {
+  assert.match(AIR_MILEAGE.source, /^https:\/\//);
+  assert.ok(AIR_MILEAGE.checked === null || /^\d{4}-\d{2}-\d{2}$/.test(AIR_MILEAGE.checked));
+  assert.deepEqual(checkMileage({ ...clone(AIR_MILEAGE), source: 1, checked: '어제' }),
+    ['air-mileage.yaml: source 는 출처 주소(글)입니다', 'air-mileage.yaml: checked 는 원본과 맞춰 본 날(YYYY-MM-DD)이거나 null 입니다']);
+});
 
 console.log('항공권의 글에서 항공사·공항·좌석 등급을 찾는다');
 t('항공사 — 한국어 이름이나 영문 이름이 들어 있으면 그 항공사다. 표에 없는 항공사는 null', () => {

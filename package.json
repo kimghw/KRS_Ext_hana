@@ -2,6 +2,12 @@
   "name": "krs-meeting-room",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\" gmail/gmail.test.mjs",
+    "gen": "node tools/refdata.mjs gen",
+    "check": "node tools/refdata.mjs check",
+    "refdata": "node tools/refdata.mjs"
+  },
   "devDependencies": {
     "jsdom": "^30.0.1",
     "pdf-lib": "^1.17.1",

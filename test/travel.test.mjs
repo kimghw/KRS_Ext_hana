@@ -8,7 +8,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { render, checkRules, checkFares, mergeFares, withHours } from '../tools/gen-travel.mjs';
+import { parse, stringify } from 'yaml';
+import { render, renderReview, changes, checkRules, checkFares, mergeFares, withHours } from '../tools/gen-travel.mjs';
 import { TRAVEL_RULES, KTX_FARES } from '../src/travelspec.js';
 import {
   TRANSPORTS, DEFAULT_TRANSPORT, TRAIN_GRADES, DEFAULT_GRADE, stationOf, stationsOf, pathOf, pathKnown, legParts, legTimesAll,
@@ -46,8 +47,61 @@ t('KTX 운임은 두 파일이다 — 손으로 고치는 파일(ktx-fares.yaml)
   assert.deepEqual(mergeFares({ routes: [hand.routes[0], { a: '서울', b: '부산', standard: 1, first: null }] }, official).errors,
     ['ktx-fares.yaml: 같은 구간이 두 번 있습니다(서울↔부산)']);
 });
-t('지금 손으로 고친 구간은 없다 — 운임은 모두 공식 표의 값이다', () =>
-  assert.deepEqual(KTX_FARES.routes.filter((r) => r.source !== 'official'), []));
+t('손으로 고친 구간(ktx-fares.yaml 의 routes)은 확장이 쓰는 운임표에 그 값으로 들어가 있고, 나머지는 모두 공식 표의 값이다', () => {
+  // 지금 몇 구간을 고쳐 두었는지는 묻지 않는다 — README 대로 한 줄 고쳤다고 이 테스트가 깨지면 안 된다.
+  const key = (r) => [r.a, r.b].sort().join('|');
+  const hand = parse(read('references/ktx-fares.yaml')).routes || [];
+  const mine = new Map(hand.map((r) => [key(r), r]));
+  for (const r of KTX_FARES.routes) {
+    const h = mine.get(key(r));
+    if (!h) { assert.equal(r.source, 'official', `${r.a}↔${r.b}`); continue; }
+    assert.deepEqual([r.standard, r.first, r.source], [h.standard, h.first ?? null, h.source || 'manual'], `${r.a}↔${r.b}`);
+  }
+  assert.equal(KTX_FARES.routes.filter((r) => r.source !== 'official').length, hand.length);
+});
+t('검토표(references/review.md)는 같은 YAML 로 만든 그대로다 — 확장이 쓰는 값을 사람이 읽는 표로 낸 것 (어긋났으면 node tools/gen-travel.mjs)', () => {
+  const texts = ['references/travel-rules.yaml', 'references/ktx-fares.yaml', 'references/ktx-fares-official.yaml', 'references/air-mileage.yaml'].map(read);
+  const review = read('references/review.md');
+  assert.equal(review, renderReview(...texts));
+  assert.match(review, /^<!-- 생성물 — 고치지 않는다/, '머리말이 손대지 말라고 한다');
+  assert.match(review, /\| 부산 ↔ 서울 \| [\d,]+ \| [\d,]+ \| \d+시간 \| .+ \|/, '두 역을 가나다 순으로 적은 구간 줄');
+  assert.equal(review.split('\n').filter((line) => / ↔ .*시간 \|/.test(line)).length, KTX_FARES.routes.length + (parse(texts[1]).routes || []).length,
+    '구간마다 한 줄(손으로 고친 구간은 따로 한 번 더 적힌다)');
+});
+t('검토표는 손으로 고친 구간을 따로 모아 보이고, 맞춰 보지 못한 표는 그렇다고 적는다', () => {
+  const [rules, fares, official, mileage] = ['references/travel-rules.yaml', 'references/ktx-fares.yaml', 'references/ktx-fares-official.yaml', 'references/air-mileage.yaml'].map(read);
+  // 지금 고쳐 둔 구간이 있든 없든 돌게, 고치는 파일을 읽어 부산↔서울 한 줄만 남긴 글로 바꿔 넣는다.
+  const hand = stringify({ ...parse(fares), routes: [{ a: '부산', b: '서울', standard: 55000, first: 79800, note: '시험' }] });
+  const review = renderReview(rules, hand, official, mileage.replace(/^checked: .*$/m, 'checked: null'));
+  assert.match(review, /### 손으로 고친 구간 \(1\)\n\n\| 구간 \| 일반실 \| 특실 \| 시간 \| 출처 \| 메모 \|\n.*\n\| 부산 ↔ 서울 \| 55,000 \| 79,800 \| 4시간 \| 손으로 고침 \| 시험 \|/);
+  assert.match(review, /항공 마일리지 \(\d+구간\) .*\*\*아직 원본과 맞춰 보지 못함\*\*/);
+  assert.match(renderReview(rules, fares, official, mileage.replace(/^checked: .*$/m, 'checked: "2026-10-05"')), /2026-10-05 원본과 맞춰 봄/);
+});
+t('다시 만들 때 무엇이 바뀌었는지 사람이 읽는 줄로 말한다 — 구간은 두 역으로 짝지어, 나머지는 파일.길: 예전 → 지금', () => {
+  const prev = {
+    TRAVEL_RULES: { meals: { breakfast: { first_day_depart_hour_at_most: 7 } } },
+    KTX_FARES: { places: { 고양: '서울' }, routes: [{ a: '서울', b: '부산', standard: 54400, first: 78900, hours: 4, source: 'official' }] },
+    AIR_MILEAGE: { airlines: [{ name: '대한항공', rates: { standard: 100, first: 125 }, routes: [{ a: '김포', b: '김해', miles: 215 }] }] },
+  };
+  const next = clone(prev);
+  assert.deepEqual([changes(prev, next), changes(null, next)], [[], []], '같으면(또는 견줄 것이 없으면) 할 말이 없다');
+  Object.assign(next.KTX_FARES.routes[0], { standard: 56000, source: 'manual' });
+  next.KTX_FARES.routes.push({ a: '서울', b: '강릉', standard: 27600, first: null, hours: 2, source: 'observed' });
+  next.KTX_FARES.places.고양 = '행신';
+  next.TRAVEL_RULES.meals.breakfast.first_day_depart_hour_at_most = 6;
+  next.AIR_MILEAGE.airlines[0].routes[0].miles = 220;
+  next.AIR_MILEAGE.airlines.push({ name: '아시아나항공', rates: { standard: 100, first: 125 }, routes: [] });
+  const lines = changes(prev, next);
+  assert.equal(lines.length, 6);
+  assert.equal(lines[0], 'travel-rules.meals.breakfast.first_day_depart_hour_at_most: 7 → 6');
+  assert.deepEqual(lines.slice(1), [
+    'KTX 부산 ↔ 서울: 일반실 54,400 · 특실 78,900 · 4시간 · 공식 표 → 일반실 56,000 · 특실 78,900 · 4시간 · 손으로 고침',
+    'KTX 강릉 ↔ 서울: 새로 들어옴 — 일반실 27,600 · 특실 없음 · 2시간 · 손으로 고침(실제로 본 값)',
+    'ktx-fares.places.고양: "서울" → "행신"',
+    '대한항공 김포 ↔ 김해: 215마일 → 220마일',
+    '항공 마일리지: 아시아나항공 새로 들어옴(구간 0개)',
+  ]);
+});
 t('구간마다 대략 소요 시간(hours)을 운임 옆에 붙인다 — 이웃한 역 사이의 분을 이어 가장 빠른 길에 여유를 더해 시간 단위로 올린다(가장 짧아도 1시간)', () => {
   const routes = [{ a: '서울', b: '대전', standard: 21600 }, { a: '서울', b: '부산', standard: 54400 }, { a: '대전', b: '부산', standard: 33100 },
     { a: '부산', b: '울산', standard: 7500 }, { a: '울산', b: '서울', standard: 48400 }];
@@ -67,7 +121,7 @@ t('틀린 소요 시간 설정은 생성기가 받지 않는다 — times 가 �
   const times = { min_hours: 1, margin_minutes: 10, routes: [], links: [['서울', '대전', 65], ['대전', '부산', 107]] };
   const errors = (over) => withHours({ routes, times: { ...times, ...over } }).errors.map((e) => e.replace(/^ktx-fares.yaml: times: /, ''));
   assert.deepEqual(withHours({ routes }).errors, ['ktx-fares.yaml: times 가 없습니다(구간의 대략 소요 시간)']);
-  assert.deepEqual(errors({ links: [['서울', '대전', 65]] }), ['대전↔부산: links 로 이어지지 않아 소요 시간을 셈할 수 없습니다']);
+  assert.deepEqual(errors({ links: [['서울', '대전', 65]] }), ['대전↔부산: links 로 이어지지 않아 소요 시간을 셈할 수 없습니다 — 그 구간에 hours 를 적거나 links 에 이웃한 역 사이의 분을 더하세요']);
   assert.deepEqual(errors({ links: [...times.links, ['서울', '제주', 60], ['부산', '서울', 0], ['대전', '서울', 70]] }),
     ['links: 운임표에 없는 역이 있습니다(["서울","제주",60])', 'links: 분은 0 보다 큰 정수입니다(부산↔서울)', 'links: 같은 구간이 두 번 있습니다(대전↔서울)']);
   assert.deepEqual(errors({ min_hours: 0, margin_minutes: -5 }), ['min_hours 는 1~23 의 정수(시간)입니다', 'margin_minutes 는 0 이상의 정수(분)입니다']);
@@ -116,8 +170,23 @@ t('틀린 규칙·운임표는 생성기가 받지 않는다', () => {
   fares.places['제주'] = '제주';
   fares.airports.CJU = '제주';
   assert.deepEqual(checkFares(fares).map((e) => e.replace(/^ktx-fares.yaml: /, '').split(':')[0]),
-    ['같은 구간이 두 번 있습니다(서울↔부산)', '부산↔대구', '부산↔대구', 'places.제주', 'airports.CJU']);
+    ['같은 구간이 두 번 있습니다(서울↔부산)', '서울↔부산', '부산↔대구', '부산↔대구', 'places.제주', 'airports.CJU']);
   assert.deepEqual([checkRules(TRAVEL_RULES), checkFares(KTX_FARES)], [[], []]);
+});
+t('자릿수를 잘못 적은 운임은 생성기가 받지 않는다 — 정가는 100원 단위이고 특실은 일반실보다 크다. 규칙의 빠진 칸·글로 적은 수도 잡는다', () => {
+  const errors = (route) => checkFares({ weekend_days: ['금'], routes: [{ a: '서울', b: '부산', standard: 54400, first: 78900, hours: 4, source: 'official', ...route }] })
+    .map((e) => e.replace(/^ktx-fares.yaml: 서울↔부산: /, ''));
+  assert.deepEqual(errors({}), []);
+  assert.deepEqual(errors({ standard: 5440 }), ['standard 가 100원 단위가 아닙니다(5440) — 자릿수를 확인하세요']);
+  assert.deepEqual(errors({ first: 78950 }), ['first 가 100원 단위가 아닙니다(78950) — 자릿수를 확인하세요']);
+  assert.deepEqual(errors({ first: 54400 }), ['first(특실 54400)가 standard(일반실 54400)보다 크지 않습니다']);
+  assert.deepEqual(errors({ first: null }), [], '특실이 없는 구간은 그대로 받는다');
+  const rules = clone(TRAVEL_RULES);
+  rules.daily.per_day = '1';
+  delete rules.transport.method;
+  delete rules.transport.train.currency;
+  assert.deepEqual(checkRules(rules).map((e) => e.replace(/^travel-rules.yaml: /, '')),
+    ['daily.per_day 는 0 보다 커야 합니다', 'transport.method.code 가 없습니다', 'transport.train.currency 가 없습니다']);
 });
 t('길잡이(places)의 값은 역 하나이거나 후보 역의 목록이다 — 모르는 역·빈 목록·겹친 역, 운임표에 없는 갈아타는 역은 생성기가 받지 않는다', () => {
   const errors = (over) => checkFares({ ...clone(KTX_FARES), ...over }).map((e) => e.replace(/^ktx-fares.yaml: /, ''));
@@ -191,13 +260,15 @@ t('운임은 방향이 없다. 운임표에 없는 구간·모르는 등급은 n
   }
 });
 t('운임표는 코레일 공식 KTX 운임표(2026-09-01)에서 가져온 것이다 — 구간마다 일반실과 특실 정가가 있고, 경유하는 길이 여럿이면 가장 큰 값이다', () => {
-  assert.ok(KTX_FARES.routes.length > 500);
-  assert.ok(KTX_FARES.routes.every((r) => r.source === 'official' && r.first > r.standard), '모든 구간에 특실 값이 있다');
+  // 공식 표에서 온 구간만 묻는다 — 손으로 고치거나 더한 구간(특실이 없는 KTX-이음 등)이 있어도 깨지지 않게.
+  const official = KTX_FARES.routes.filter((r) => r.source === 'official');
+  assert.ok(official.length > 500);
+  assert.ok(official.every((r) => r.first > r.standard), '공식 표의 구간에는 모두 특실 값이 있다');
   const both = (a, b) => [fareOf(a, b, '2026-10-07').fare, fareOf(a, b, '2026-10-07', 'first').fare];
   assert.deepEqual([both('서울', '부산'), both('수서', '부산'), both('부산', '대전'), both('서울', '대전'), both('용산', '광주송정'), both('부산', '동대구')],
     [[54400, 78900], [52900, 76700], [33100, 48000], [21600, 31300], [42000, 60900], [15600, 22600]]);
   assert.deepEqual(both('서울', '경주'), [44500, 64500], '서대구·수원을 도는 열차의 값(44,000 · 38,000)이 아니라 고속선의 값');
-  assert.equal(fareOf('서울', '강릉', '2026-10-07'), null, 'KTX-이음 노선(특실이 없다)은 넣지 않았다');
+  assert.ok(!official.some((r) => r.a === '강릉' || r.b === '강릉'), 'KTX-이음 노선(특실이 없다)은 공식 표에서 가져오지 않았다');
 });
 t('주말 운임을 따로 적지 않은 구간은 평일·주말이 같다. 적어 두면 금·토·일에는 그 값이다', () => {
   assert.deepEqual([isWeekend('2026-10-07'), isWeekend('2026-10-09'), isWeekend('2026-10-11'), isWeekend('2026-10-12')], [false, true, true, false]);

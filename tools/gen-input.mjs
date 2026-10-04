@@ -32,6 +32,7 @@ export function checkSpec(spec) {
         at(`${key}: enum 은 글로 된 values 가 있어야 합니다`);
       }
       for (const lim of ['min', 'max']) if (lim in f && typeof f[lim] !== 'number') at(`${key}: ${lim} 은 수여야 합니다`);
+      if (typeof f.min === 'number' && typeof f.max === 'number' && f.min > f.max) at(`${key}: min(${f.min})이 max(${f.max})보다 큽니다`);
     }
     for (const c of task.checks || []) {
       if (!(c.left in fields) || !(c.right in fields)) at(`checks: 없는 칸(${c.left}, ${c.right})`);
@@ -62,7 +63,9 @@ export function render(yamlText) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const next = render(fs.readFileSync(SOURCE, 'utf8'));
+  let next;
+  // 틀린 명세는 무엇이 틀렸는지만 말하고 끝낸다 — 고치는 사람이 볼 것은 그 줄들이지 스택이 아니다.
+  try { next = render(fs.readFileSync(SOURCE, 'utf8')); } catch (err) { console.error(err.message); process.exit(1); }
   const now = fs.existsSync(TARGET) ? fs.readFileSync(TARGET, 'utf8') : '';
   if (process.argv.includes('--check')) {
     if (now !== next) {
