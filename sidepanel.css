@@ -735,10 +735,9 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-cars-note.ok { color: var(--fg); font-weight: 600; }
 .attend .at-cars-note.need { color: var(--pick); font-weight: 600; }
 
-/* 신청 내역의 출장 줄에 붙는 여비계산서 단계 딱지와, 편 줄 안의 여비계산서 한 줄(단계 · 바로 가기). */
-.attend .at-trip { flex: none; margin-left: auto; padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; background: var(--pick-soft); color: var(--pick); }
-.attend .at-trip.post:not(.done) { background: color-mix(in srgb, var(--mine) 28%, var(--surface)); color: var(--fg); }
-.attend .at-trip.done { background: var(--free); color: var(--fg); }
+/* 신청 내역의 출장 줄에 붙는 정산 상태 딱지와, 편 줄 안의 여비계산서 한 줄(단계 · 바로 가기). */
+/* 정산 상태는 색으로 가리지 않는다(2026-10-04 사용자 지정) — 색은 왼쪽의 결재 상태 딱지만 쓰고, 이쪽은 테두리만 두른 한 가지 모양이다. */
+.attend .at-trip { flex: none; margin-left: auto; padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; font-weight: 650; color: var(--muted); }
 /* 여비계산서 줄은 신청서의 버튼 줄(변경·취소신청) 아래에 선다 — 금을 그어 신청서의 일과 여비계산서의 일을 가른다. */
 .attend .at-tripline { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .attend .at-tripline button.at-web { flex: none; min-height: 30px; padding: 5px 9px; color: var(--muted); }
@@ -755,6 +754,14 @@ button.danger:hover { filter: brightness(1.08); }
 /* 다녀온 출장을 언제까지 보일지(4주·8주) — 기본 보기에서 고른 것이 파랗다. */
 .attend .at-range-dates button[data-back] { padding: 4px 7px; border: 1px solid var(--line); font-size: 13px; }
 .attend .at-range-dates button[data-back].active { color: var(--pick); border-color: var(--pick); background: var(--pick-soft); font-weight: 600; }
+@media (max-width: 420px) {
+  /* 패널을 좁게 쓸 때 — 날짜의 해가 잘리지 않게 한 번 더 줄인다. */
+  .attend .at-range { padding: 8px; }
+  .attend .at-range-dates { gap: 3px; }
+  .attend .at-range-dates input { padding: 4px 2px 4px 4px; font-size: 11px; }
+  .attend .at-range-dates button { padding: 4px 7px; }
+  .attend .at-range-dates button[data-back] { padding: 4px 5px; font-size: 12px; }
+}
 
 /* 출장 카드의 증빙 송부 칸(sendbox.js) — 과제·계정과 받는 사람을 고르고, 보관함의 증빙을 PDF 하나로 묶어 보낸다. */
 .attend .at-send { margin-top: 8px; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; font-size: 12px; }

@@ -2,7 +2,7 @@
 // (2026-10-04 사용자 지정).
 //
 // 지키려는 것은 셋이다.
-//   - 오늘부터의 것은 전부 보이고, 지난 것은 출장만 다녀온 뒤 2주(또는 4주)까지 — 안 보기로 하면 남지 않는다.
+//   - 오늘부터의 것은 전부 보이고, 지난 것은 출장만 다녀온 뒤 4주(또는 8주)까지 — 안 보기로 하면 남지 않는다.
 //   - 사후정산이 완료됐거나 증빙을 담당자에게 보낸 출장은 뺀다. **모르는 것을 끝났다고 하지 않는다**(목록을 못 읽으면 그대로 보인다).
 //   - 여비계산서 목록은 하루에 한 번만 읽는다. 근태 탭이 읽은 것은 담아 둔 것에 덧대진다.
 import assert from 'node:assert/strict';
@@ -41,14 +41,14 @@ function fakeStorage(init = {}) {
 }
 
 console.log('다녀온 출장을 몇 주 뒤까지 보일지');
-t('고를 수 있는 값은 안 봄(0)·2주·4주이고, 고르지 않았으면 2주다', () => {
-  assert.deepEqual([BACK_CHOICES, BACK_DEFAULT, BACK_MAX_DAYS], [[0, 2, 4], 2, 28]);
-  assert.deepEqual([undefined, 0, 2, 4, 3, '4', null].map(backWeeksOf), [2, 0, 2, 4, 2, 2, 2]);
-  assert.deepEqual(stagesWindow(TODAY), { from: '2026-09-06', to: TODAY });
+t('고를 수 있는 값은 안 봄(0)·4주·8주이고, 고르지 않았으면 4주다 — 예전에 고른 2주도 4주로 읽는다', () => {
+  assert.deepEqual([BACK_CHOICES, BACK_DEFAULT, BACK_MAX_DAYS], [[0, 4, 8], 4, 56]);
+  assert.deepEqual([undefined, 0, 4, 8, 2, '4', null].map(backWeeksOf), [4, 0, 4, 8, 4, 4, 4]);
+  assert.deepEqual(stagesWindow(TODAY), { from: '2026-08-09', to: TODAY });
 });
 
 console.log('정산이 끝났는가 — 사후정산 완료 또는 증빙 송부');
-const STAGES = { day: TODAY, me: '김거화', rows: [
+const STAGES = { day: TODAY, since: '2026-08-09', me: '김거화', rows: [
   bt('101', day(-3), day(-3), '작성', ''), bt('102', day(-5), day(-4), '완료', '대기'), bt('103', day(-8), day(-7), '완료', '작성'), bt('104', day(-10), day(-9), '완료', '완료'),
 ] };
 const trip = (docNo, from, to = from) => ({ docNo, from, to });
@@ -83,58 +83,60 @@ console.log('신청 내역의 기본 보기 — 오늘부터 전부, 지난 것�
     { ...out('C-OLD', day(0)), docNo: 'C-OLD', formId: 'TROC', workCodeKindName: '', formName: '외근/교육 취소 신청', startDate: '', endDate: '', startTime: '', endTime: '', reqstDate: `${day(-3)} 15:00:00` },
   ]);
   const ids = (rule) => itemsToShow(items, TODAY, rule).map((it) => it.docNo);
-  t('오늘부터의 것은 한참 뒤의 것까지 전부(끝이 없다), 날짜가 늦은 것이 위다. 지난 것은 출장만 2주 전에 끝난 것까지', () => {
-    assert.deepEqual(ids({ backDays: 14 }), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-A', 'T-B', 'T-REQ', 'T-D', 'T-14']);
+  t('오늘부터의 것은 한참 뒤의 것까지 전부(끝이 없다), 날짜가 늦은 것이 위다. 지난 것은 출장만 4주 전에 끝난 것까지', () => {
+    assert.deepEqual(ids({ backDays: 28 }), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-A', 'T-B', 'T-REQ', 'T-D', 'T-14', 'T-15', 'T-28']);
   });
   t('지난 외근·지난 취소신청서는 기본 보기에 없다. 임시저장·회수한 지난 출장도 다녀온 출장이 아니다(결재요청 중인 것은 보인다)', () => {
     const got = ids({ backDays: 28 });
     assert.ok(!got.includes('O-PAST') && !got.includes('C-OLD') && !got.includes('T-TEMP') && !got.includes('T-BACK'), got.join());
     assert.ok(got.includes('T-REQ'));
   });
-  t('4주로 고르면 4주 전에 끝난 출장까지, 안 봄(0)이면 지난 것은 하나도 없다', () => {
-    assert.deepEqual(ids({ backDays: 28 }).slice(-3), ['T-14', 'T-15', 'T-28']);
+  t('8주로 고르면 8주 전에 끝난 출장까지, 안 봄(0)이면 지난 것은 하나도 없다', () => {
+    assert.deepEqual(ids({ backDays: 56 }).slice(-4), ['T-14', 'T-15', 'T-28', 'T-29']);
     assert.deepEqual(ids({ backDays: 0 }), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW']);
     assert.deepEqual(ids(), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW'], '규칙을 주지 않으면 지난 것은 보이지 않는다');
   });
   const settled = settledBy({ sent: { 'T-A': { at: 1 } }, stages: { ...STAGES, rows: [...STAGES.rows, bt('200', day(-1), day(1), '완료', '완료'), bt('201', day(3), day(4), '완료', '완료')] } });
   t('사후정산이 완료됐거나(T-D) 증빙을 보낸(T-A) 다녀온 출장은 빠진다 — 앞으로의 출장·지금 가 있는 출장은 정산이 끝났어도 그대로다', () => {
-    assert.deepEqual(ids({ backDays: 14, settled }), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-B', 'T-REQ', 'T-14']);
+    assert.deepEqual(ids({ backDays: 28, settled }), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-B', 'T-REQ', 'T-14', 'T-15', 'T-28']);
   });
   t('펴 둔 줄은 정산이 끝났어도 남긴다 — 방금 보낸 카드가 눈앞에서 사라지지 않는다', () => {
-    assert.ok(ids({ backDays: 14, settled, keep: 'T-A' }).includes('T-A'));
-    assert.ok(!ids({ backDays: 14, settled, keep: 'T-A' }).includes('T-D'));
+    assert.ok(ids({ backDays: 28, settled, keep: 'T-A' }).includes('T-A'));
+    assert.ok(!ids({ backDays: 28, settled, keep: 'T-A' }).includes('T-D'));
   });
   t('이미 고른 목록에서 나중에 끝난 것으로 드러난 다녀온 출장만 뺀다(펴 둔 줄은 남긴다) — 기간은 다시 따지지 않는다', () => {
-    const shown = itemsToShow(items, TODAY, { backDays: 14 });
-    assert.deepEqual(dropSettled(shown, TODAY, { settled }).map((it) => it.docNo), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-B', 'T-REQ', 'T-14']);
-    assert.deepEqual(dropSettled(shown, TODAY, { settled, keep: 'T-D' }).map((it) => it.docNo), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-B', 'T-REQ', 'T-D', 'T-14']);
+    const shown = itemsToShow(items, TODAY, { backDays: 28 });
+    assert.deepEqual(dropSettled(shown, TODAY, { settled }).map((it) => it.docNo), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-B', 'T-REQ', 'T-14', 'T-15', 'T-28']);
+    assert.deepEqual(dropSettled(shown, TODAY, { settled, keep: 'T-D' }).map((it) => it.docNo), ['T-FAR', 'T-NEXT', 'O-TODAY', 'T-NOW', 'T-B', 'T-REQ', 'T-D', 'T-14', 'T-15', 'T-28']);
     assert.equal(dropSettled(shown, TODAY).length, shown.length);
   });
   t('현황·홈 카드도 같은 규칙이다(plansToShow) — 기간과 끝난 것을 같이 따진다', () => {
     const p = (rule) => plansToShow(items, TODAY, day(30), rule).map((x) => x.docNo);
-    assert.deepEqual(p({ backDays: 14, settled }), ['T-14', 'T-REQ', 'T-B', 'T-NOW', 'O-TODAY', 'T-NEXT']);
+    assert.deepEqual(p({ backDays: 28, settled }), ['T-28', 'T-15', 'T-14', 'T-REQ', 'T-B', 'T-NOW', 'O-TODAY', 'T-NEXT']);
     assert.deepEqual(p({ backDays: 0, settled }), ['T-NOW', 'O-TODAY', 'T-NEXT']);
-    assert.deepEqual(p({ backDays: 28 }), ['T-28', 'T-15', 'T-14', 'T-D', 'T-REQ', 'T-B', 'T-A', 'T-NOW', 'O-TODAY', 'T-NEXT']);
-    assert.deepEqual(p(), ['T-14', 'T-D', 'T-REQ', 'T-B', 'T-A', 'T-NOW', 'O-TODAY', 'T-NEXT'], '규칙을 주지 않으면 2주 · 모두 보임');
+    assert.deepEqual(p({ backDays: 56 }), ['T-29', 'T-28', 'T-15', 'T-14', 'T-D', 'T-REQ', 'T-B', 'T-A', 'T-NOW', 'O-TODAY', 'T-NEXT']);
+    assert.deepEqual(p(), ['T-28', 'T-15', 'T-14', 'T-D', 'T-REQ', 'T-B', 'T-A', 'T-NOW', 'O-TODAY', 'T-NEXT'], '규칙을 주지 않으면 4주 · 모두 보임');
   });
 }
 
 console.log('여비계산서 목록 — 하루에 한 번만 읽어 담아 둔다');
 {
   const lister = (rows, seen = []) => async (range) => { seen.push(range); return { rows, me: '김거화' }; };
-  t('오늘 읽은 것만 그대로 쓴다', () => {
+  t('오늘, 창의 처음(8주 전)부터 읽어 둔 것만 그대로 쓴다', () => {
     assert.ok(stagesFresh(STAGES, TODAY));
+    assert.ok(!stagesFresh({ ...STAGES, since: day(-28) }, TODAY), '4주만 읽어 둔 것으로는 8주 전 출장의 단계를 모른다');
+    assert.ok(!stagesFresh({ ...STAGES, since: undefined }, TODAY));
     assert.ok(!stagesFresh({ ...STAGES, day: day(-1) }, TODAY));
     assert.ok(!stagesFresh({ day: TODAY }, TODAY));
     assert.ok(!stagesFresh(undefined, TODAY));
   });
-  await ta('담아 둔 것이 없으면 4주 전부터 오늘까지를 읽어 담는다 — 단계를 가리는 데 쓰는 것만', async () => {
+  await ta('담아 둔 것이 없으면 8주 전부터 오늘까지를 읽어 담는다 — 단계를 가리는 데 쓰는 것만', async () => {
     const storage = fakeStorage();
     const seen = [];
     const got = await loadStages({ list: lister(STAGES.rows, seen), storage, today: TODAY });
-    assert.deepEqual(seen, [{ from: '2026-09-06', to: TODAY }]);
+    assert.deepEqual(seen, [{ from: '2026-08-09', to: TODAY }]);
     assert.deepEqual(got.rows[3], { seq: '104', from: day(-10), to: day(-9), pre: '완료', travelers: [{ name: '김거화', post: '완료' }] });
-    assert.deepEqual([got.day, got.me, storage.data[STAGES_KEY].rows.length], [TODAY, '김거화', 4]);
+    assert.deepEqual([got.day, got.since, got.me, storage.data[STAGES_KEY].rows.length], [TODAY, '2026-08-09', '김거화', 4]);
   });
   await ta('오늘 읽어 둔 것이 있으면 다시 읽지 않고, force 면 다시 읽는다', async () => {
     const storage = fakeStorage({ [STAGES_KEY]: STAGES });
@@ -151,11 +153,11 @@ console.log('여비계산서 목록 — 하루에 한 번만 읽어 담아 둔�
     assert.equal((await loadStages({ list: boom, storage: fakeStorage({ [STAGES_KEY]: STAGES }), today: TODAY, force: true })).rows.length, 4);
   });
   await ta('저장소에서 읽는 규칙: 고른 기간(주 → 일) · 보낸 기록 · 오늘 읽어 둔 목록', async () => {
-    const rule = await tripRule({ storage: fakeStorage({ [BACK_KEY]: 4, [SENT_KEY]: { a: { at: 1 } }, [STAGES_KEY]: STAGES }), today: TODAY });
+    const rule = await tripRule({ storage: fakeStorage({ [BACK_KEY]: 8, [SENT_KEY]: { a: { at: 1 } }, [STAGES_KEY]: STAGES }), today: TODAY });
     assert.deepEqual([rule.backDays, rule.stages.rows.length, rule.settled(trip('a', day(-3))), rule.settled(trip('d', day(-10), day(-9))), rule.settled(trip('b', day(-5), day(-4)))],
-      [28, 4, 'sent', 'post', '']);
+      [56, 4, 'sent', 'post', '']);
     const bare = await tripRule({ storage: fakeStorage({ [STAGES_KEY]: { ...STAGES, day: day(-1) } }), today: TODAY });
-    assert.deepEqual([bare.backDays, bare.stages, bare.settled(trip('d', day(-10), day(-9)))], [14, null, ''], '고르지 않았으면 2주, 어제 읽은 목록은 쓰지 않는다');
+    assert.deepEqual([bare.backDays, bare.stages, bare.settled(trip('d', day(-10), day(-9)))], [28, null, ''], '고르지 않았으면 4주, 어제 읽은 목록은 쓰지 않는다');
     assert.equal((await tripRule({ storage: fakeStorage({ [BACK_KEY]: 0 }), today: TODAY })).backDays, 0);
   });
 }
@@ -163,11 +165,14 @@ console.log('여비계산서 목록 — 하루에 한 번만 읽어 담아 둔�
 console.log('근태 탭이 읽은 여비계산서 목록을 담아 둔 것에 덧댄다 — 패널에서 정산을 마치면 홈 카드도 따라온다');
 {
   const read = (rows, from, to) => ({ rows, me: '김거화', from, to });
-  await ta('창(4주 전 ~ 오늘)을 다 읽은 것이면 통째로 담는다 — 창 밖의 계산서는 담지 않는다', async () => {
+  await ta('창(8주 전 ~ 오늘)을 다 읽은 것이면 통째로 담는다 — 창 밖의 계산서는 담지 않는다', async () => {
     const storage = fakeStorage();
-    await noteStages(read([...STAGES.rows, bt('300', day(10), day(11), '작성', ''), bt('301', day(-40), day(-39), '완료', '완료')], day(-28), day(30)), { storage, today: TODAY });
+    await noteStages(read([...STAGES.rows, bt('300', day(10), day(11), '작성', ''), bt('301', day(-70), day(-69), '완료', '완료')], day(-56), day(30)), { storage, today: TODAY });
     assert.deepEqual(storage.data[STAGES_KEY].rows.map((r) => r.seq), ['101', '102', '103', '104']);
-    assert.deepEqual([storage.data[STAGES_KEY].day, storage.data[STAGES_KEY].me], [TODAY, '김거화']);
+    assert.deepEqual([storage.data[STAGES_KEY].day, storage.data[STAGES_KEY].since, storage.data[STAGES_KEY].me], [TODAY, '2026-08-09', '김거화']);
+    const part = fakeStorage();
+    await noteStages(read(STAGES.rows, day(-28), day(30)), { storage: part, today: TODAY });
+    assert.equal(part.data[STAGES_KEY], undefined, '4주만 읽은 것은 창을 다 읽은 것이 아니다');
   });
   await ta('일부만 읽은 것이면(기간을 정해 조회) 오늘 담아 둔 것의 같은 계산서만 바꿔 끼운다', async () => {
     const storage = fakeStorage({ [STAGES_KEY]: STAGES });
@@ -183,8 +188,8 @@ console.log('근태 탭이 읽은 여비계산서 목록을 담아 둔 것에 �
   });
   await ta('달라진 것이 없으면 적지 않는다 — 홈 카드를 괜히 다시 그리게 하지 않는다', async () => {
     const storage = fakeStorage();
-    await noteStages(read(STAGES.rows, day(-28), TODAY), { storage, today: TODAY });
-    await noteStages(read(STAGES.rows, day(-28), TODAY), { storage, today: TODAY });
+    await noteStages(read(STAGES.rows, day(-56), TODAY), { storage, today: TODAY });
+    await noteStages(read(STAGES.rows, day(-56), TODAY), { storage, today: TODAY });
     assert.equal(storage.sets, 1);
   });
 }

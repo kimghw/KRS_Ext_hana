@@ -188,16 +188,16 @@ console.log('배경: 홈 카드 대신 근태를 읽어 준다');
   });
 }
 
-console.log('현황·홈 카드에 올릴 근태 — 출장은 다녀온 뒤 2주까지');
+console.log('현황·홈 카드에 올릴 근태 — 출장은 다녀온 뒤 4주까지(따로 고르지 않았을 때)');
 {
   const row = (docNo, kind, formId, from, to) => ({ ...ROW, docNo, workCodeKindName: kind, formId, startDate: from.replace(/-/g, ''), endDate: to.replace(/-/g, '') });
   const items = rowsToItems([
-    row('T-OLD', '국내출장', 'TR', plus(-16), plus(-15)), row('T-WEEK', '국내출장', 'TR', plus(-14), plus(-14)), row('T-NOW', '국내출장', 'TR', plus(1), plus(2)),
+    row('T-OLD', '국내출장', 'TR', plus(-30), plus(-29)), row('T-WEEK', '국내출장', 'TR', plus(-28), plus(-28)), row('T-NOW', '국내출장', 'TR', plus(1), plus(2)),
     row('O-PAST', '외근', 'TRO', plus(-3), plus(-3)), row('O-NOW', '외근', 'TRO', plus(0), plus(0)),
   ]);
-  t('출장은 start 의 2주 전부터(다녀온 뒤 2주까지 남는다), 그 밖은 start 부터 — 다녀온 출장의 여비를 정산해야 하므로', () => {
+  t('출장은 start 의 4주 전부터(다녀온 뒤 4주까지 남는다), 그 밖은 start 부터 — 다녀온 출장의 여비를 정산해야 하므로', () => {
     assert.deepEqual(plansToShow(items, TODAY, plus(30)).map((p) => p.docNo), ['T-WEEK', 'O-NOW', 'T-NOW']);
-    assert.equal(TRIP_LOOKBACK_DAYS, 14);
+    assert.equal(TRIP_LOOKBACK_DAYS, 28);
   });
 }
 

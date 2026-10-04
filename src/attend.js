@@ -727,6 +727,13 @@ const colon = (s) => (/^\d{4}$/.test(s || '') ? `${s.slice(0, 2)}:${s.slice(2)}`
 /** 결재 상태 코드(SY02). */
 export const STATUS = { TEMP: '1', WAIT: '2', REQUESTED: '3', REJECTED: '4', APPROVED: '5', RECALLED: '6', DELETED: 'D' };
 
+/**
+ * 신청 내역의 결재 상태 딱지에 적는 말(2026-10-04 사용자 지정) — 올려 둔 것(결재대기·결재요청)은 "신청", 결재가 끝난 것은 "승인"이다.
+ * 나머지(임시저장·반려·회수)는 HR 의 이름 그대로다.
+ */
+const STATUS_LABEL = { [STATUS.WAIT]: '신청', [STATUS.REQUESTED]: '신청', [STATUS.APPROVED]: '승인' };
+export const statusLabel = (it) => STATUS_LABEL[it?.status] || it?.statusName || '';
+
 /** 패널 폼으로 되돌릴 수 있는 종류. 이름은 HR 목록의 근태종류 이름이고, 값은 그 종류가 올라가는 신청서다. */
 const FILLABLE = {
   외근: 'TRO', 교육: 'TRO', 국내출장: 'TR', 외출: 'ET', '정기 건강검진': 'LV', 연차: 'LV', 체력관리: 'LV', 유연근무: 'FW',

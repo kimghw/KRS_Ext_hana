@@ -9,7 +9,7 @@ import {
   workStartOn, halfPlan, halfFlexForm, itemsIn, isPast,
   SUBS, codeOf, withSub, halfOf, halfFromTimes, timeStep, timeOptions, spanDays, spanned, spanEnd, settle, nextSpan, SPAN_HOURS,
   FLEX_TIMES, FLEX_MODES, FLEX_DAYS, flexTimesFor, flexModeOf, fillFlexWeek,
-  acceptsFile, kindOfItem, itemsOfKind, EVIDENCE_ACCEPT,
+  acceptsFile, kindOfItem, itemsOfKind, EVIDENCE_ACCEPT, statusLabel,
 } from '../src/attend.js';
 
 const TODAY = '2026-10-02';   // 금요일
@@ -561,6 +561,11 @@ t('한 줄 요약과 조회 주소', () => {
   assert.equal(it.summary, '외근 9/23 12:00~14:00');
   assert.equal(it.api, '/uhr/docappr/approut100');
   assert.deepEqual([it.from, it.start, it.end], ['2026-09-23', '12:00', '14:00']);
+});
+t('결재 상태 딱지의 말: 올려 둔 것(결재대기·결재요청)은 "신청", 결재완료는 "승인" — 임시저장·반려·회수는 HR 의 이름 그대로다', () => {
+  const label = (statusCode, statusName) => statusLabel(listItem({ ...ROW, statusCode, statusName }));
+  assert.deepEqual([label('2', '결재대기'), label('3', '결재요청'), label('5', '결재완료')], ['신청', '신청', '승인']);
+  assert.deepEqual([label('1', '임시저장'), label('4', '반려'), label('6', '회수')], ['임시저장', '반려', '회수']);
 });
 t('결재완료 → 변경·취소신청', () => assert.deepEqual(listItem(ROW).actions, ['change', 'cancel']));
 t('임시저장 → 수정·상신·삭제', () =>

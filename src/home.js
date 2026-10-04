@@ -17,6 +17,8 @@
 // 겉모습은 홈 카드 공통 스타일(src/homecard.js — R&D ERP 현황 카드와 같은 색·칩·아이콘 버튼)을 쓰고,
 // 안쪽 목록은 krs-mine-* 접두어의 자체 스타일만 쓴다 — 사이트 CSS 가 바뀌어도 목록은 읽힌다.
 // 예약도 경고도 없으면 본문을 접어 머리 한 줄(건수 칩 · 읽은 때)만 남긴다. "없습니다" 같은 말은 적지 않는다.
+// 목록이 있으면 머리 줄이나 화살표 버튼으로 접고 편다(2026-10-04 사용자 지정 — 접수 미확인 공문 카드와 같은 버튼). 접은 것은
+// 기억한다(FOLD_KEY) — 홈은 하루에도 여러 번 여는 화면이다. 접혀 있어도 건수 칩과 경고는 보인다.
 
 import { scanDays } from './site.js';
 import { scanCarDays } from './rentcar.js';
@@ -41,6 +43,8 @@ export const JUMP_KEY = 'homeJump';
 export const JUMP_TTL_MS = 60_000;
 /** 카드에서 숨긴 "다녀온 출장"의 신청서 번호들을 담는 storage 키. 머리 줄의 눈 아이콘(전체 보기)을 켜면 숨긴 것까지 보인다. */
 export const HIDDEN_KEY = 'homeHiddenTrips';
+/** 카드의 목록을 접어 두었는가(true 면 접힘)를 담는 storage 키. 값이 없으면 펴 둔 것이다. */
+export const FOLD_KEY = 'homeFolded';
 /** 카드의 루트 요소 id. CDP 검사가 이걸로 찾는다. */
 export const ROOT_ID = 'krsMine';
 /** 패널이 예약·취소를 연달아 하면 알림이 몰려온다. 이만큼 모아서 한 번만 훑는다. */
@@ -183,11 +187,13 @@ async function scanMine(dates, { scanRooms, scanCars, onDay, onProgress, signal 
 /* ------------------------------------------------------------ 그리기 */
 
 const STYLE = `${CARD_STYLE}
-.krs-mine:not(:has(.krs-mine-item, .krs-mine-warn:not(:empty), .krs-mine-bar:not([hidden]))) .krs-mine-body { display: none; }
+.krs-mine:not(:has(.krs-mine-list:not([hidden]) .krs-mine-item, .krs-mine-warn:not(:empty), .krs-mine-bar:not([hidden]))) .krs-mine-body { display: none; }
+.krs-mine .krs-mine-head.can-open { cursor: pointer; }
 .krs-mine .krs-mine-bar { height: 3px; margin: 0 0 8px; border-radius: 2px; background: #e3eaf3; overflow: hidden; }
 .krs-mine .krs-mine-bar[hidden] { display: none; }
 .krs-mine .krs-mine-bar > i { display: block; width: 0; height: 100%; background: #1f4e9c; transition: width .3s; }
 .krs-mine .krs-mine-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.krs-mine .krs-mine-list[hidden] { display: none; }
 .krs-mine[aria-busy="true"] .krs-mine-list { opacity: .7; }
 .krs-mine .krs-mine-item { display: flex; align-items: flex-start; gap: 9px; flex: 1 1 280px; max-width: 460px; padding: 8px 12px; border: 1px solid #d5dbe3; border-radius: 8px; background: #fff; color: #222; font-size: 13px; line-height: 1.35; cursor: pointer; }
 .krs-mine .krs-mine-item:hover { border-color: #1f4e9c; background: #f5f8fc; }
@@ -212,7 +218,7 @@ const STYLE = `${CARD_STYLE}
 .krs-mine .krs-mine-hide svg { display: block; pointer-events: none; }
 .krs-mine .krs-mine-item.tucked { opacity: .55; }
 .krs-mine .krs-card-btn[aria-pressed="true"] { border-color: #1f4e9c; background: #e3edfb; color: #1f4e9c; }
-.krs-mine .krs-mine-list:not(:empty) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
+.krs-mine .krs-mine-list:not(:empty, [hidden]) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
 .krs-mine .krs-mine-warn:not(:empty) + .krs-mine-warn:not(:empty) { margin-top: 2px; }
 .krs-mine .krs-mine-login { margin-left: 4px; color: #1f4e9c; text-decoration: underline; }
 `;
@@ -232,7 +238,7 @@ function buildStrip(doc) {
   root.innerHTML = `<style>${STYLE}</style>
 <div class="col-12">
   <div class="krs-card-panel">
-    <div class="krs-card-head krs-mine-head">
+    <div class="krs-card-head krs-mine-head" data-act="toggle">
       <span class="krs-card-title krs-mine-title">WORKSPACE</span>
       <span class="krs-card-chips">
         <span class="krs-card-chip" title="오늘부터의 내 회의실 예약"><span>회의실</span><b data-role="rooms"></b></span>
@@ -244,6 +250,7 @@ ${PLAN_GROUPS.map((g) => `        <span class="krs-card-chip" title="${PLAN_CHIP
         <button type="button" class="krs-card-btn" data-act="all" aria-pressed="false" hidden>${ICON.eye}</button>
         <button type="button" class="krs-card-btn" data-act="refresh" title="새로고침 — 담아 둔 것을 버리고 사이트와 HR 을 다시 읽습니다" aria-label="새로고침">${ICON.refresh}</button>
         <button type="button" class="krs-card-btn" data-act="panel" title="예약 패널 열기 — 확장의 사이드 패널에서 예약·근태를 올리고 고칩니다" aria-label="예약 패널 열기">${ICON.panel}</button>
+        <button type="button" class="krs-card-btn" data-act="toggle" data-role="toggle" aria-expanded="true" hidden>${ICON.chevron}</button>
       </span>
     </div>
     <div class="krs-card-body krs-mine-body">
@@ -256,7 +263,7 @@ ${PLAN_GROUPS.map((g) => `        <span class="krs-card-chip" title="${PLAN_CHIP
 </div>`;
   const q = (role) => root.querySelector(`[data-role="${role}"]`);
   return {
-    root,
+    root, head: root.querySelector('.krs-mine-head'), toggle: q('toggle'),
     rooms: q('rooms'), cars: q('cars'), note: q('note'), bar: q('bar'), fill: q('fill'),
     list: q('list'), warn: q('warn'), planWarn: q('planWarn'),
     plans: Object.fromEntries(PLAN_GROUPS.map((g) => [g.key, q(g.key)])),
@@ -446,6 +453,7 @@ export function createHomeCard(doc, deps = {}) {
   let stageRun = null;     // 지금 도는 여비계산서 목록 읽기
   let hidden = new Set();  // 숨긴 "다녀온 출장"의 신청서 번호(HIDDEN_KEY)
   let showAll = false;     // 전체 보기 — 숨긴 출장까지 보는 중인가(이 화면에서만, 기억하지 않는다)
+  let open = true;         // 목록을 펴 두었는가. 접은 것은 기억한다(FOLD_KEY)
   let running = null;      // 지금 도는 훑기. 한 번에 하나만.
   let rerun = false;       // 도는 중에 다시 훑을 일이 생겼다
   let needRescan = false;  // 안 보이는 사이에 생긴 일. 보이면 훑는다
@@ -461,6 +469,24 @@ export function createHomeCard(doc, deps = {}) {
     ui.root.setAttribute('aria-busy', String(on));
     ui.refresh.disabled = on;
   };
+
+  /** 목록을 펴거나 접는다. 접혀 있어도 머리 줄의 건수 칩과 본문의 경고·진행 막대는 보인다. */
+  function setOpen(on) {
+    open = on;
+    ui.list.hidden = !open;
+    const label = open ? '접기' : '펼치기';
+    ui.toggle.setAttribute('aria-expanded', String(open));
+    ui.toggle.setAttribute('aria-label', label);
+    ui.toggle.title = label;
+    ui.head.title = view.all.length ? `클릭: ${label}` : '';
+  }
+  setOpen(true);
+  // 접어 둔 것을 기억해 두었으면 접은 채로 시작한다. 못 읽으면(확장과 끊김) 펴 둔다. 읽는 사이에 이미 접거나 폈으면
+  // (눌렀거나 다른 창에서 바꿨다) 늦게 온 이 답은 버린다 — 예전 값이 방금 고른 것을 덮지 않게.
+  let foldChosen = false;
+  Promise.resolve().then(() => storage.get(FOLD_KEY)).then((saved) => {
+    if (!disposed && !foldChosen && saved?.[FOLD_KEY] === true) setOpen(false);
+  }).catch(() => {});
 
   /**
    * 예약과 근태를 한 목록에 날짜순으로 섞어 그리고, 칩에 건수를 적는다. 숨긴 "다녀온 출장"은 빼고 그린다 —
@@ -486,6 +512,10 @@ export function createHomeCard(doc, deps = {}) {
       setChip(ui.plans[g.key], view.plans ? plans.filter((p) => p.group === g.key && !p.tucked).length : null);
     }
     ui.list.innerHTML = view.all.map((it, i) => itemHtml(it, i, t)).join('');
+    // 접을 것이 없으면 화살표 버튼도 두지 않는다.
+    ui.toggle.hidden = !view.all.length;
+    ui.head.classList.toggle('can-open', view.all.length > 0);
+    setOpen(open);
   }
 
   function paintList(items) {
@@ -747,6 +777,11 @@ export function createHomeCard(doc, deps = {}) {
       stages = stagesFresh(value, today()) ? value : null;
       pick();
     }
+    // 다른 창의 홈에서 카드를 접거나 폈다.
+    if (FOLD_KEY in changes) {
+      foldChosen = true;
+      setOpen(changes[FOLD_KEY].newValue !== true);
+    }
     // 다른 창의 홈에서 출장을 숨기거나 다시 보이게 했다.
     if (HIDDEN_KEY in changes) {
       hidden = new Set(Array.isArray(changes[HIDDEN_KEY].newValue) ? changes[HIDDEN_KEY].newValue : []);
@@ -775,6 +810,15 @@ export function createHomeCard(doc, deps = {}) {
     const target = e.target?.closest ? e.target : null;
     const act = target?.closest('[data-act]')?.dataset.act;
     const li = act ? null : target?.closest('li[data-i]');
+    // 머리 줄 어디를 눌러도 접고 편다(화살표 버튼도 같은 일). 접을 것이 없으면 아무 일도 없다. 이 화면의 일이라 확장과
+    // 끊겨 있어도 되고, 고른 것은 담아 둔다(끊겼으면 못 담을 뿐이다).
+    if (act === 'toggle') {
+      if (!view.all.length) return;
+      foldChosen = true;
+      setOpen(!open);
+      try { await storage.set({ [FOLD_KEY]: !open }); } catch { /* 다음에 열면 펴져 있을 뿐이다 */ }
+      return;
+    }
     if ((!act && !li) || orphaned()) return;
     if (act === 'refresh') { run({ force: true }); runPlans({ force: true }); return; }
     if (act === 'panel') { await askPanel(); return; }

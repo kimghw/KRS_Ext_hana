@@ -10,12 +10,12 @@ import {
   nameOf, timeOptions, spanDays, nextSpan, halfOf, halfPlan, halfFlexForm, workStartOn, itemsIn, isPast,
   buildJob, buildDocJob, buildCancelJob, listItems, formFromDoc, applyPatch, withSub, attendToday,
   FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek,
-  acceptsFile, itemsOfKind, EVIDENCE_ACCEPT,
+  acceptsFile, itemsOfKind, EVIDENCE_ACCEPT, statusLabel,
 } from './src/attend.js';
 import { hrListDocs, hrGetDoc, hrDeleteDoc, hrRunJob, hrWeekTimes, hrOpenDoc, hrCloseWorker, HR_SSO_URL } from './src/hr.js';
 import { fillAttendSmart, receiptSmart } from './src/llm.js';
 import {
-  settlePlan, describePlan, tripStage, tripDocFor, tripIconState,
+  settlePlan, describePlan, tripStage, tripDocFor, tripIconState, settleLabel,
   TRANSPORTS, TRAIN_GRADES, LEG_GRADED, transportsOf, trainGradeOf, nextTransport, legPlan, nextLegPick, describeTrans,
 } from './src/travel.js';
 import { tripList, tripCreate, tripDocUrl, TRIP_SHELL_URL, tripPreDetail, tripPreConfirm, tripPostConfirm, tripAfterSave, tripAfterUrl } from './src/trip.js';
@@ -1092,12 +1092,12 @@ export function createAttendPanel({
     const today = attendToday();
     el.list.innerHTML = items.map((it, i) => {
       const open = st.openDoc === it.docNo;
-      // 출장 줄에는 여비계산서가 어느 단계인지 딱지로 보인다(사전정산 작성·완료, 사후정산 작성·완료). 없으면 딱지도 없다.
+      // 왼쪽 딱지는 근태의 결재 상태(신청·승인 …), 출장 줄의 오른쪽 딱지는 정산 상태다(2026-10-04 사용자 지정). 색은 결재 상태만 가린다.
       const trip = tripOf(it);
       const stage = trip ? tripStage(trip, st.trips.me) : null;
-      const chip = stage ? `<span class="at-trip ${stage.phase}${stage.done ? ' done' : ''}" title="여비계산서 ${escapeHtml(trip.seq)}">${escapeHtml(stage.label)}</span>` : '';
+      const chip = settleChip(it, trip, stage, today);
       const head = `<button type="button" class="at-head" aria-expanded="${open}" aria-controls="atMore_${i}">`
-        + `<span class="at-row"><span class="at-st">${escapeHtml(it.statusName)}</span>`
+        + `<span class="at-row"><span class="at-st" title="${escapeHtml(it.statusName)}">${escapeHtml(statusLabel(it))}</span>`
         + `<span class="at-sum">${escapeHtml(it.summary)}</span>${chip}</span>`
         + `<span class="at-reason">${escapeHtml(it.reason || it.formName || '')}</span></button>`;
       // 지난 건은 상태 딱지를 회색으로 가라앉힌다(스타일이 결재완료에만 건다).
@@ -1119,7 +1119,7 @@ export function createAttendPanel({
       // 아이콘의 숫자(1 사전정산 · 2 사후정산)와 색(회색 미작성 · 녹색 작성 중 · 파랑 완료)이 단계를 말한다.
       const icon = tripIconState(trip, stage);
       const tripLine = !isTrip(it) ? '' : `<div class="at-tripline"><span>${escapeHtml(
-        trip ? `여비계산서 ${trip.seq} · ${stage.label}` : st.trips?.error ? `여비계산서를 읽지 못했습니다: ${st.trips.error}` : st.trips ? '여비계산서 없음' : '여비계산서 확인 중...')}</span>`
+        trip ? `여비계산서 ${trip.seq} · ${stage.label}` : noTripNote(it))}</span>`
         + `<button type="button" class="small ghost at-web at-tripbtn ${icon.state}" data-act="trip" title="${TRIP_TITLE} — ${escapeHtml(icon.label)}" aria-label="${TRIP_TITLE} — ${escapeHtml(icon.label)}">${tripIcon(icon.digit)}</button></div>`;
       // 출장이면 사후정산 칸 아래에 증빙 송부 칸(sendbox.js)이 선다 — 정산이 끝난 뒤 증빙을 PDF 로 묶어 담당자에게 보낸다.
       const afterBox = isTrip(it) ? afterHtml(it, trip, stage) + sendBox.html(sendCtx(it)) : '';
@@ -1136,24 +1136,77 @@ export function createAttendPanel({
 
   /** 출장 신청서인가(여비계산서가 따르는 것). */
   const isTrip = (it) => it.formId === 'TR';
-  /** 그 출장의 여비계산서(기간과 출장자가 같은 것). 출장이 아니거나 아직 못 읽었으면 null. */
-  const tripOf = (it) => (isTrip(it) && st.trips?.rows ? tripDocFor(it, st.trips.rows, st.trips.me) : null);
+  /** 올려 두었거나 결재가 끝난 신청서인가(신청·승인). 임시저장·반려·회수는 아니다. */
+  const isLive = (it) => it.status === STATUS.WAIT || it.status === STATUS.REQUESTED || it.status === STATUS.APPROVED;
+  /**
+   * 같은 기간의 올려 둔 신청서에 가려진 줄인가 — 계산서는 기간과 출장자로 찾으므로(tripDocFor), 같은 기간에 올려 둔(신청·승인) 출장
+   * 신청서가 따로 있으면 임시저장·반려·회수한 신청서에도 같은 계산서가 걸린다. 그 계산서는 올려 둔 신청서의 것으로 본다.
+   */
+  const shadowed = (it) => !isLive(it)
+    && st.all.some((x) => x.docNo !== it.docNo && isTrip(x) && isLive(x) && x.from === it.from && (x.to || x.from) === (it.to || it.from));
+  /**
+   * 그 출장의 여비계산서(기간과 출장자가 같은 것). 출장이 아니거나 아직 못 읽었으면 null. 가려진 줄(shadowed)도 null 이다 —
+   * 딱지·편 카드·버튼이 같은 판단을 쓴다(계산서와 사후정산·증빙 송부는 올려 둔 신청서의 줄에서 한다).
+   */
+  const tripOf = (it) => (isTrip(it) && st.trips?.rows && !shadowed(it) ? tripDocFor(it, st.trips.rows, st.trips.me) : null);
+  /**
+   * 그 출장에 여비계산서가 없다고 말해도 되는가 — 계산서 목록을 그 출장기간까지 다 읽었을 때만이다. 읽어 둔 기간 밖이거나(기간을 바꿔
+   * 다시 읽는 중) 목록이 여러 쪽이면(첫 쪽만 읽는다 — src/trip.js 의 tripList) 없는 것이 아니라 모르는 것이다.
+   */
+  const tripsCover = (it) => !!st.trips?.rows && !(st.trips.pages > 1) && st.trips.from <= it.from && (it.to || it.from) <= st.trips.to;
+
+  /**
+   * 출장 줄 오른쪽의 정산 상태 딱지(2026-10-04 사용자 지정) — 정산전 · 사전정산 중 · 사전정산 완료 · 사후정산전 · 사후정산 중 · 정산완료.
+   * 붙이지 않는 때: 계산서를 못 찾았는데 없는지 모를 때(목록을 못 읽었거나 다 읽지 못했다 — 모르는 것을 정산전이라고 하지 않는다),
+   * 반려·회수한 신청서에 계산서가 없을 때, 같은 기간의 올려 둔 신청서에 가려진 줄일 때(shadowed).
+   */
+  function settleChip(it, trip, stage, today) {
+    if (!isTrip(it) || shadowed(it)) return '';
+    if (!stage && (!tripsCover(it) || it.status === STATUS.REJECTED || it.status === STATUS.RECALLED)) return '';
+    return `<span class="at-trip" title="${trip ? `여비계산서 ${escapeHtml(trip.seq)}` : '여비계산서 없음'}">`
+      + `${escapeHtml(settleLabel(stage, { past: isPast(it, today) }))}</span>`;
+  }
+
+  /** 계산서가 걸리지 않은 출장 줄을 폈을 때 적는 말 — 없는 것, 모르는 것, 다른 줄에 있는 것을 가려 말한다. */
+  function noTripNote(it) {
+    if (shadowed(it)) return '같은 기간에 올려 둔 출장 신청서가 있습니다 — 여비계산서는 그 줄에서 봅니다';
+    if (st.trips?.error) return `여비계산서를 읽지 못했습니다: ${st.trips.error}`;
+    if (!st.trips) return '여비계산서 확인 중...';
+    if (tripsCover(it)) return '여비계산서 없음';
+    if (tripsBusy) return '여비계산서 확인 중...';
+    return st.trips.pages > 1 ? '여비계산서를 찾지 못했습니다 — 계산서 목록이 여러 쪽이라 첫 쪽만 읽었습니다'
+      : '여비계산서를 찾지 못했습니다 — 조회 기간이 이 출장기간을 다 덮지 않습니다';
+  }
+
+  let tripsAsk = 0;        // 여비계산서 목록을 읽기 시작한 차례 — 가장 나중에 시작한 읽기의 답만 받는다
+  let tripsBusy = false;   // 답을 기다리는 읽기가 있는가
 
   /**
    * 여비계산서 목록을 읽어 둔다(보이는 기간의 출장기간 기준). 던지지 않는다 — 못 읽으면 까닭을 담아 두고,
    * 출장 줄이 그 말을 한다. 근태 목록과 따로 돌아서 근태가 먼저 보인다.
    */
   async function loadTrips() {
+    const ask = ++tripsAsk;
+    tripsBusy = true;
     const { from, to } = tripRange();
+    let next;
     try {
       const r = await tripList({ from, to });
-      st.trips = { rows: r.rows, me: r.me };
-      // 홈의 WORKSPACE 카드가 같은 단계를 보게 담아 둔다. 못 담아도 목록은 그대로다.
-      noteStages({ rows: r.rows, me: r.me, from, to }).catch(() => {});
+      // 읽은 기간과 쪽 수를 같이 담는다 — 계산서가 "없다"고 말해도 되는지(tripsCover) 가릴 때 쓴다.
+      next = { rows: r.rows, me: r.me, from, to, pages: r.pages };
+    } catch (err) {
+      next = { error: err.message };
+    }
+    // 그 사이에 다시 읽기 시작했으면 이 답은 버린다 — 늦게 온 예전 답(다른 기간의 목록, 실패)이 새 답을 덮지 않게.
+    if (ask !== tripsAsk) return;
+    tripsBusy = false;
+    st.trips = next;
+    if (next.rows) {
+      // 홈의 WORKSPACE 카드가 같은 단계를 보게 담아 둔다. 못 담아도 목록은 그대로다. 목록이 여러 쪽이면 첫 쪽만 읽은 것이라
+      // 담지 않는다 — 반쪽짜리 목록을 "다 읽은 것"으로 두면 홈이 있는 계산서를 없다고 본다.
+      if (!(next.pages > 1)) noteStages({ rows: next.rows, me: next.me, from, to }).catch(() => {});
       // 사후정산이 완료된 것으로 드러난 다녀온 출장은 기본 보기에서 뺀다.
       pruneSettled();
-    } catch (err) {
-      st.trips = { error: err.message };
     }
     paintList();
   }

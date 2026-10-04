@@ -526,6 +526,20 @@ export function tripStage(row, name) {
 }
 
 /**
+ * 신청 내역의 출장 줄에 붙는 정산 상태 딱지의 말(2026-10-04 사용자 지정):
+ *   정산전(여비계산서 없음) → 사전정산 중 → 사전정산 완료 → 사후정산전 → 사후정산 중 → 정산완료
+ * "사전정산 완료"와 "사후정산전"은 계산서로는 같은 단계(사전정산 완료 · 사후정산 대기)다 — 다녀오기 전이면 앞의 것, 다녀온 뒤면 뒤의 것이다.
+ * @param {{phase:'pre'|'post', done:boolean}|null} stage tripStage 의 결과. 계산서가 없으면 null
+ * @param {{past?: boolean}} [when] past 는 이미 다녀온 출장인가
+ */
+export function settleLabel(stage, { past = false } = {}) {
+  if (!stage) return '정산전';
+  if (stage.phase === 'post') return stage.done ? '정산완료' : '사후정산 중';
+  if (!stage.done) return '사전정산 중';
+  return past ? '사후정산전' : '사전정산 완료';
+}
+
+/**
  * 신청 내역의 여비계산서 아이콘(문서 안의 숫자). 숫자는 1(사전정산)·2(사후정산), 색(state)은 회색 = 미작성·대기(none),
  * 녹색 = 작성 중(doing), 파랑 = 완료(done) — 2026-10-03 사용자 지정. 계산서가 없으면(row 가 null) 1 · 회색이다.
  * @param {object|null} row tripDocFor 의 결과

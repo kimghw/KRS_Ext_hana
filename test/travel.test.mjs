@@ -13,7 +13,7 @@ import { TRAVEL_RULES, KTX_FARES } from '../src/travelspec.js';
 import {
   TRANSPORTS, DEFAULT_TRANSPORT, TRAIN_GRADES, DEFAULT_GRADE, stationOf, isWeekend, fareOf, hoursOf, legTimes, mealsOf, dailyOf, settlePlan, describePlan,
   parseTripList, tripListPages, tripUser, tripStage, tripDocFor, formFields, saveBody, parseFeeRows, pickFeeRow,
-  tripIconState, transportsOf, trainGradeOf, nextTransport, nextLegPick, parseTransRows, pickOfRow, legsOfRows, ticketsOf, seatTickets,
+  tripIconState, settleLabel, transportsOf, trainGradeOf, nextTransport, nextLegPick, parseTransRows, pickOfRow, legsOfRows, ticketsOf, seatTickets,
   picksWithTickets, legPlan, describeTrans, sameTrans,
 } from '../src/travel.js';
 import { blankForm, settle } from '../src/attend.js';
@@ -637,6 +637,22 @@ console.log('신청 내역의 여비계산서 아이콘 — 숫자(1 사전 · 2
   t('사후정산으로 넘어가면 2 — 작성 중 녹색, 완료 파랑', () => {
     assert.deepEqual(icon(row('완료', '작성')), { digit: 2, state: 'doing', label: '사후정산 작성 중' });
     assert.deepEqual(icon(row('완료', '완료')), { digit: 2, state: 'done', label: '사후정산 완료' });
+  });
+}
+
+console.log('신청 내역의 정산 상태 딱지 — 정산전 · 사전정산 중 · 사전정산 완료 · 사후정산전 · 사후정산 중 · 정산완료');
+{
+  const row = (pre, post) => ({ seq: '1', pre, travelers: [{ name: '김거화', post }] });
+  const label = (r, past) => settleLabel(r && tripStage(r, '김거화'), { past });
+  t('계산서가 없으면 "정산전", 사전정산을 쓰는 중이면 "사전정산 중" — 다녀왔든 아니든 같다', () => {
+    assert.deepEqual([label(null, false), label(null, true)], ['정산전', '정산전']);
+    assert.deepEqual([label(row('작성', '대기'), false), label(row('작성', '대기'), true)], ['사전정산 중', '사전정산 중']);
+  });
+  t('사전정산만 끝난 계산서: 다녀오기 전이면 "사전정산 완료", 다녀온 뒤면 "사후정산전"', () => {
+    assert.deepEqual([label(row('완료', '대기'), false), label(row('완료', '대기'), true)], ['사전정산 완료', '사후정산전']);
+  });
+  t('사후정산을 쓰는 중이면 "사후정산 중", 완료면 "정산완료"', () => {
+    assert.deepEqual([label(row('완료', '작성'), true), label(row('완료', '완료'), true)], ['사후정산 중', '정산완료']);
   });
 }
 
