@@ -58,7 +58,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (init.method === 'POST') {
     if (!u.endsWith('/BusinessTrip/AfterTrip/Save')) throw new Error('모르는 저장 주소 ' + u);
     site.posts.push(init.body);
-    site.post = '작성';
+    // 완료한 사후정산을 다시 저장했을 때 사이트가 단계를 어떻게 하는지는 모른다 — sticky 면 완료로 남는 사이트를 흉내 낸다.
+    if (!site.sticky) site.post = '작성';
     return page('ok');
   }
   if (u.includes('/Home/List')) return page(LIST());
@@ -279,6 +280,49 @@ await ta('기차표는 증빙으로 받지 않는다 — 편도 바뀌지 않고
   assert.deepEqual(legs().map((l) => l.on), [['train'], ['plane']]);
 });
 
+// 2026-10-05 사용자 지정: "출장 기간동안의 내용이 아니면 알림을 줘 안맞다고, 맞는것만 선별취급 해서 올리고 해당 없는거는 문서보관에 알림표지 하고
+// 확정 해주기 전까지는 보내기 해도 같이 보내지 말고"
+console.log('출장 기간의 것이 아닌 증빙 — 안 맞다고 알리고, 올리지 않고 알림 표시로 보관한다');
+await drop('제주.png', 'image/png', { ...blank, docType: 'lodging_receipt', vendor: '제주호텔', payDate: '2026-09-21', checkIn: '2026-09-20', checkOut: '2026-09-21', nights: 1, total: 90000, currency: 'KRW', summary: '제주호텔 1박 90,000원' });
+const keptLi = (name) => [...doc.querySelectorAll('#atList .at-kept li')].find((li) => li.querySelector(`button[data-act="kept-drop"][data-name="${name}"]`));
+await ta('출장 기간 밖에 묵은 숙박 영수증은 사후정산에 올리지 않는다 — 안 맞다고 알리고, 보관 중인 증빙에 알림 표시(⚠ 와 까닭)와 `확정` 버튼이 선다', async () => {
+  const WHY = '묵은 기간(9/20~9/21)이 출장 기간(9/9~9/10) 밖입니다';
+  assert.equal(site.posts.length, 2, '사이트에는 아무것도 가지 않는다');
+  assert.deepEqual([...doc.querySelectorAll('#atList .at-after-docs li')].map((li) => li.textContent),
+    [`숙박 증빙 ⚠ · 제주.png — ${WHY} · 알림 표시로 보관했습니다(확정하기 전에는 올리지도 보내지도 않습니다)`]);
+  assert.equal(doc.querySelector('#atList .at-after-warn').textContent,
+    `출장 기간과 맞지 않는 증빙 1장은 올리지 않고 알림 표시로 보관했습니다 — 제주.png: ${WHY} · 아래 보관 중인 증빙에서 확정하기 전에는 보낼 때도 빠집니다`);
+  assert.equal(doc.querySelector('#atList .at-after-note.error:not(.at-after-warn)'), null, '"넣을 내역이 없다"는 말을 따로 적지 않는다');
+  assert.equal(doc.getElementById('atStatus').textContent, `출장 기간과 맞지 않는 증빙이 있습니다 — 제주.png: ${WHY}`);
+  const held = (await evidence.list('TR-1')).find((k) => k.name === '제주.png');
+  assert.deepEqual([held.label, held.warn, held.todo, held.record.vendor, 'file' in held.record], ['숙박 증빙', WHY, undefined, '제주호텔', false]);
+  assert.equal(doc.querySelector('#atList .at-kept .at-after-note').textContent, '보관 중인 증빙 2장 — 담당자에게 보낼 때 같이 갑니다(⚠ 출장 기간과 안 맞는 1장은 확정해야 갑니다)');
+  const li = keptLi('제주.png');
+  assert.deepEqual([li.classList.contains('warn'), li.querySelector('span').textContent, li.querySelector('button[data-act="kept-ok"]').textContent],
+    [true, `숙박 증빙 · 제주.png · ⚠ ${WHY}`, '확정']);
+  assert.equal(keptLi('오는편.pdf').querySelector('button[data-act="kept-ok"]'), null, '맞는 증빙에는 확정 버튼이 없다');
+  assert.equal(doc.querySelector('#atList button[data-act="kept-go"]'), null, '확정하기 전에는 올리는 버튼도 없다');
+  assert.deepEqual(legs().map((l) => l.on), [['train'], ['plane']]);
+});
+keptLi('제주.png').querySelector('button[data-act="kept-ok"]').click();
+await until(() => /확정했습니다/.test(doc.getElementById('atStatus').textContent), '확정');
+await ta('`확정`을 누르면 알림 표시가 걷힌다 — 사이트에는 아무것도 가지 않고, 숙박 증빙이라 "사후정산에 안 올림"으로 바뀌어 올리는 버튼이 선다', async () => {
+  assert.equal(site.posts.length, 2);
+  const now = (await evidence.list('TR-1')).find((k) => k.name === '제주.png');
+  assert.deepEqual([now.warn, now.confirmed, now.todo, now.record.confirmed], [undefined, true, true, true]);
+  const li = keptLi('제주.png');
+  assert.deepEqual([li.classList.contains('warn'), li.querySelector('span').textContent, li.querySelector('button[data-act="kept-ok"]')], [false, '숙박 증빙 · 제주.png · 사후정산에 안 올림', null]);
+  assert.equal(doc.querySelector('#atList .at-after-warn'), null, '알림도 걷힌다');
+  assert.equal(doc.querySelector('#atList .at-kept .at-after-note').textContent, '보관 중인 증빙 2장 — 담당자에게 보낼 때 같이 갑니다');
+  const go = doc.querySelector('#atList button[data-act="kept-go"]');
+  assert.deepEqual([go.textContent, go.closest('.at-leg-go').querySelector('.at-after-note').textContent],
+    ['보관한 증빙을 사후정산에 올리기', '확정한 증빙을 포함해 1장은 사후정산에 아직 올리지 않았습니다']);
+  assert.equal(doc.getElementById('atStatus').textContent, '이 출장의 증빙으로 확정했습니다 — 제주.png · 사후정산에는 아래의 올리기 버튼으로 올립니다');
+  assert.ok(logs.some((l) => l.kind === 'trip' && l.ok && /^증빙 확정\(출장 기간과 안 맞던 것\): 145580 · 숙박 증빙 제주\.png/.test(l.text)));
+});
+keptLi('제주.png').querySelector('button[data-act="kept-drop"]').click();
+await until(() => /보관함에서 뺐습니다 — 제주\.png/.test(doc.getElementById('atStatus').textContent), '보관함에서 빼기');
+
 console.log('사후정산을 올릴 때가 아니면 보여 주기만 한다');
 st.trips.rows[0].pre = '작성';
 st.trips.rows[0].travelers[0].post = '대기';
@@ -307,7 +351,8 @@ t('사후정산이 완료된 출장에는 정산 내역이 보여 주기만 하�
   ]);
   assert.ok(legs().every((l) => l.icons.every((b) => b.disabled)));
   assert.deepEqual(['.at-after-drop', 'button[data-act="after"]', 'button[data-act="legs-go"]', '.at-kept'].map((q) => doneBox().querySelector(q)), [null, null, null, null]);
-  assert.equal(doneBox().dataset.seq, undefined, '붙여넣기는 이 칸으로 오지 않는다 — 완료된 출장의 증빙은 여비증빙 송부 칸이 받는다');
+  assert.equal(doneBox().dataset.seq, '145580', '붙여넣기도 이 카드로 온다 — 완료된 출장에 넣은 증빙은 읽어서 사후정산에 반영한다(2026-10-05 사용자 지정, 아래)');
+  assert.equal(doneBox().querySelector('.at-after-head button'), null, '머리에 버튼은 없다 — `사후정산 다시하기`는 여비증빙 송부 칸 아래에 있다');
   assert.equal(doneBox().querySelector('.at-lodge-count').textContent, '없음', '숙박비 내역도 같이 선다(이 출장은 숙박 줄을 올리지 않았다)');
 });
 // 사후정산에 따로 올린 교통 줄이 화면에 있다 — 지움 표시가 된 줄과 아직 저장하지 않은 줄(번호 없음)은 치지 않는다.
@@ -328,6 +373,78 @@ t('사후정산에 따로 올린 교통 줄이 있으면 그 줄이 선다 — �
   assert.ok(legs().every((l) => l.icons.every((b) => b.disabled)));
   assert.equal(site.posts.length, 2, '읽기만 했다 — 아무것도 보내지 않았다');
 });
+
+// 2026-10-05 사용자 지정(정산을 마치고 보낸 카드를 보고): "사후정산을 완료 후 보낸 후 증빙을 첨부나 복사하기나 추가 하면 다시 사후정산을
+// 업데이트 할 수 있는지 확인하고 할 수 있도록 해줘" — 그 전에는 완료한 출장에 넣은 증빙을 읽지 않고 보관함에 담기만 했다.
+console.log('사후정산을 완료한 출장에 넣은 증빙 — 읽어서, 숙박 증빙·항공권이면 사후정산에 다시 올린다 (2026-10-05 사용자 지정)');
+const sendBox = () => doc.querySelector('#atList .at-send');
+const doneNotes = () => [...doneBox().querySelectorAll(':scope > .at-after-note')].map((n) => n.textContent);
+/** 완료한 출장의 여비증빙 송부 칸(증빙 넣기)에 파일을 넣고 다 읽을 때까지 기다린다. */
+const addDone = async (name, type, record) => {
+  site.record = record;
+  const input = sendBox().querySelector('input[data-send="file"]');
+  const asked = site.asks.length;
+  Object.defineProperty(input, 'files', { configurable: true, value: [new window.File(['x'], name, { type })] });
+  input.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await until(() => site.asks.length > asked && !st.after['145580'].busy, `${name} 을 읽기`);
+};
+t('송부 칸의 증빙 넣는 곳이 읽어서 반영한다고 적는다 — 맨 아래 보내기 위에는 `사전정산 다시하기`·`사후정산 다시하기`가 선다', () => {
+  assert.equal(sendBox().querySelector('.at-send-add span').textContent, '증빙 더 넣기 · 읽어서 사후정산에 반영합니다');
+  assert.equal(sendBox().querySelector('.at-send-add').title, '숙박 증빙·항공권이면 읽어서 사후정산에 다시 올리고, 그 밖의 문서는 보낼 증빙으로 담습니다');
+  assert.deepEqual([...sendBox().querySelectorAll('.at-send-redo button')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['사전정산 다시하기', 'false'], ['사후정산 다시하기', 'false']]);
+});
+await addDone('저녁.png', 'image/png', { ...blank, docType: 'other_receipt', vendor: '킨텍스식당', payDate: '2026-09-09', payPlace: '경기 고양시 일산서구', atDestination: true, total: 18000, summary: '킨텍스식당 카드 영수증 18,000원' });
+await ta('출장지 영수증 — 읽어서 이름표를 붙여 담기만 한다. 사후정산에 올릴 것이 아니라 끝난 정산은 건드리지 않고, 카드는 정산 내역 그대로다', async () => {
+  assert.equal(site.posts.length, 2);
+  assert.deepEqual((await evidence.list('TR-1')).map((k) => [k.label, k.name]), [['항공기 증명', '오는편.pdf'], ['출장지 영수증', '저녁.png']]);
+  assert.deepEqual([doneBox().querySelector('.at-after-head strong').textContent, st.after['145580'].reopen], ['정산 내역', undefined]);
+  assert.deepEqual(doneNotes(), ['증빙 1장을 보관했습니다(저녁.png) — 숙박 증빙·항공권이 아니어서 사후정산은 그대로 두었습니다']);
+  assert.deepEqual([...sendBox().querySelectorAll('.at-send-files li span')].map((n) => n.textContent), ['항공기 증명 · 오는편.pdf', '출장지 영수증 · 저녁.png']);
+});
+await addDone('ktx.png', 'image/png', { ...blank, docType: 'train_ticket', summary: 'KTX 서울→부산 승차권' });
+await ta('그 증명으로 쓸 수 없다고 읽힌 문서(기차표)도 완료한 출장에 넣은 것이면 보낼 증빙으로 담는다 — 읽지 않고 담던 자리다', async () => {
+  assert.equal(site.posts.length, 2);
+  assert.deepEqual((await evidence.list('TR-1')).map((k) => [k.label, k.name]), [['항공기 증명', '오는편.pdf'], ['출장지 영수증', '저녁.png'], ['증빙', 'ktx.png']]);
+  assert.equal(doneBox().querySelector('.at-after-head strong').textContent, '정산 내역');
+});
+// 가는 편의 항공권을 붙여 넣는다(Ctrl+V) — 완료한 사후정산을 다시 저장해도 단계가 완료로 남는 사이트다.
+site.post = '완료';   // 위에서 패널의 상태만 완료로 앉혔다 — 가짜 사이트의 목록도 맞춘다
+site.sticky = true;
+site.record = { ...blank, docType: 'flight_receipt', vendor: '대한항공', payDate: '2026-09-08', total: 87000, currency: 'KRW', airline: '대한항공', flightNo: 'KE1102', flightDate: '2026-09-09',
+  depPlace: '김해', arrPlace: '김포', depTime: '07:30', arrTime: '08:30', seatClass: '일반석', mileage: 215, passenger: '김거화', summary: '대한항공 KE1102 김해→김포 전자영수증 87,000원' };
+{
+  const asked = site.asks.length;
+  const ev = new window.Event('paste', { bubbles: true, cancelable: true });
+  ev.clipboardData = { files: [new window.File(['pdf'], '가는편.pdf', { type: 'application/pdf' })] };
+  doc.getElementById('attend').classList.remove('hidden');   // 붙여넣기는 근태 탭이 보일 때만 받는다
+  doc.dispatchEvent(ev);
+  await until(() => site.asks.length > asked && site.posts.length === 3 && !st.after['145580'].busy, '붙여 넣은 항공권을 읽고 올리기');
+  assert.equal(ev.defaultPrevented, true, '붙여 넣은 파일은 이 카드가 받았다');
+}
+await ta('붙여 넣은 항공권 — 읽어서 완료한 사후정산에 다시 올린다. 카드에는 사후정산 칸이 다시 서고(`사후정산 다시하기`를 누른 것과 같다) 올린 내용이 적힌다', async () => {
+  const body = site.posts[2];
+  // 화면에 있던 교통 줄(번호가 있는 것)은 지움 표시되고, 새 두 줄(가는 편·오는 편 모두 비행기)이 뒤에 붙는다.
+  assert.deepEqual([fields(body, 'tr_transport').slice(-2), fields(body, 'tr_dep').slice(-2), fields(body, 'tr_arr').slice(-2), fields(body, 'air_abroad')],
+    [['비행기', '비행기'], ['김해', '김포'], ['김포', '김해'], ['Y']]);
+  assert.deepEqual(fields(body, 'tr_seq').map((seq, i) => (seq ? fields(body, 'tr_del')[i] : '')).filter(Boolean), ['1', '1', '1']);
+  assert.deepEqual([doneBox().querySelector('.at-after-head strong').textContent, doneBox().querySelector('button[data-act="after-reopen"]').textContent], ['사후정산', '그만두기']);
+  assert.match(doneBox().querySelector('.at-after-why').textContent, / · 다시 작성 중$/);
+  assert.match(doneBox().querySelector('.at-after-note.ok').textContent, /^올렸습니다 — /);
+  assert.deepEqual((await evidence.list('TR-1')).map((k) => [k.label, k.name]).at(-1), ['항공기 증명', '가는편.pdf']);
+  assert.match(doc.getElementById('atStatus').textContent, /^사후정산을 올렸습니다 — 비행기 2026-09-09 김해→김포 87,000원 · 비행기 2026-09-10 김포→김해 98,000원/);
+  assert.ok(logs.some((l) => l.kind === 'trip' && l.ok && /사후정산\) 작성: 145580 · 비행기 2026-09-09 김해→김포/.test(l.text)));
+});
+t('사이트의 단계가 완료로 남아 있어도 다시 작성하는 중이다 — 송부 칸의 보내기가 저장 → 확정부터 하고, `사후정산 다시하기`가 켜져 있다', () => {
+  assert.equal(st.trips.rows[0].travelers[0].post, '완료');
+  assert.match(sendBox().querySelector('button[data-act="send-go"]').title, /^사후정산을 저장하고 확정\(완료\)한 뒤에 증빙을 보냅니다 — /);
+  assert.deepEqual([...sendBox().querySelectorAll('.at-send-redo button')].map((b) => b.getAttribute('aria-pressed')), ['false', 'true']);
+  assert.equal(sendBox().querySelector('.at-send-add'), null, '다시 작성하는 중에는 증빙을 위의 사후정산 칸에 넣는다');
+});
+doneBox().querySelector('button[data-act="after-reopen"]').click();
+t('`그만두기`를 누르면 정산 내역으로 돌아간다 — 방금 올린 것은 사이트에 그대로 있다', () => {
+  assert.deepEqual([doneBox().querySelector('.at-after-head strong').textContent, site.posts.length], ['정산 내역', 3]);
+});
+site.sticky = false;
 
 console.log(`\n통과 ${pass}건`);
 process.exit(0);   // 패널이 걸어 둔 타이머(두 번 누르기)가 남아 있어도 끝낸다

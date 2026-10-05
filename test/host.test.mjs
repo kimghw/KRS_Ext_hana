@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 process.env.KRS_HOST_NO_MAIN = '1';
-const { handle, writeLog, tailLogs, pruneLogs, cliCall, canAttach, envelopeOf } = await import('../native/host.mjs');
+const { handle, writeLog, tailLogs, pruneLogs, cliCall, canAttach, envelopeOf, guardStdout } = await import('../native/host.mjs');
 
 const HOST = fileURLToPath(new URL('../native/host.mjs', import.meta.url));
 
@@ -63,7 +63,8 @@ console.log('첨부를 읽히는 두 길 — 메시지에 바로 싣기(빠른 �
     assert.deepEqual([flag('--input-format'), flag('--output-format'), flag('--system-prompt'), flag('--tools')], ['stream-json', 'stream-json', '지시문', '']);
     assert.ok(['--safe-mode', '--strict-mcp-config', '--no-session-persistence'].every((f) => call.args.includes(f)), '사용자 설정을 싣지 않고 세션 기록도 남기지 않는다');
     assert.ok(!call.args.some((a) => /Read 도구|AAAA/.test(a)), '그림은 인자가 아니라 표준 입력으로 간다');
-    assert.equal(call.env.MAX_THINKING_TOKENS, '1024', '생각은 조금만 한다');
+    // 2026-10-05 사용자 지정: "모두 opus 5.5로 변경해줘" — Opus 5.5 는 생각 토큰의 상한(MAX_THINKING_TOKENS)을 받지 않는다. 깊이는 effort 로 정한다.
+    assert.deepEqual([flag('--model'), flag('--effort'), call.env.MAX_THINKING_TOKENS], ['claude-opus-5-5', 'low', process.env.MAX_THINKING_TOKENS], '모델과 생각의 깊이 — 생각 토큰의 상한은 주지 않는다');
     call.cleanup();
   });
   await ta('Read 로 읽히는 길: 파일을 임시 폴더에 내려 그 경로를 프롬프트에 적고 Read 만 열어 준다 — 끝나면 지운다', async () => {
@@ -73,6 +74,7 @@ console.log('첨부를 읽히는 두 길 — 메시지에 바로 싣기(빠른 �
     assert.match(prompt, /^출장 정보\n\n첨부 파일\(Read 도구로 열어서 보세요\):/);
     assert.ok(file && fs.existsSync(file));
     assert.deepEqual([call.args[call.args.indexOf('--allowedTools') + 1], call.stdin, call.limitMs, call.env.MAX_THINKING_TOKENS], ['Read', '', 120_000, process.env.MAX_THINKING_TOKENS]);
+    assert.deepEqual([call.args[call.args.indexOf('--model') + 1], call.args[call.args.indexOf('--effort') + 1]], ['claude-opus-5-5', 'low'], '이 길도 같은 모델·같은 깊이다');
     call.cleanup();
     assert.equal(fs.existsSync(file), false);
   });
@@ -95,6 +97,73 @@ console.log('첨부를 읽히는 두 길 — 메시지에 바로 싣기(빠른 �
   const logged = [];
   await handle({ task: 'receipt', input: '출장 정보', files: [png] }, { log: (e) => logged.push(e), run: async () => ({ data: { docType: 'unknown' }, costUsd: 0, attach: 'direct' }) });
   await ta('어느 길로 읽었는지 기록에 남는다', async () => assert.equal(logged.at(-1).attach, 'direct'));
+}
+
+console.log('증빙은 글자를 먼저 뽑는다 — PDF 는 글자만, 그림은 OCR 글자와 그림을 같이 (native/doctext.mjs)');
+{
+  const pdf = { name: 'Receipt.pdf', type: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERg==' };
+  const png = { name: 'image.png', type: 'image/png', dataUrl: 'data:image/png;base64,AAAA' };
+  const logged = [];
+  const log = (e) => logged.push(e);
+  const data = { docType: 'lodging_receipt', summary: 's' };
+  await ta('글자만 뽑힌 PDF 는 첨부 없이 글자만 가고, 빠른 길(lean)로 부른다', async () => {
+    let seen;
+    const res = await handle({ task: 'receipt', input: '출장 정보', files: [pdf] }, {
+      log, text: async (input, files) => ({ input: `${input}\n\n<문서 글자>\n총계 USD 131.57\n</문서 글자>`, files: [], read: [`${files[0].name}: 글자 층 12자(1쪽) — 글자만 보냄`], lean: true }),
+      run: async (_t, input, files, opts) => { seen = { input, files, opts }; return { data, costUsd: 0.01, attach: 'text' }; },
+    });
+    assert.equal(res.ok, true);
+    assert.deepEqual([seen.files, seen.opts], [[], { lean: true }]);
+    assert.ok(seen.input.includes('총계 USD 131.57'));
+  });
+  await ta('기록에는 어떻게 읽었는지(read)만 남는다 — 뽑은 글자는 남기지 않는다', async () => {
+    const e = logged.at(-1);
+    assert.deepEqual([e.attach, e.read, e.input, e.files], ['text', ['Receipt.pdf: 글자 층 12자(1쪽) — 글자만 보냄'], '출장 정보', ['Receipt.pdf (application/pdf, 0KB)']]);
+    assert.ok(!JSON.stringify(e).includes('131.57'));
+  });
+  await ta('그림은 OCR 글자를 적은 글과 그림이 같이 간다 — 실패해도 read 가 남는다', async () => {
+    let seen;
+    const res = await handle({ task: 'receipt', input: '출장 정보', files: [png] }, {
+      log, text: async (input, files) => ({ input: `${input}\n\nOCR 글자`, files, read: ['image.png: OCR 271자(믿음 84) — OCR 글자와 그림을 같이 보냄'], lean: false }),
+      run: async (_t, input, files, opts) => { seen = { input, files, opts }; throw new Error('모델이 JSON 을 돌려주지 않았습니다.'); },
+    });
+    assert.deepEqual([res.ok, seen.files, seen.opts, seen.input], [false, [png], { lean: false }, '출장 정보\n\nOCR 글자']);
+    assert.deepEqual(logged.at(-1).read, ['image.png: OCR 271자(믿음 84) — OCR 글자와 그림을 같이 보냄']);
+  });
+  await ta('증빙이 아닌 작업과 첨부 없는 증빙은 글자를 뽑지 않는다', async () => {
+    const text = async () => assert.fail('부르면 안 됨');
+    for (const msg of [{ task: 'parse', input: '내일', files: [png] }, { task: 'receipt', input: '출장 정보' }]) {
+      let opts;
+      await handle(msg, { log, text, run: async (_t, _i, _f, o) => { opts = o; return { data: {} }; } });
+      assert.deepEqual(opts, { lean: false });
+      assert.equal('read' in logged.at(-1), false);
+    }
+  });
+  await ta('글자만 보내는 빠른 길: 표준 입력 한 줄에 글만 실리고 도구는 없다', async () => {
+    const call = cliCall({ system: '지시문' }, '출장 정보\n\n<문서 글자>\n총계\n</문서 글자>', [], { direct: true });
+    assert.deepEqual(JSON.parse(call.stdin).message.content, [{ type: 'text', text: '출장 정보\n\n<문서 글자>\n총계\n</문서 글자>' }]);
+    assert.equal(call.args[call.args.indexOf('--tools') + 1], '');
+    assert.ok(!call.args.includes('-p') || call.args[call.args.indexOf('-p') + 1].startsWith('--'), '글은 인자가 아니라 표준 입력으로 간다');
+    assert.deepEqual([call.args[call.args.indexOf('--effort') + 1], call.env.MAX_THINKING_TOKENS], ['low', process.env.MAX_THINKING_TOKENS]);
+    // 2026-10-05 에 잰 것으로 정한 것: CLI 의 꼭 필요하지 않은 통신(사용 통계·업데이트 확인)은 끈다 — 한 번에 1초 넘게 줄고, 그 통신이
+    // 늦을 때 호출이 같이 기다리지 않는다. 첨부 없는 호출은 60초까지만 기다린다.
+    assert.deepEqual([call.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, call.limitMs], ['1', 60_000]);
+    assert.equal(cliCall({ system: '지시문' }, '글', []).env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, '1', '다시 부르는 길도 같다');
+  });
+  await ta('표준 출력에는 프레임만 나간다 — 꾸러미가 찍는 것은 표준 오류로 돌린다', async () => {
+    const seen = { out: [], err: [] };
+    const out = { write: (c) => seen.out.push(c) };
+    const raw = guardStdout(out, { write: (c) => seen.err.push(c) });
+    out.write('Warning: 꾸러미의 경고\n');
+    raw('프레임');
+    assert.deepEqual(seen, { out: ['프레임'], err: ['Warning: 꾸러미의 경고\n'] });
+  });
+  await ta('글자 뽑기를 갈아 끼우지 않아도 던지지 않는다 — 풀 수 없는 첨부는 전처럼 파일째 가고 까닭이 남는다', async () => {
+    let seen;
+    await handle({ task: 'receipt', input: '출장 정보', files: [png] }, { log, run: async (_t, input, files, opts) => { seen = { input, files, opts }; return { data }; } });
+    assert.deepEqual(seen, { input: '출장 정보', files: [png], opts: { lean: false } });
+    assert.match(logged.at(-1).read[0], /^image\.png: 글자를 뽑지 못함\(.+\) — 파일째 보냄$/);
+  });
 }
 
 console.log('무엇을 남기나 (가짜 claude)');
@@ -228,11 +297,12 @@ console.log('파일');
     const now = new Date(2026, 8, 16, 12);
     const keep = path.join(tmp, 'prune');
     fs.mkdirSync(keep);
-    for (const f of ['2026-08-01.jsonl', '2026-09-01.jsonl', '2026-09-02.jsonl', '2026-09-16.jsonl', 'notes.txt']) {
+    // slow-날짜-시각.txt 는 느린 호출의 까닭을 짚으려고 남긴 claude CLI 의 디버그 기록이다 — 날짜별 기록과 같은 기한으로 지운다.
+    for (const f of ['2026-08-01.jsonl', '2026-09-01.jsonl', '2026-09-02.jsonl', '2026-09-16.jsonl', 'notes.txt', 'slow-2026-09-01-214346.txt', 'slow-2026-09-16-090000.txt']) {
       fs.writeFileSync(path.join(keep, f), '');
     }
     pruneLogs(keep, now);
-    assert.deepEqual(fs.readdirSync(keep).sort(), ['2026-09-02.jsonl', '2026-09-16.jsonl', 'notes.txt']);
+    assert.deepEqual(fs.readdirSync(keep).sort(), ['2026-09-02.jsonl', '2026-09-16.jsonl', 'notes.txt', 'slow-2026-09-16-090000.txt']);
   });
 }
 
@@ -277,6 +347,28 @@ console.log('실제 프로세스로 (크롬이 띄우는 것처럼)');
     assert.notEqual(line.exitCode, 0);
     assert.match(line.stderr, /bad option/);
     assert.equal(line.input, '내일 회의실');
+  });
+  // 2026-10-05 사용자 지정: "호출이 왜 느린지 테스트 해줘" — 80초가 걸린 호출이 한 번 있었는데 전체 시간만 남아 까닭을 못 짚었다.
+  await ta('claude 를 부른 차례마다 어느 길로 얼마나 걸렸는지 기록에 남는다 — 느린 호출이 어디서 걸렸는지 본다', async () => {
+    const line = JSON.parse(fs.readFileSync(path.join(dir, dayName(new Date())), 'utf8').trim().split('\n').at(-1));
+    // 글 작업도 빠른 길(direct)을 먼저 부르고, 안 되면 전의 길(tool)로 다시 부른다 — 둘 다 남는다.
+    assert.deepEqual(line.cli.map((c) => [c.path, typeof c.ms, typeof c.error]), [['direct', 'number', 'string'], ['tool', 'number', 'string']]);
+    assert.ok(line.cli[0].ms + line.cli[1].ms <= line.ms, '차례의 시간은 전체 시간 안이다');
+    assert.match(line.direct, /bad option/, '빠른 길이 왜 안 됐는지도 남는다');
+    assert.equal(fs.readdirSync(os.tmpdir()).filter((f) => /^krs-cli-\d+-\d+\.txt$/.test(f) && Date.now() - fs.statSync(path.join(os.tmpdir(), f)).mtimeMs < 60_000).length, 0, 'CLI 의 디버그 임시 파일을 남기지 않는다');
+  });
+  await ta('성공한 호출에는 글자 뽑기에 든 시간(textMs)과 claude 호출의 단계별 시간(cli)이 남는다', async () => {
+    const logged = [];
+    const cli = [{ path: 'direct', ms: 5600, startMs: 900, answerMs: 4700, resultMs: 4750, apiMs: 3700, selfMs: 3800, turns: 1, events: { 'system/init': 1, assistant: 1, result: 1 } }];
+    const r = await handle({ task: 'receipt', input: '출장 정보', files: [{ name: 'a.png', type: 'image/png', dataUrl: 'data:image/png;base64,AAAA' }] }, {
+      log: (e) => logged.push(e), text: async (input, files) => ({ input, files, read: ['a.png: OCR 10자'], lean: false }),
+      run: async () => ({ data: { total: 1 }, costUsd: 0.01, attach: 'direct', cli }),
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual([typeof logged[0].textMs, logged[0].cli, logged[0].attach, logged[0].read], ['number', cli, 'direct', ['a.png: OCR 10자']]);
+    // 글 작업에는 글자 뽑기가 없다
+    await handle({ task: 'parse', input: '내일 회의실' }, { log: (e) => logged.push(e), run: async () => ({ data: {}, costUsd: 0 }) });
+    assert.deepEqual(['textMs' in logged[1], 'cli' in logged[1]], [false, false]);
   });
 
   const logs = await roundTrip({ task: 'logs', limit: 10 });

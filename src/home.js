@@ -28,8 +28,10 @@
 // 사용자 지정). 아이콘 옆(숨기기 눈 아이콘 아래)에는 **계산서 보기**가 선다 — 그 출장의 여비계산서 화면을 새 탭으로 연다.
 // 가는 편·오는 편은 사전정산의 교통편 줄(하루에 한 번 읽어 LEGS_KEY 에 담는다)에 패널의 출장 카드에서 고른 것(PICKS_KEY)을 얹은 것이고,
 // 숙박·항공권·출장증빙은 보관함에 담긴 증빙(src/evidence.js 의 MARKS_KEY), 보냄은 패널의 여비증빙 송부 칸이 적는 보낸 기록(SENT_KEY)이다.
-// **여비계산서는 여기서 바꾸지 않는다** — 숙박 증빙·항공권을 사후정산에 올리는 것은 패널의 출장 카드가 한다(실제 계산서를 바꾸는
-// 일이고, 정산금액을 물어야 할 때가 있다).
+// **숙박 증빙·항공권은 넣는 즉시 사후정산에도 올린다**(같은 날 사용자 지정: "올리면 바로 사후등록 하게 해줘, 항공권도 동일하게" —
+// src/afterup.js). 패널의 출장 카드에 넣었을 때와 같은 차례다(사전정산이 미완료면 확정부터). **숙박비가 상한액을 넘으면 그 줄에서 묻는다**
+// (2026-10-05 사용자 지정) — `상한액으로`·`실제 금액으로`(상한액의 1.5배 이내면 부서장 승인) 버튼이 서고, 고르면 그 금액으로 올린다.
+// 원화 금액을 적어야 하거나(외화 문서) 못 올렸으면 "아직 안 올림" 표시가 남고, 패널의 출장 카드가 올린다.
 
 import { scanDays } from './site.js';
 import { scanCarDays } from './rentcar.js';
@@ -45,6 +47,7 @@ import { BACK_KEY, SENT_KEY, STAGES_KEY, backWeeksOf, settledBy, stagesFresh, st
 import { TRANSPORTS, tripDocFor, tripStage, tripIconState, legsOfRows, pickOfRow, describeTrans } from './travel.js';
 import { MARKS_KEY } from './evidence.js';
 import { INTAKE_LIMIT } from './intake.js';
+import { UP_BUSY_KEY, upBusy } from './afterup.js';
 
 /** 훑은 결과를 담는 storage 키. 패널은 예약·취소 뒤 이 키를 지워 카드에게 알린다. */
 export const CACHE_KEY = 'homeMine';
@@ -204,6 +207,18 @@ const MARK_ICON = {
   sent: mark('<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>'),
 };
 /**
+ * 숙박비가 상한액을 넘었을 때 그 줄에서 고르는 두 아이콘(2026-10-05 사용자 지정: "여기 설명은 필요 없고, 아이콘만 2개 주고 선택하라고해").
+ * cap 은 상한액으로(위가 막힌 화살표), real 은 실제 금액으로(원 기호)다. 금액과 승인 규칙은 버튼의 풍선말에 있다.
+ */
+const PICK_ICON = {
+  cap: mark('<path d="M5 4h14"/><path d="M12 20V9"/><path d="m7 13 5-5 5 5"/>'),
+  real: mark('<circle cx="12" cy="12" r="9"/><path d="m7.5 8.5 2 7 2.5-7 2.5 7 2-7"/><path d="M7 11.5h10"/>'),
+};
+/** 고르기를 기다릴 때 그 줄에 적는 말 — 이것과 아이콘 둘뿐이다. */
+const PICK_CUE = '정산금액 선택';
+/** 출장 줄의 알림에 붙는 두 버튼 — 펴 보기/접기(화살표)와 지우기(×). */
+const NOTE_ICON = { more: mark('<path d="m6 9 6 6 6-6"/>'), close: mark('<path d="M6 6l12 12M18 6 6 18"/>') };
+/**
  * 계산서 보기의 그림 — 패널의 출장 카드에서 여비계산서를 여는 버튼과 같다: 문서 안에 숫자(1 사전정산 · 2 사후정산)가 적혀 있고,
  * 색이 단계를 말한다(회색 미작성·대기, 녹색 작성 중, 파랑 완료 — src/travel.js 의 tripIconState). 영수증 그림(출장증빙)과 헷갈리지 않는다.
  */
@@ -215,7 +230,14 @@ const LEG_MARKS = [{ key: 'go', label: '가는 편' }, { key: 'back', label: '�
 /** 보관함의 이름표(src/after.js 의 evidenceOf) 가운데 숙박·항공권의 것. 나머지(당일출장 증명·출장지 영수증·증빙)는 출장증빙이다. */
 const LODGE_LABEL = '숙박 증빙';
 const FLIGHT_LABEL = '항공기 증명';
-const TODO_NOTE = '사후정산에는 아직 올리지 않았습니다(예약 패널의 출장 카드에서 올립니다)';
+// 넣는 즉시 사후정산에 올리므로(src/afterup.js) 이 말이 남는 것은 올리는 중이거나, 정산금액을 물어야 해서·못 올려서 남겨 둔 증빙이다.
+const TODO_NOTE = '사후정산에는 아직 올리지 않았습니다(홈을 열면 올립니다 — 정할 것이 있으면 이 줄에서 묻습니다)';
+/** 출장 기간과 안 맞아 알림 표시로 보관해 둔 증빙을 아이콘의 풍선말에 적는 말 — 확정은 예약 패널의 출장 카드(보관 중인 증빙)에서 한다. */
+const HELD_NOTE = '출장 기간과 안 맞아 확정을 기다리는 증빙(예약 패널의 출장 카드에서 확정)';
+/** 넣은 증빙이 출장 기간과 안 맞을 때 그 줄에 적는 꼬리말(2026-10-05 사용자 지정) — 올리지도 보내지도 않고 알림 표시로 보관한다. */
+export const HELD_HOW = '알림 표시로 보관했습니다(예약 패널의 출장 카드에서 확정하기 전에는 올리지도 보내지도 않습니다)';
+/** 올려 봤는데 안 된 증빙을 그 줄에서 다시 올려 보는 버튼(`다시 올리기`)의 풍선말 — 증빙을 다시 읽지 않는다(그때 읽은 기록으로 올린다). */
+const UP_HOW = '보관해 둔 증빙을 다시 읽지 않고 사후정산에 한 번 더 올려 봅니다';
 /** 보냄 아이콘(보내기)을 누르면 하는 일 — 실제로 나가는 것은 패널에 뜨는 팝업의 보내기를 눌렀을 때다. */
 const SEND_HOW = '누르면 예약 패널의 출장 카드(여비증빙 송부)를 열어 보낼 내용을 보여 줍니다';
 const SEND_AGAIN = '누르면 예약 패널의 여비증빙 송부 칸을 엽니다(다시 보내기)';
@@ -257,12 +279,17 @@ export function tripMarks({ doc = null, known = false, legs = null, picks = null
     const on = !!(pick || site);
     return { key, icon: MARK_ICON[t] ? t : 'train', on, title: on ? `${label} — ${what}` : `${label} 없음 — ${why}` };
   };
-  const files = (icon, name, list, hint) => {
+  const files = (icon, name, every, hint) => {
+    // 출장 기간과 안 맞아 알림 표시로 둔 것(warn)은 들어온 것으로 치지 않는다 — 확정하기 전에는 올리지도 보내지도 않는다.
+    const list = every.filter((k) => !k.warn);
+    const held = every.filter((k) => k.warn);
     const todo = list.some((k) => k.todo);
+    const heldNote = held.length ? `${HELD_NOTE} ${held.length}장 — ${held.map((k) => k.name).join(' · ')}` : '';
     return {
       key: icon, icon, on: list.length > 0,
-      title: list.length ? `${name} ${list.length}장 — ${list.map((k) => k.name).join(' · ')}${todo ? ` · ${TODO_NOTE}` : ''}`
-        : `${name} 없음 — ${hint} 이 줄에 끌어다 놓거나, 마우스를 올리고 붙여 넣으세요(Ctrl+V)`,
+      title: list.length ? `${name} ${list.length}장 — ${list.map((k) => k.name).join(' · ')}${todo ? ` · ${TODO_NOTE}` : ''}${heldNote ? ` · ${heldNote}` : ''}`
+        : heldNote ? `${name} 없음 — ${heldNote}`
+          : `${name} 없음 — ${hint} 이 줄에 끌어다 놓거나, 마우스를 올리고 붙여 넣으세요(Ctrl+V)`,
     };
   };
   const all = kept || [];
@@ -347,7 +374,8 @@ const STYLE = `${CARD_STYLE}
 .krs-mine .krs-mine-state { color: #607089; font-size: 11px; line-height: 1.2; white-space: nowrap; }
 .krs-mine .krs-mine-item.is-trip { flex: 0 1 auto; max-width: 500px; }
 .krs-mine .krs-mine-item.is-trip .krs-mine-main { flex: 0 1 auto; }
-.krs-mine .krs-mine-item.is-trip .krs-mine-sub, .krs-mine .krs-mine-item.is-trip .krs-mine-drop { width: 0; min-width: 100%; }
+.krs-mine .krs-mine-item.is-trip .krs-mine-sub, .krs-mine .krs-mine-item.is-trip .krs-mine-drop,
+.krs-mine .krs-mine-item.is-trip .krs-mine-ask, .krs-mine .krs-mine-item.is-trip .krs-mine-todo { width: 0; min-width: 100%; }
 .krs-mine .krs-mine-marks { display: grid; grid-template-columns: repeat(3, 16px); gap: 5px 8px; flex: none; margin-top: 1px; }
 .krs-mine .krs-mine-mark { display: inline-flex; color: #aab4c3; line-height: 1; }
 .krs-mine .krs-mine-mark.on { color: #1f4e9c; }
@@ -362,8 +390,21 @@ const STYLE = `${CARD_STYLE}
 .krs-mine .krs-mine-bill:hover { background: #e3eaf3; color: #1f4e9c; }
 .krs-mine .krs-mine-bill svg { display: block; pointer-events: none; }
 .krs-mine .krs-mine-drop { display: block; margin-top: 4px; color: #1f7a45; font-size: 11.5px; word-break: keep-all; overflow-wrap: anywhere; }
+.krs-mine .krs-mine-drop.open, .krs-mine .krs-mine-drop.shut { display: flex; align-items: flex-start; gap: 2px; }
+.krs-mine .krs-mine-drop-text { flex: 1; min-width: 0; }
+.krs-mine .krs-mine-drop.shut .krs-mine-drop-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.krs-mine .krs-mine-drop-btn { flex: none; display: inline-flex; margin: -1px 0 0; padding: 2px; border: 0; border-radius: 5px; background: transparent; color: #8a97ab; cursor: pointer; }
+.krs-mine .krs-mine-drop-btn:hover { background: #e3eaf3; color: #1f4e9c; }
+.krs-mine .krs-mine-drop-btn svg { display: block; width: 13px; height: 13px; pointer-events: none; }
+.krs-mine .krs-mine-drop.open .krs-mine-drop-btn[data-act="drop-more"] svg { transform: rotate(180deg); }
 .krs-mine .krs-mine-drop.busy { color: #607089; }
 .krs-mine .krs-mine-drop.error { color: #a7691a; }
+.krs-mine .krs-mine-ask, .krs-mine .krs-mine-todo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; color: #33415a; font-size: 11.5px; word-break: keep-all; overflow-wrap: anywhere; }
+.krs-mine .krs-mine-ask-q { flex: none; font-weight: 600; }
+.krs-mine .krs-mine-pick, .krs-mine .krs-mine-up { padding: 2px 9px; border: 1px solid #1f4e9c; border-radius: 11px; background: #fff; color: #1f4e9c; font: inherit; font-weight: 600; line-height: 1.5; cursor: pointer; }
+.krs-mine .krs-mine-pick { display: inline-flex; align-items: center; padding: 3px 10px; }
+.krs-mine .krs-mine-pick svg { display: block; pointer-events: none; }
+.krs-mine .krs-mine-pick:hover, .krs-mine .krs-mine-up:hover { background: #e3edfb; }
 .krs-mine .krs-card-btn[aria-pressed="true"] { border-color: #1f4e9c; background: #e3edfb; color: #1f4e9c; }
 .krs-mine .krs-mine-list:not(:empty, [hidden]) ~ .krs-mine-warn:not(:empty) { margin-top: 8px; }
 .krs-mine .krs-mine-warn:not(:empty) + .krs-mine-warn:not(:empty) { margin-top: 2px; }
@@ -455,7 +496,39 @@ function planHtml(it, i, today) {
     + `title="${escapeHtml(billTip)}" aria-label="${escapeHtml(billTip)}"${it.bill.seq ? '' : ' aria-disabled="true"'}>${billIcon(it.bill.digit)}</button>`;
   // 줄 끝의 누르는 것들 — 위에 숨기기(다녀온 출장만), 아래에 계산서 보기. 아이콘 두 줄과 높이를 맞춘다.
   const acts = it.marks ? `<span class="krs-mine-acts">${eye}${bill}</span>` : eye;
-  const drop = !it.drop?.text ? '' : `<span class="krs-mine-drop${it.drop.busy ? ' busy' : it.drop.error ? ' error' : ''}">${escapeHtml(it.drop.text)}</span>`;
+  // 숙박비가 상한액을 넘으면 넣은 자리에서 묻는다(2026-10-05 사용자 지정) — 상한액으로 / 실제 금액으로(상한액의 1.5배 이내면 부서장 승인).
+  // 고르면 그 금액으로 사후정산에 올린다. **설명은 적지 않고 아이콘 둘만 세운다**(같은 날 사용자 지정: "여기 설명은 필요 없고, 아이콘만
+  // 2개 주고 선택하라고해") — 묻는 말과 금액·승인 규칙(src/after.js 의 lodgeChoices, 패널의 카드와 같은 말)은 풍선말에 있다.
+  const asks = it.drop?.busy ? [] : (it.drop?.ask || []).filter((a) => !it.drop.settle?.[a.key]);
+  const askAll = it.drop?.ask || [];
+  const ask = asks.map((a) => '<span class="krs-mine-ask">'
+    + `<span class="krs-mine-ask-q" title="${escapeHtml(a.question)}">${PICK_CUE}${askAll.length > 1 ? ` ${askAll.indexOf(a) + 1}/${askAll.length}` : ''}</span>`
+    + a.choices.map((c) => {
+      const tip = escapeHtml(`${c.label}${c.note ? ` — ${c.note}` : ''}`);
+      return `<button type="button" class="krs-mine-pick" data-act="settle" data-doc="${escapeHtml(it.docNo)}" data-key="${escapeHtml(a.key)}" `
+        + `data-settle="${escapeHtml(c.settle)}" title="${tip}" aria-label="${tip}">${PICK_ICON[c.settle] || escapeHtml(c.label)}</button>`;
+    }).join('')
+    + '</span>').join('');
+  // 고르기를 기다리는 동안에는 넣은 증빙이 어떻게 됐는지의 글도 적지 않는다 — 못 받은 것(알릴 것)이 있을 때만 그 줄들을 남긴다.
+  const dropText = asks.length ? (it.drop.bad ? (it.drop.lines || []).join(' · ') : '') : it.drop?.text || '';
+  // 끝난 일의 알림은 **접고 펴고 지울 수 있다**(2026-10-05 사용자가 길게 적힌 알림을 보고: "알림 끄거나 보거나 제거 하는 기능이 안보임") —
+  // 접혀 있으면 한 줄(올린 것의 요약 it.drop.brief, 없으면 글의 앞머리)이고, 화살표로 펴서 전부 보고, × 로 지운다. 잘된 일의 알림은
+  // 접혀서 서고, 알릴 것이 있는 알림(못 받았다·못 올렸다)은 펴져서 선다. 하는 중이거나 금액을 묻는 중인 글에는 버튼이 없다.
+  const note = dropText && !asks.length && !it.drop.busy ? it.drop : null;
+  const open = note ? note.open ?? !!note.error : true;
+  const noteBtn = (act, label, icon) => `<button type="button" class="krs-mine-drop-btn" data-act="${act}" data-doc="${escapeHtml(it.docNo)}" `
+    + `title="${label}" aria-label="${label}"${act === 'drop-more' ? ` aria-expanded="${open}"` : ''}>${icon}</button>`;
+  const drop = !dropText ? '' : `<span class="krs-mine-drop${it.drop.busy ? ' busy' : it.drop.error ? ' error' : ''}${note ? (open ? ' open' : ' shut') : ''}">`
+    + `<span class="krs-mine-drop-text"${note && !open ? ` title="${escapeHtml(dropText)}"` : ''}>${escapeHtml(note && !open && note.brief ? note.brief : dropText)}</span>`
+    + (note ? noteBtn('drop-more', open ? '알림 접기' : '알림 펴 보기', NOTE_ICON.more) + noteBtn('drop-close', '알림 지우기', NOTE_ICON.close) : '')
+    + '</span>';
+  // 보관만 하고 사후정산에 아직 안 올린 증빙은 누르지 않아도 올린다(wantUp — 2026-10-05 사용자 지정: "왜 '사후정산에 올리기' 버튼이
+  // 아직 까지 있는 거지? 올리라고"). 버튼은 **올려 봤는데 안 됐을 때만** 선다(같은 날 사용자: "안올라가서 그 버튼이 있는거면 나두고") —
+  // 위에 까닭이 적혀 있고(it.drop), 다시 넣지 않고 한 번 더 올려 본다. 올리는 중이거나 금액을 묻는 중에는 두지 않는다.
+  const todo = it.drop && !it.drop.busy && !it.drop.ask?.length ? it.todo || [] : [];
+  const up = !todo.length ? '' : '<span class="krs-mine-todo">'
+    + `<button type="button" class="krs-mine-up" data-act="up" data-doc="${escapeHtml(it.docNo)}" title="${escapeHtml(`${todo.join(' · ')} — ${UP_HOW}`)}">다시 올리기</button>`
+    + '</span>';
   const cls = `krs-mine-item${now ? ' today' : ''}${it.past ? ' past' : ''}${it.tucked ? ' tucked' : ''}${it.marks ? ' is-trip' : ''}`;
   const doc = it.marks ? ` data-doc="${escapeHtml(it.docNo)}"` : '';
   const tip = `${past ? `${past} — ` : ''}${it.marks ? TRIP_TITLE : '누르면 예약 패널의 근태 탭을 엽니다'}`;
@@ -468,7 +541,7 @@ function planHtml(it, i, today) {
     + `<span class="krs-mine-when">${escapeHtml(when)}</span>`
     // 출장 줄의 내용은 날짜·시각이 끝나는 데까지만 적고 줄인다(같은 날 사용자 지정, CSS) — 전체는 풍선말에 있다.
     + (it.title ? `<span class="krs-mine-sub"><span class="krs-mine-what" title="${escapeHtml(it.title)}">${escapeHtml(it.title)}</span></span>` : '')
-    + drop
+    + drop + ask + up
     + '</span>' + marks + acts + '</li>';
 }
 
@@ -533,6 +606,17 @@ async function defaultPreDetail(seq) {
 async function defaultKeepEvidence(ask) {
   const r = await chrome.runtime.sendMessage({ type: 'evidenceKeep', ...ask });
   return r || { ok: false, error: '응답이 없습니다' };
+}
+
+/**
+ * 방금 넣은 숙박 증빙·항공권을 사후정산에 올리는 길(src/afterup.js). 홈은 eclass 와 같은 출처라 여비계산서 화면을 여기서 바로 읽고 쓴다
+ * — 읽은 기록과 파일은 배경이 보관함에서 꺼내 준다.
+ * @param {{docNo: string, row: object, me: string}} trip
+ * @param {(stage: string) => void} onStage
+ */
+async function defaultAfterUp(trip, onStage) {
+  const { afterUp } = await import('./afterup.js');
+  return afterUp(trip, { onStage });
 }
 
 /** 배경에게 보관함에 무엇이 들어 있는지 줄여 적어 달라고 한다(MARKS_KEY). 적어 둔 것이 없을 때와 새로고침 때다. */
@@ -644,6 +728,7 @@ export function createHomeCard(doc, deps = {}) {
   const listTrips = deps.listTrips || defaultListTrips;
   const preDetail = deps.preDetail || defaultPreDetail;
   const keepEvidence = deps.keepEvidence || defaultKeepEvidence;
+  const afterUp = deps.afterUp || defaultAfterUp;
   const syncMarks = deps.syncMarks || defaultSyncMarks;
   const openBill = deps.openBill || defaultOpenBill;
   const readFile = deps.readFile || defaultReadFile;
@@ -674,6 +759,8 @@ export function createHomeCard(doc, deps = {}) {
   const legTried = new Set();    // 이 화면에서 읽어 본 계산서 — 못 읽은 것을 그릴 때마다 다시 두드리지 않는다
   let marksAsked = false;        // 보관함을 줄여 적어 달라고 배경에 부탁했는가(적어 둔 것이 없을 때 한 번)
   const drops = new Map();       // 신청서 번호 → 방금 넣은 증빙이 어떻게 됐는지({ busy, error, text })
+  const tried = new Map();       // 이 화면에서 사후정산에 올려 본 출장 → 그때 남아 있던 증빙들 — 같은 증빙을 저절로 올리는 것은 한 번이다(안 되면 `다시 올리기`가 선다)
+  let upRun = null;              // 지금 도는 "남은 증빙 저절로 올리기"
   let hot = '';                  // 마우스가 올라가 있는 출장 줄의 신청서 번호 — 붙여넣기가 갈 곳이다
   let hidden = new Set();  // 숨긴 "다녀온 출장"의 신청서 번호(HIDDEN_KEY)
   let showAll = false;     // 전체 보기 — 숨긴 출장까지 보는 중인가(이 화면에서만, 기억하지 않는다)
@@ -726,6 +813,10 @@ export function createHomeCard(doc, deps = {}) {
     const stage = tripStage(row, stages.me);
     return { ...tripIconState(row, stage), seq: row.seq, trseq: me?.trseq || '', label: stage.label };
   }
+  /** 그 출장의 보관함에서 사후정산에 아직 안 올린 증빙(숙박 증빙·항공권)의 파일 이름들 — 보관함을 줄여 적은 것(MARKS_KEY)으로 안다. */
+  const todoOf = (docNo) => (kept?.[docNo] || []).filter((k) => k.todo).map((k) => k.name);
+  /** 그 출장에 지금 남아 있는 "아직 안 올림" 증빙들을 한 글로 — 올려 본 것과 같은 것인지 가린다. */
+  const todoSig = (docNo) => todoOf(docNo).sort().join(' | ');
   /** 그 출장 줄의 아이콘 여섯 — 지금 아는 것(여비계산서·사전정산의 편·패널에서 고른 편·보관함·보낸 기록)으로 짓는다. */
   function marksFor(p) {
     const row = docOf(p);
@@ -743,7 +834,7 @@ export function createHomeCard(doc, deps = {}) {
     const items = view.items || [];
     const every = (view.plans || []).map((p) => ({
       ...p, tucked: p.past && hidden.has(p.docNo),
-      ...(isTrip(p) ? { marks: marksFor(p), drop: drops.get(p.docNo) || null, bill: billFor(p) } : {}),
+      ...(isTrip(p) ? { marks: marksFor(p), drop: drops.get(p.docNo) || null, bill: billFor(p), todo: todoOf(p.docNo) } : {}),
     }));
     const tucked = every.filter((p) => p.tucked).length;
     if (!tucked) showAll = false;
@@ -765,6 +856,32 @@ export function createHomeCard(doc, deps = {}) {
     ui.toggle.hidden = !view.all.length;
     ui.head.classList.toggle('can-open', view.all.length > 0);
     setOpen(open);
+    wantUp();
+  }
+
+  /**
+   * 보관만 하고 사후정산에 아직 안 올린 증빙이 남은 출장은 **누르지 않아도 올린다**(2026-10-05 사용자 지정: "왜 '사후정산에 올리기' 버튼이
+   * 아직 까지 있는 거지? 올리라고") — 홈을 열어 그 출장 줄과 여비계산서가 읽히면 한 번, 넣은 직후와 같은 길로(resumeUp). 이미 올라가
+   * 있는 줄이면 표시만 걷히고, 숙박비가 상한액을 넘으면 그 줄에 고르는 아이콘이 선다. 안 되면 까닭과 `다시 올리기`가 남는다.
+   * 보이는 창에서만, 다른 창의 홈이 그 출장을 올리는 중(UP_BUSY_KEY)이 아닐 때만 한다 — 같은 줄이 두 번 올라가지 않게.
+   */
+  function wantUp() {
+    if (disposed || upRun || !alive() || !visible() || !stages?.rows) return;
+    // 올려 본 뒤에 새 증빙이 남게 됐으면(패널에서 확정했다 등) 그것은 다시 올려 본다 — 같은 증빙만 한 번이다. 알림을 지운 줄(closed)도 본다.
+    const next = view.all.find((p) => isTrip(p) && tried.get(p.docNo) !== todoSig(p.docNo) && (!drops.has(p.docNo) || drops.get(p.docNo).closed)
+      && todoOf(p.docNo).length && docOf(p));
+    if (!next) return;
+    let ran = false;
+    upRun = (async () => {
+      const busy = (await storage.get(UP_BUSY_KEY).catch(() => null))?.[UP_BUSY_KEY];
+      if (disposed || upBusy(busy, next.docNo, now()) || (drops.has(next.docNo) && !drops.get(next.docNo).closed)) return;
+      ran = true;
+      await resumeUp(next.docNo);
+    })().catch(() => {}).finally(() => {
+      upRun = null;
+      // 올려 본 뒤에는 다음 출장을 본다. 다른 창이 올리는 중이라 건너뛴 것은 이 창이 다시 보일 때 본다(onVisible).
+      if (ran && !disposed) wantUp();
+    });
   }
 
   function paintList(items) {
@@ -852,9 +969,26 @@ export function createHomeCard(doc, deps = {}) {
   }
 
   /**
+   * 이 출장의 증빙을 받아 올리는 중이라고 적거나 걷는다(UP_BUSY_KEY) — 그동안 패널의 출장 카드는 같은 증빙을 올리지 않는다.
+   * 받는 동안에는 단계마다 다시 적어 시각을 새로 한다 — 여러 장을 오래 읽어도 도중에 기한(UP_BUSY_MS)이 지나 풀리지 않는다.
+   * 기한이 지난 것은 같이 치운다 — 홈 탭이 도중에 닫히거나 새로고침되면 걷지 못한 값이 남는다(2026-10-04 실제로 남아 있었다).
+   */
+  async function markUp(docNo, on) {
+    try {
+      const all = { ...(await storage.get(UP_BUSY_KEY))?.[UP_BUSY_KEY] };
+      for (const key of Object.keys(all)) if (!upBusy(all, key, now())) delete all[key];
+      if (on) all[docNo] = now();
+      else delete all[docNo];
+      await storage.set({ [UP_BUSY_KEY]: all });
+    } catch { /* 못 적어도 증빙은 받는다 */ }
+  }
+
+  /**
    * 출장 줄에 놓거나 붙여 넣은 파일을 그 출장의 증빙으로 넣는다(2026-10-04 사용자 지정). 배경이 한 장씩 읽어 증빙으로 쓸 수 있는 것만
    * 보관함에 담고(src/intake.js), 어떻게 됐는지는 그 줄에 적는다 — 아이콘은 보관함이 바뀐 것(MARKS_KEY)을 보고 따라온다.
-   * 여비계산서는 바꾸지 않는다. 사후정산이 완료된 출장이면 읽지 않고 보낼 증빙으로 담는다(패널의 출장 카드와 같다).
+   * 숙박 증빙·항공권이 들어왔으면 다 담은 뒤 **곧바로 사후정산에 올린다**(같은 날 사용자 지정 — src/afterup.js). 여러 장을 한꺼번에
+   * 넣어도 올리는 것은 한 번이다(같은 숙박의 영수증·예약서, 가는 편·오는 편 항공권이 한 벌로 묶인다).
+   * 사후정산이 완료된 출장이면 읽지 않고 보낼 증빙으로 담는다(패널의 출장 카드와 같다).
    */
   async function takeFiles(it, fileList) {
     if (disposed || orphaned() || drops.get(it.docNo)?.busy) return;
@@ -872,6 +1006,8 @@ export function createHomeCard(doc, deps = {}) {
     const stage = tripStage(row, stages.me);
     const settled = stage.phase === 'post' && stage.done;
     const trip = { seq: row.seq, from: row.from, to: row.to, location: row.location || '' };
+    // 받는 동안 담아 둔 여비계산서 목록이 바뀔 수 있다(사후정산을 올리면 단계가 바뀐다) — 내 이름은 지금 것을 쥐고 간다.
+    const me = stages.me || '';
     const lines = [];
     const files = [];
     let bad = false;
@@ -887,19 +1023,108 @@ export function createHomeCard(doc, deps = {}) {
       }
     }
     let todo = false;
-    for (const [i, f] of files.entries()) {
-      say({ busy: true, text: `증빙을 ${settled ? '담는' : '읽는'} 중 (${i + 1}/${files.length}) — ${f.name}` });
-      const r = await keepEvidence({ docNo: it.docNo, trip, me: stages.me || '', file: f, settled }).catch((err) => ({ ok: false, error: err.message }));
-      if (disposed) return;
-      if (r?.ok && r.kept) {
-        lines.push(`${r.name}: ${r.label}으로 보관했습니다`);
-        todo ||= !!r.todo;
-      } else {
-        bad = true;
-        lines.push(r?.ok ? `${r.name}: ${r.label} ✗ — ${r.note}` : `${f.name}: ${r?.error || '응답이 없습니다'}`);
+    const lock = !settled && files.length > 0;
+    try {
+      for (const [i, f] of files.entries()) {
+        if (lock) await markUp(it.docNo, true);
+        if (disposed) return;
+        say({ busy: true, text: `증빙을 ${settled ? '담는' : '읽는'} 중 (${i + 1}/${files.length}) — ${f.name}` });
+        const r = await keepEvidence({ docNo: it.docNo, trip, me, file: f, settled }).catch((err) => ({ ok: false, error: err.message }));
+        if (disposed) return;
+        if (r?.ok && r.kept && r.warn) {
+          // 출장 기간의 것이 아닌 문서다 — 안 맞다고 알리고(2026-10-05 사용자 지정), 맞는 것만 아래에서 올린다.
+          bad = true;
+          lines.push(`${r.name}: ${r.label} ⚠ ${r.warn} — ${HELD_HOW}`);
+        } else if (r?.ok && r.kept) {
+          lines.push(`${r.name}: ${r.label}으로 보관했습니다`);
+          todo ||= !!r.todo;
+        } else {
+          bad = true;
+          lines.push(r?.ok ? `${r.name}: ${r.label} ✗ — ${r.note}` : `${f.name}: ${r?.error || '응답이 없습니다'}`);
+        }
       }
+      // 숙박 증빙·항공권이 들어왔다 — 곧바로 사후정산에 올린다(결과는 sendUp 이 줄에 적는다).
+      if (todo) {
+        await sendUp(it, { row, me, lines, bad });
+        return;
+      }
+    } finally {
+      if (lock) await markUp(it.docNo, false);
     }
-    say({ error: bad, text: `${lines.join(' · ')}${todo ? ' · 사후정산에는 예약 패널의 출장 카드에서 올립니다' : ''}` });
+    say({ error: bad, text: lines.join(' · ') });
+  }
+
+  /**
+   * 그 출장의 보관함에 "아직 안 올림"으로 담긴 숙박 증빙·항공권을 사후정산에 올리고(src/afterup.js) 어떻게 됐는지 줄에 적는다.
+   * 못 올렸으면 까닭을 적는다(패널의 출장 카드가 올린다). **숙박비가 상한액을 넘으면 올리지 않고 그 줄에 고르는 버튼을 세운다**
+   * (2026-10-05 사용자 지정 — 상한액으로 / 실제 금액으로) — 고르면(pickSettle) 고른 것(settle)을 들고 다시 여기로 온다.
+   * @param {object} it 카드의 출장 한 건
+   * @param {{row: object, me: string, lines: string[], bad?: boolean, settle?: Record<string, string>}} with
+   *   lines 는 그 줄에 이미 적은 말(무엇을 보관했는지), bad 는 그 가운데 못 받은 것이 있는가, settle 은 상한액을 넘는 숙박 줄에 고른 것
+   */
+  async function sendUp(it, { row, me, lines, bad = false, settle = {} }) {
+    const say = (state) => {
+      drops.set(it.docNo, state);
+      paint();
+    };
+    const head = lines.join(' · ');
+    tried.set(it.docNo, todoSig(it.docNo));
+    let up;
+    try {
+      await markUp(it.docNo, true);
+      if (disposed) return;
+      say({ busy: true, text: `${head} · 사후정산에 올리는 중...` });
+      up = await afterUp({ docNo: it.docNo, row, me, settle }, (s) => { if (!disposed) say({ busy: true, text: `${head} · ${s}` }); })
+        .catch((err) => ({ ok: false, text: `사후정산에 올리지 못했습니다 — ${err.message} · 예약 패널의 출장 카드에서 올려 주세요` }));
+    } finally {
+      await markUp(it.docNo, false);
+    }
+    if (disposed) return;
+    say({
+      error: bad || !up?.ok, text: [...lines, up?.text].filter(Boolean).join(' · '),
+      // 접어 둔 알림에 적을 한 줄 — 올렸으면 무엇을 올렸는지다(src/afterup.js 의 brief). 없으면 글의 앞머리가 한 줄로 보인다.
+      ...(up?.brief ? { brief: up.brief } : {}),
+      // 고르기를 기다리는 동안 쥐고 있을 것 — 고르면 이것으로 다시 올린다.
+      ...(up?.ask?.length ? { ask: up.ask, settle: {}, lines, bad } : {}),
+    });
+  }
+
+  /**
+   * 출장 줄의 고르는 버튼(상한액으로 / 실제 금액으로)을 눌렀다 — 물은 숙박 줄을 다 골랐으면 그 금액으로 사후정산에 올린다.
+   * 누른 것이 곧 올리라는 말이다(패널의 출장 카드에서 고를 때와 같다).
+   */
+  async function pickSettle(docNo, key, how) {
+    const state = drops.get(docNo);
+    const it = view.all.find((p) => p.docNo === docNo);
+    if (disposed || !it || !state?.ask?.some((a) => a.key === key) || state.busy) return;
+    const settle = { ...state.settle, [key]: how };
+    if (state.ask.some((a) => !settle[a.key])) {
+      drops.set(docNo, { ...state, settle });
+      paint();
+      return;
+    }
+    const row = docOf(it);
+    if (!row) return;
+    await sendUp(it, { row, me: stages?.me || '', lines: state.lines, bad: state.bad, settle });
+  }
+
+  /**
+   * 출장 줄의 `사후정산에 올리기`를 눌렀다 — 보관만 하고 아직 안 올린 증빙을 다시 읽지 않고 올린다(넣은 직후에 올리는 것과 같은 길이다).
+   * 숙박비가 상한액을 넘으면 여기서도 그 줄에 고르는 버튼이 선다.
+   */
+  async function resumeUp(docNo) {
+    const it = view.all.find((p) => p.docNo === docNo);
+    const names = todoOf(docNo);
+    if (disposed || !it || !names.length || drops.get(docNo)?.busy) return;
+    const row = docOf(it);
+    if (!row) {
+      drops.set(docNo, { error: true, text: stages?.rows
+        ? '여비계산서가 없는 출장이라 사후정산에 올리지 못했습니다 — 예약 패널의 근태 탭에서 여비계산서를 확인해 주세요'
+        : '여비계산서 목록을 아직 읽지 못해 사후정산에 올리지 못했습니다 — 새로고침한 뒤 다시 눌러 주세요' });
+      paint();
+      return;
+    }
+    await sendUp(it, { row, me: stages?.me || '', lines: [`보관해 둔 증빙 ${names.length}장`] });
   }
 
   /** 숨긴 출장을 바꿔 담고 다시 그린다. 목록에서 이미 빠진 출장(고른 기간이 지났다)의 번호는 버린다. */
@@ -1144,6 +1369,10 @@ export function createHomeCard(doc, deps = {}) {
     // 바꿨다, 다른 창의 홈이 사전정산의 교통편을 읽어 담았다.
     if (MARKS_KEY in changes) {
       kept = objectOr(changes[MARKS_KEY].newValue, null);
+      // 고르기를 기다리던 증빙이 그 사이에 올라갔거나 빠졌으면(패널의 출장 카드에서 했다) 고르는 버튼을 걷는다 — 올릴 것이 남아 있지 않다.
+      for (const [docNo, state] of drops) {
+        if (state.ask?.length && !state.busy && !(kept?.[docNo] || []).some((k) => k.todo)) drops.set(docNo, { error: !!state.bad, text: state.lines.join(' · ') });
+      }
       paint();
     }
     if (PICKS_KEY in changes) {
@@ -1178,6 +1407,8 @@ export function createHomeCard(doc, deps = {}) {
       needPlans = false;
       runPlans();
     }
+    // 안 보이는 사이에는 남은 증빙을 올리지 않았다 — 보이면 올린다.
+    wantUp();
   };
   doc.addEventListener('visibilitychange', onVisible);
 
@@ -1217,6 +1448,24 @@ export function createHomeCard(doc, deps = {}) {
     }
     // 출장 줄의 보내기(종이비행기) — 패널에 그 출장 카드의 여비증빙 송부 칸을 열어 달라는 부탁을 남기고 연다. 실제로 나가는 것은
     // 패널에 뜨는 보낼 내용 팝업의 보내기를 눌렀을 때다(받는 사람·과제·계정과 보관함은 패널이 안다).
+    // 출장 줄의 고르는 버튼 — 상한액을 넘는 숙박을 어느 금액으로 정산할지(넣은 자리에서 묻는다). 다 골랐으면 사후정산에 올린다.
+    if (act === 'settle') {
+      const btn = target.closest('[data-act="settle"]');
+      await pickSettle(docNo, btn.dataset.key, btn.dataset.settle);
+      return;
+    }
+    // 출장 줄의 `다시 올리기` — 올려 봤는데 안 된 증빙을 한 번 더 올려 본다(누른 것이 곧 올리라는 말이다).
+    if (act === 'up') { await resumeUp(docNo); return; }
+    // 출장 줄의 알림 — 화살표로 펴 보거나 접고, × 로 지운다(2026-10-05 사용자 지정). 이 화면의 일이라 사이트에는 아무것도 가지 않는다.
+    if (act === 'drop-more' || act === 'drop-close') {
+      const state = drops.get(docNo);
+      if (!state || state.busy || state.ask?.length) return;
+      // 지워도 안 올린 증빙이 남아 있으면 `다시 올리기`는 남긴다(글 없는 자리만 둔다).
+      if (act === 'drop-close') { if (todoOf(docNo).length) drops.set(docNo, { closed: true }); else drops.delete(docNo); }
+      else drops.set(docNo, { ...state, open: !(state.open ?? !!state.error) });
+      paint();
+      return;
+    }
     if (act === 'send') {
       const trip = view.all.find((p) => p.docNo === docNo);
       if (!trip) return;

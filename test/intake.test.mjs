@@ -1,5 +1,6 @@
 // 홈의 WORKSPACE 카드에서 넣은 증빙을 받는 길(src/intake.js) — 읽어서 무엇의 증명인지 가리고, 쓸 수 있는 것만 보관함에 담는다.
-// 여비계산서는 바꾸지 않는다: 사후정산에도 올라가야 하는 증빙(숙박·항공권)에는 읽은 기록과 "아직 안 올림" 표시를 붙여 둔다.
+// 받는 길은 여비계산서를 바꾸지 않는다: 사후정산에도 올라가야 하는 증빙(숙박·항공권)에는 읽은 기록과 "아직 안 올림" 표시를 붙여 둔다
+// — 홈 카드가 이어서 올리고 표시를 걷는다(src/afterup.js, test/afterup.test.mjs).
 // Claude 와 보관함(IndexedDB)은 가짜다.
 import assert from 'node:assert/strict';
 import { intakeEvidence, uniqueName, INTAKE_LIMIT, PLAIN_LABEL } from '../src/intake.js';
@@ -76,6 +77,34 @@ await ta('증빙으로 쓸 수 없는 문서는 담지 않고 까닭을 답한�
   assert.match(ktx.note, /증빙으로 받지 않습니다/);
   assert.deepEqual([await store.list('TR-1'), mirrored], [[], []]);
 });
+// 2026-10-05 사용자 지정: "출장 기간동안의 내용이 아니면 알림을 줘 안맞다고, 맞는것만 선별취급 해서 올리고 해당 없는거는 문서보관에 알림표지 하고
+// 확정 해주기 전까지는 보내기 해도 같이 보내지 말고"
+await ta('출장 기간의 것이 아닌 문서는 버리지 않고 알림 표시를 붙여 담는다 — 까닭을 답하고, "아직 안 올림"은 붙이지 않는다(올리지 않는다). 읽은 기록은 같이 둔다', async () => {
+  const { store, mirrored } = fakeStore();
+  const read = fakeRead({
+    ...RECORDS,
+    'jeju.png': { docType: 'lodging_receipt', summary: '제주호텔 1박', vendor: '제주호텔', payDate: '2026-09-21', checkIn: '2026-09-20', checkOut: '2026-09-21', total: 90000, currency: 'KRW' },
+    'late.png': { docType: 'flight_ticket', summary: '김해→김포', flightDate: '2026-09-20', total: 89000 },
+    'old.png': { docType: 'other_receipt', summary: '점심', payDate: '2026-09-01', total: 9000, atDestination: true },
+  });
+  const jeju = await intakeEvidence(ask(png('jeju.png')), { store, read });
+  assert.deepEqual(jeju, { ok: true, kept: true, name: 'jeju.png', label: '숙박 증빙', note: '', warn: '묵은 기간(9/20~9/21)이 출장 기간(9/9~9/10) 밖입니다', summary: '제주호텔 1박', todo: false });
+  const late = await intakeEvidence(ask(png('late.png')), { store, read });
+  const old = await intakeEvidence(ask(png('old.png')), { store, read });
+  assert.deepEqual([late.kept, late.label, late.warn, late.todo], [true, '항공기 증명', '탑승일(9/20)이 출장 기간(9/9~9/10) 밖입니다', false]);
+  assert.deepEqual([old.kept, old.label, old.warn, old.todo], [true, '출장지 영수증', '결제일(9/1)이 출장 기간(9/9~9/10) 밖입니다', false]);
+  // 맞는 것은 전처럼 담긴다 — 맞는 것만 올라간다
+  const hotel = await intakeEvidence(ask(png('hotel.png')), { store, read });
+  assert.deepEqual([hotel.warn, hotel.todo], [undefined, true]);
+  assert.deepEqual((await store.list('TR-1')).map((k) => [k.name, k.label, !!k.warn, !!k.todo, !!k.record]),
+    [['jeju.png', '숙박 증빙', true, false, true], ['late.png', '항공기 증명', true, false, true], ['old.png', '출장지 영수증', true, false, true], ['hotel.png', '숙박 증빙', false, true, true]]);
+  assert.deepEqual(mirrored.at(-1)['TR-1'].map((k) => [k.name, k.warn || '', !!k.todo]), [
+    ['jeju.png', '묵은 기간(9/20~9/21)이 출장 기간(9/9~9/10) 밖입니다', false], ['late.png', '탑승일(9/20)이 출장 기간(9/9~9/10) 밖입니다', false],
+    ['old.png', '결제일(9/1)이 출장 기간(9/9~9/10) 밖입니다', false], ['hotel.png', '', true]], '홈 카드도 알림 표시를 본다');
+  // 확정하면 표시가 걷히고, 숙박 증빙은 올릴 것이 된다
+  await store.confirm('TR-1', 'jeju.png', { todo: true });
+  assert.deepEqual((await store.list('TR-1')).filter((k) => k.name === 'jeju.png').map((k) => [!!k.warn, k.todo, k.record.confirmed]), [[false, true, true]]);
+});
 await ta('사후정산이 완료된 출장이면 읽지 않고 보낼 증빙으로 담는다 — 패널 송부 칸의 "증빙 넣기"와 같다', async () => {
   const { store } = fakeStore();
   const read = fakeRead(RECORDS);
@@ -127,6 +156,18 @@ await ta('담거나 뺄 때마다 보관함 전체에서 다시 지어 적는다
   assert.deepEqual(Object.keys(mirrored.at(-1)), ['TR-1']);
   assert.deepEqual(await store.sync(), mirrored.at(-1), '배경이 홈 카드의 부탁으로 한 번 통째로 적어 줄 때도 같은 것이다');
   assert.equal(MARKS_KEY, 'evidenceMarks');
+});
+await ta('홈 카드가 사후정산에 올린 증빙은 표시만 걷는다(settle) — 읽은 기록과 담은 차례는 그대로이고, 줄여 적은 것에서도 표시가 빠진다', async () => {
+  const { store, mirrored } = fakeStore();
+  const read = fakeRead(RECORDS);
+  await intakeEvidence(ask(png('hotel.png')), { store, read });
+  await intakeEvidence(ask(png('lunch.png')), { store, read });
+  await intakeEvidence(ask(png('ticket.png')), { store, read });
+  assert.equal(await store.settle('TR-1', ['hotel.png', 'lunch.png', '없는것.png']), 1, '표시가 있던 것만 센다');
+  assert.deepEqual((await store.list('TR-1')).map((k) => [k.name, !!k.todo, !!k.record]), [['hotel.png', false, true], ['lunch.png', false, false], ['ticket.png', true, true]]);
+  assert.deepEqual(mirrored.at(-1)['TR-1'], [{ name: 'hotel.png', label: '숙박 증빙' }, { name: 'lunch.png', label: '출장지 영수증' }, { name: 'ticket.png', label: '항공기 증명', todo: true }]);
+  const n = mirrored.length;
+  assert.deepEqual([await store.settle('TR-1', ['hotel.png']), await store.settle('TR-2', ['ticket.png']), mirrored.length], [0, 0, n], '걷을 것이 없으면 다시 적지 않는다');
 });
 await ta('줄여 적지 못해도 담고 빼는 일은 된 것이다', async () => {
   const backend = fakeBackend();
@@ -182,6 +223,20 @@ console.log('배경: 홈 카드 대신 증빙을 받는다');
     const { answer } = await send({ type: 'evidenceMarks' });
     assert.equal(answer.ok, false);
     assert.match(answer.error, /보관함\(IndexedDB\)이 없습니다/);
+  });
+  await ta('홈 카드가 사후정산에 올릴 때 보관함에 하는 부탁(evidenceGiven·evidenceFile·evidenceDone)도 받는다 — 못 하면 던지지 않고 까닭을 답한다', async () => {
+    for (const msg of [{ type: 'evidenceGiven', docNo: 'TR-1' }, { type: 'evidenceFile', docNo: 'TR-1', name: 'hotel.png' }, { type: 'evidenceDone', docNo: 'TR-1', names: ['hotel.png'] }]) {
+      const { answer, calls } = await send(msg);
+      assert.deepEqual([answer.ok, calls.native.length], [false, 0], msg.type);
+      assert.match(answer.error, /보관함\(IndexedDB\)이 없습니다/, msg.type);
+    }
+  });
+  await ta('홈 카드가 여비계산서에 한 일(tripLog)을 활동 기록에 남긴다', async () => {
+    const { answer, data } = await send({ type: 'tripLog', ok: true, text: '여비계산서(사후정산) 작성: 145580 · 숙박 고양호텔 1박 143,000원 · 홈 카드에서 넣은 증빙', data: { seq: '145580', files: ['hotel.png'] } });
+    assert.deepEqual(answer, { ok: true });
+    const last = data.activityLog.at(-1);
+    assert.deepEqual([last.kind, last.ok, last.data.files], ['trip', true, ['hotel.png']]);
+    assert.match(last.text, /^여비계산서\(사후정산\) 작성: 145580 · /);
   });
 }
 

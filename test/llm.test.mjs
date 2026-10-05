@@ -215,6 +215,11 @@ console.log('근태 폼 말로 채우기');
     const body = sent.at(-1);
     assert.equal(body.output_config.format.type, 'json_schema');
     assert.ok(body.output_config.format.schema.required.includes('reply'));
+    // 2026-10-05 사용자 지정: "모두 opus 5.5로 변경해줘" — 다리와 같은 모델·같은 깊이다. Opus 5.5 가 400 으로 받지 않는 칸
+    // (temperature·thinking 끄기/토큰 상한·억지 tool_choice·미리 적은 assistant 글)은 보내지 않고, 생각까지 드는 답의 한도는 넉넉히 준다.
+    assert.deepEqual([body.model, body.output_config.effort, body.max_tokens], ['claude-opus-5-5', 'low', 16000]);
+    assert.deepEqual(['temperature', 'top_p', 'top_k', 'thinking', 'tool_choice'].filter((k) => k in body), []);
+    assert.deepEqual(body.messages.map((m) => m.role), ['user']);
   });
   await ta('틀린 값은 폼에 얹지 않고 무엇을 뺐는지 알린다 — 달력에 없는 날, 없는 갈래', async () => {
     globalThis.chrome = { runtime: { sendNativeMessage: async () => ({ ok: true, data: { kind: 'leave', sub: 'XX', dateFrom: '2026-02-30', start: '9:00', reply: '휴가로 채웠습니다.', fn: 'apprRequest' } }) } };

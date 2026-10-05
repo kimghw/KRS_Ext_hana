@@ -66,6 +66,14 @@ export const TRAVEL_RULES = {
       "currency": "KRW",
       "link_site_fee": true
     }
+  },
+  "lodging": {
+    "over_cap": {
+      "approve_rate": 1.5,
+      "approver": "부서장",
+      "source": "사용자 지정(2026-10-05) — 규정 원문은 확인하지 못함",
+      "checked": null
+    }
   }
 };
 

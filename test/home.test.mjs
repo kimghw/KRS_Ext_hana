@@ -9,6 +9,7 @@ import {
   homeEnabled, CACHE_KEY, JUMP_KEY, ENABLE_KEY, ROOT_ID, HIDDEN_KEY, FOLD_KEY, LEGS_KEY, PICKS_KEY, tripMarks, legsSlim,
 } from '../src/home.js';
 import { MARKS_KEY } from '../src/evidence.js';
+import { UP_BUSY_KEY } from '../src/afterup.js';
 import { PLANS_KEY } from '../src/plans.js';
 import { BACK_KEY, SENT_KEY, STAGES_KEY } from '../src/settling.js';
 import { AuthError } from '../src/net.js';
@@ -167,11 +168,34 @@ function fakeKeep(answer = {}, { storage = null } = {}) {
   return fn;
 }
 
+/**
+ * 방금 넣은 증빙을 사후정산에 올리는 길 흉내(src/afterup.js). answer 가 답이고(함수면 부탁을 보고 답한다), calls 에 부탁을, busy 에
+ * 그때 적혀 있던 "올리는 중" 표시(UP_BUSY_KEY)를 적는다. storage 를 주면 진짜처럼 올린 증빙의 "아직 안 올림" 표시를 걷는다(MARKS_KEY).
+ */
+function fakeUp(answer = { ok: true, sent: true, hold: false, text: '사후정산을 올렸습니다 — 숙박 고양호텔 1박 110,000원' }, { storage = null } = {}) {
+  const fn = async (trip, onStage) => {
+    fn.calls.push(trip);
+    fn.busy.push(structuredClone(storage?.data[UP_BUSY_KEY] || null));
+    onStage('여비계산서(사후정산)를 올리는 중...');
+    await tick(5);
+    const r = typeof answer === 'function' ? answer(trip) : answer;
+    if (r.sent && storage?.data[MARKS_KEY]?.[trip.docNo]) {
+      const marks = structuredClone(storage.data[MARKS_KEY]);
+      marks[trip.docNo] = marks[trip.docNo].map(({ todo: _todo, ...k }) => k);
+      await storage.set({ [MARKS_KEY]: marks });
+    }
+    return r;
+  };
+  fn.calls = [];
+  fn.busy = [];
+  return fn;
+}
+
 /** 카드를 붙인다. 바깥 것은 전부 가짜다. */
 async function mount({
   storage = fakeStorage(), rooms = fakeScan('room'), cars = fakeScan('car'), plans = fakePlans(), trips = fakeTrips(),
   now = () => NOW, visible = () => true, openPanel = null, doc = homeDoc(), debounceMs = 5, alive = () => true,
-  pre = fakePre(), keep = fakeKeep({}, { storage }), marks = null,
+  pre = fakePre(), keep = fakeKeep({}, { storage }), up = fakeUp(undefined, { storage }), marks = null,
 } = {}) {
   const panelCalls = [];
   const syncCalls = [];
@@ -180,7 +204,7 @@ async function mount({
     storage, onChanged: storage.onChanged, now, today: () => TODAY,
     scanRooms: rooms, scanCars: cars, loadPlans: plans, listTrips: trips, visible, debounceMs, alive,
     openPanel: openPanel || (async () => { panelCalls.push(1); return { ok: true }; }),
-    preDetail: pre, keepEvidence: keep, readFile: async (f) => f.dataUrl || `data:${f.type};base64,AAAA`,
+    preDetail: pre, keepEvidence: keep, afterUp: up, readFile: async (f) => f.dataUrl || `data:${f.type};base64,AAAA`,
     // 출장 줄의 `계산서 보기`가 여는 계산서(번호, 내 출장자 번호).
     openBill: async (seq, trseq) => { billCalls.push([seq, trseq]); },
     // 배경에게 보관함을 줄여 적어 달라는 부탁. marks 를 주면 그것이 보관함에 있는 것이다.
@@ -189,7 +213,7 @@ async function mount({
   const root = doc.getElementById(ROOT_ID);
   const text = (role) => (root?.querySelector(`[data-role="${role}"]`)?.textContent || '').trim();
   return {
-    ctl, doc, root, storage, rooms, cars, plans, trips, panelCalls, syncCalls, billCalls, pre, keep, text,
+    ctl, doc, root, storage, rooms, cars, plans, trips, panelCalls, syncCalls, billCalls, pre, keep, up, text,
     items: () => [...(root?.querySelectorAll('li.krs-mine-item') || [])],
   };
 }
@@ -773,6 +797,21 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
   const filesOfLi = (li) => marksOfLi(li).slice(2, 5);
   const markOf = (li, key) => li.querySelector(`.krs-mine-mark.${key}`);
   const tripLis = (m) => m.items().filter((li) => li.classList.contains('is-trip'));
+  /** 조건이 될 때까지 기다린다 — 정해 둔 시간만 기다리면 테스트 파일 여럿이 같이 돌 때 늦어져 어긋난다. */
+  const until = async (cond, what = '조건', ms = 3000) => {
+    const t0 = Date.now();
+    while (!cond()) {
+      if (Date.now() - t0 > ms) throw new Error(`기다리다 시간이 다 됐습니다 — ${what}`);
+      await tick(5);
+    }
+  };
+  /** 그 출장 줄에 넣은 증빙의 처리가 끝날 때까지(줄에 결과가 적히고 "…중"이 아닐 때까지) 기다린다. */
+  // 정산금액을 고르기를 기다리는 줄에는 글 없이 고르는 아이콘만 선다 — 그것도 끝난 것이다.
+  const landed = (m, i = 0) => until(() => {
+    const li = tripLis(m)[i];
+    const n = li?.querySelector('.krs-mine-drop');
+    return (!!n && !n.classList.contains('busy')) || !!li?.querySelector('.krs-mine-ask');
+  }, '증빙 처리');
   const file = (name, type = 'image/png', size = 1000) => ({ name, type, size, dataUrl: `data:${type};base64,${Buffer.from(name).toString('base64')}` });
   /** 파일을 끌어다 놓는(또는 끌고 지나가는) 이벤트. */
   const drag = (m, node, files, type = 'drop') => {
@@ -788,6 +827,8 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     return e;
   };
   const hover = (m, node) => node.dispatchEvent(new m.doc.defaultView.Event('mouseover', { bubbles: true }));
+  /** 보관만 하고 사후정산에 아직 안 올린 증빙을 그 줄에서 올리는 버튼(`사후정산에 올리기`). */
+  const upBtn = (li) => li.querySelector('.krs-mine-todo [data-act="up"]');
 
   t('아이콘 여섯: 가는 편·오는 편은 사전정산의 줄에 패널에서 고른 것을 얹은 것이고, 숙박·항공권·출장증빙은 보관함의 증빙, 보냄은 보낸 기록이다', () => {
     const none = tripMarks({});
@@ -809,7 +850,7 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
       [['go', 'train', true], ['back', 'plane', true], ['lodge', 'lodge', true], ['ticket', 'ticket', true], ['proof', 'proof', true], ['sent', 'sent', true]]);
     assert.deepEqual(full.map((x) => x.title), [
       '가는 편 — KTX 부산→행신 일반석 59,800원', '오는 편 — 비행기 특실 · 예약 패널에서 고름',
-      '숙박 증빙 1장 — hotel.png · 사후정산에는 아직 올리지 않았습니다(예약 패널의 출장 카드에서 올립니다)', '항공권 1장 — a.pdf', '출장증빙 2장 — lunch.png · etc.png',
+      '숙박 증빙 1장 — hotel.png · 사후정산에는 아직 올리지 않았습니다(홈을 열면 올립니다 — 정할 것이 있으면 이 줄에서 묻습니다)', '항공권 1장 — a.pdf', '출장증빙 2장 — lunch.png · etc.png',
       '증빙 보냄 — 9/17 14:05 · 쪽지 · 홍길동 · RND-01 · 누르면 예약 패널의 여비증빙 송부 칸을 엽니다(다시 보내기)',
     ]);
     assert.match(tripMarks({ sent: {} })[5].title, /^증빙 보냄 —  · 누르면/, '보낸 기록에 적힌 것이 없어도 보낸 것이다');
@@ -946,7 +987,7 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     await tick(40);
     assert.deepEqual([again.syncCalls.length, filesOfLi(again.items()[0])], [1, [['lodge', true], ['ticket', false], ['proof', false]]]);
   });
-  await ta('출장 줄에 파일을 끌어다 놓으면 그 출장의 증빙으로 들어간다 — 배경이 한 장씩 받고, 결과를 줄에 적고, 아이콘이 파랗게 된다. 패널은 열지 않는다', async () => {
+  await ta('출장 줄에 파일을 끌어다 놓으면 그 출장의 증빙으로 들어간다 — 배경이 한 장씩 받고, 숙박 증빙은 곧바로 사후정산에 올리고, 결과를 줄에 적고, 아이콘이 파랗게 된다. 패널은 열지 않는다', async () => {
     const storage = fakeStorage();
     const keep = fakeKeep({
       'lunch.png': { ok: true, kept: true, name: 'lunch.png', label: '출장지 영수증', note: '', todo: false },
@@ -957,20 +998,307 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     assert.deepEqual([over.defaultPrevented, over.dataTransfer.dropEffect, tripLis(m)[0].classList.contains('over')], [true, 'copy', true]);
     const e = drag(m, tripLis(m)[0].querySelector('.krs-mine-when'), [file('hotel.png'), file('lunch.png'), file('ktx.png')]);
     assert.equal(e.defaultPrevented, true);
-    await tick(40);
+    await landed(m);
     assert.deepEqual(keep.calls.map((c) => [c.docNo, c.file.name, c.settled, c.me]), [['X-4', 'hotel.png', false, '김거화'], ['X-4', 'lunch.png', false, '김거화'], ['X-4', 'ktx.png', false, '김거화']]);
     assert.deepEqual(keep.calls[0].trip, { seq: '501', from: '2026-09-10', to: '2026-09-11', location: '경기도 고양시' }, '여비계산서의 기간·출장지를 알려 준다(출장지에서 결제했는지 가린다)');
     assert.match(keep.calls[0].file.dataUrl, /^data:image\/png;base64,/);
+    assert.deepEqual(m.up.calls.map((c) => [c.docNo, c.row.seq, c.me]), [['X-4', '501', '김거화']], '여러 장을 넣어도 사후정산에 올리는 것은 다 담은 뒤 한 번이다');
     const li = tripLis(m)[0];
     assert.equal(li.querySelector('.krs-mine-drop').textContent,
       'hotel.png: 숙박 증빙으로 보관했습니다 · lunch.png: 출장지 영수증으로 보관했습니다 · ktx.png: 기차·버스표 ✗ — 증빙으로 받지 않습니다(KTX 는 운임표의 정가로 넣습니다)'
-      + ' · 사후정산에는 예약 패널의 출장 카드에서 올립니다');
+      + ' · 사후정산을 올렸습니다 — 숙박 고양호텔 1박 110,000원');
     assert.ok(li.querySelector('.krs-mine-drop').classList.contains('error'), '못 받은 것이 있으면 그렇게 보인다');
     assert.deepEqual(filesOfLi(li), [['lodge', true], ['ticket', false], ['proof', true]]);
-    assert.match(markOf(li, 'lodge').title, /사후정산에는 아직 올리지 않았습니다/);
+    assert.equal(markOf(li, 'lodge').title, '숙박 증빙 1장 — hotel.png', '올렸으므로 "아직 안 올림"이 붙지 않는다');
     assert.equal(tripLis(m)[1].querySelector('.krs-mine-drop'), null, '다른 출장 줄에는 적지 않는다');
     assert.equal(m.panelCalls.length, 0);
     assert.equal(m.storage.data[JUMP_KEY], undefined);
+  });
+  await ta('받아서 올리는 동안에는 "올리는 중"이라고 적어 둔다 — 패널의 출장 카드가 같은 증빙을 그 사이에 올리지 않는다. 끝나면 걷는다', async () => {
+    const storage = fakeStorage();
+    let during = null;
+    let atUp = null;
+    let release = null;
+    const keep = async (ask) => { during = structuredClone(storage.data[UP_BUSY_KEY]); return { ok: true, kept: true, name: ask.file.name, label: '항공기 증명', note: '', todo: true }; };
+    // 올리는 길은 테스트가 놓아 줄 때까지 붙들고 있다 — 그 사이의 줄과 표시를 본다.
+    const up = async (trip, onStage) => {
+      atUp = structuredClone(storage.data[UP_BUSY_KEY]);
+      onStage('여비계산서(사후정산)를 올리는 중...');
+      await new Promise((r) => { release = r; });
+      return { ok: true, sent: true, hold: false, text: '사후정산을 올렸습니다 — 비행기 2026-09-10 김해→김포 89,000원' };
+    };
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), keep, up });
+    drag(m, tripLis(m)[0], [file('ticket.pdf', 'application/pdf')]);
+    await until(() => !!release, '올리는 길에 닿기');
+    assert.deepEqual([during, atUp, storage.data[UP_BUSY_KEY]], [{ 'X-4': NOW }, { 'X-4': NOW }, { 'X-4': NOW }], '읽기 시작할 때부터 올리기가 끝날 때까지다');
+    const note = tripLis(m)[0].querySelector('.krs-mine-drop');
+    assert.deepEqual([note.textContent, note.classList.contains('busy')], ['ticket.pdf: 항공기 증명으로 보관했습니다 · 여비계산서(사후정산)를 올리는 중...', true]);
+    release();
+    await landed(m);
+    assert.deepEqual(storage.data[UP_BUSY_KEY], {});
+    assert.equal(tripLis(m)[0].querySelector('.krs-mine-drop').textContent, 'ticket.pdf: 항공기 증명으로 보관했습니다 · 사후정산을 올렸습니다 — 비행기 2026-09-10 김해→김포 89,000원');
+  });
+  await ta('걷지 못하고 남은 "올리는 중"(홈 탭이 도중에 닫혔다)은 기한이 지나면 다음에 적을 때 치운다 — 다른 창의 홈이 방금 적은 것은 둔다', async () => {
+    const storage = fakeStorage({ [UP_BUSY_KEY]: { 'OLD-1': NOW - 10 * 60_000, 'T-9': NOW - 1000 } });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]) });
+    drag(m, tripLis(m)[0], [file('hotel.png')]);
+    await landed(m);
+    assert.deepEqual([m.up.busy, storage.data[UP_BUSY_KEY]], [[{ 'T-9': NOW - 1000, 'X-4': NOW }], { 'T-9': NOW - 1000 }]);
+  });
+  await ta('사후정산에 못 올렸거나 원화 금액을 적어야 하면 그 까닭을 줄에 적는다 — 증빙은 보관돼 있고 "아직 안 올림"이 남는다', async () => {
+    const storage = fakeStorage();
+    const up = fakeUp({ ok: false, sent: false, hold: true, text: '사후정산에는 올리지 않았습니다 — 외화 문서라 원화로 결제한 금액을 적어야 합니다 · 예약 패널의 출장 카드에서 올려 주세요' }, { storage });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up });
+    drag(m, tripLis(m)[0], [file('hotel.png')]);
+    await landed(m);
+    const note = tripLis(m)[0].querySelector('.krs-mine-drop');
+    assert.deepEqual([note.textContent, note.classList.contains('error')],
+      ['hotel.png: 숙박 증빙으로 보관했습니다 · 사후정산에는 올리지 않았습니다 — 외화 문서라 원화로 결제한 금액을 적어야 합니다 · 예약 패널의 출장 카드에서 올려 주세요', true]);
+    assert.match(markOf(tripLis(m)[0], 'lodge').title, /사후정산에는 아직 올리지 않았습니다/);
+    assert.equal(tripLis(m)[0].querySelector('.krs-mine-ask'), null, '물을 것(ask)이 없으면 고르는 버튼도 없다 — 패널에서 올린다');
+    assert.equal(upBtn(tripLis(m)[0]).textContent, '다시 올리기', '안 올린 증빙이 남아 있으니 다시 올려 볼 수는 있다');
+    assert.deepEqual(storage.data[UP_BUSY_KEY], {});
+    // 올리는 길이 던져도 줄에 적고 끝낸다
+    const boom = await mount({ plans: fakePlans(HR), trips: fakeTrips([doc501]), up: async () => { throw new Error('Extension context invalidated.'); } });
+    drag(boom, tripLis(boom)[0], [file('hotel.png')]);
+    await landed(boom);
+    assert.equal(tripLis(boom)[0].querySelector('.krs-mine-drop').textContent,
+      'hotel.png: 숙박 증빙으로 보관했습니다 · 사후정산에 올리지 못했습니다 — Extension context invalidated. · 예약 패널의 출장 카드에서 올려 주세요');
+  });
+  // 2026-10-05 사용자 지정: "홈 줄에서 바로 고르기: 넣은 자리에서 상한액/실제 금액 버튼이 뜹니다. 그리고 상한액의 1.5배는 부서장 승인"
+  const CAP_ASK = { key: 'hotel.png', question: '실제 금액 150,000원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?',
+    choices: [{ settle: 'cap', label: '상한액 120,000원으로' },
+      { settle: 'real', label: '실제 금액 150,000원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다' }] };
+  const ASKING = '사후정산은 아직 올리지 않았습니다 — 아래에서 정산금액을 골라 주세요';
+  /** 상한액을 넘는 숙박 — 고르기 전에는 묻고, 고른 것을 들고 오면 그 금액으로 올린다. */
+  const capUp = (storage, asks = [CAP_ASK]) => fakeUp((trip) => (asks.every((a) => trip.settle?.[a.key])
+    ? { ok: true, sent: true, hold: false, text: `사후정산을 올렸습니다 — 숙박 고양호텔 1박 ${trip.settle['hotel.png'] === 'cap' ? '120,000원(상한액)' : '150,000원 · 고양호텔: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내'}` }
+    : { ok: true, sent: false, hold: true, ask: asks, text: ASKING }), { storage });
+  const askOf = (li) => li.querySelector('.krs-mine-ask');
+  const picks = (li) => [...li.querySelectorAll('.krs-mine-pick')];
+  // 같은 날 사용자 지정(묻는 줄의 화면을 보고): "여기 설명은 필요 없고, 아이콘만 2개 주고 선택하라고해" — 글은 `정산금액 선택` 뿐이고,
+  // 묻는 말·금액·승인 규칙은 풍선말에 있다.
+  const pickTip = (b) => b.getAttribute('aria-label');
+  await ta('숙박비가 상한액을 넘으면 넣은 그 줄에서 묻는다 — 설명 없이 `정산금액 선택`과 아이콘 둘(상한액으로 / 실제 금액으로)만 서고, 올리지는 않는다', async () => {
+    const storage = fakeStorage();
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up: capUp(storage) });
+    drag(m, tripLis(m)[0], [file('hotel.png')]);
+    await landed(m);
+    const li = tripLis(m)[0];
+    assert.equal(li.querySelector('.krs-mine-drop'), null, '넣은 증빙이 어떻게 됐는지의 글도 적지 않는다');
+    assert.deepEqual([askOf(li).textContent, askOf(li).querySelector('.krs-mine-ask-q').title], ['정산금액 선택', CAP_ASK.question], '글은 이것뿐이다 — 묻는 말은 풍선말에 있다');
+    assert.equal(askOf(li).querySelector('.krs-mine-ask-note'), null);
+    assert.deepEqual(picks(li).map((b) => [pickTip(b), b.title, b.textContent, !!b.querySelector('svg'), b.dataset.act, b.dataset.doc, b.dataset.key, b.dataset.settle]), [
+      ['상한액 120,000원으로', '상한액 120,000원으로', '', true, 'settle', 'X-4', 'hotel.png', 'cap'],
+      ['실제 금액 150,000원으로 · 부서장 승인 — 상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다',
+        '실제 금액 150,000원으로 · 부서장 승인 — 상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다', '', true, 'settle', 'X-4', 'hotel.png', 'real'],
+    ]);
+    assert.notEqual(picks(li)[0].innerHTML, picks(li)[1].innerHTML, '두 아이콘은 다른 그림이다');
+    assert.deepEqual([m.up.calls.length, m.up.calls[0].settle, storage.data[UP_BUSY_KEY]], [1, {}, {}], '묻는 동안에는 올리는 중이 아니다');
+    assert.match(markOf(li, 'lodge').title, /사후정산에는 아직 올리지 않았습니다/);
+  });
+  await ta('고르면 그 금액으로 사후정산에 올린다 — 고른 것을 들고 올리는 길을 다시 부르고, 버튼을 걷고 결과를 적는다. 패널은 열지 않는다', async () => {
+    const storage = fakeStorage();
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up: capUp(storage) });
+    drag(m, tripLis(m)[0], [file('hotel.png')]);
+    await landed(m);
+    picks(tripLis(m)[0])[1].click();
+    await until(() => m.up.calls.length === 2, '고른 것으로 다시 올리기');
+    assert.deepEqual([askOf(tripLis(m)[0]), tripLis(m)[0].querySelector('.krs-mine-drop').classList.contains('busy')], [null, true], '올리는 동안에는 버튼이 없다');
+    await landed(m);
+    const li = tripLis(m)[0];
+    assert.deepEqual(m.up.calls.map((c) => [c.docNo, c.row.seq, c.settle]), [['X-4', '501', {}], ['X-4', '501', { 'hotel.png': 'real' }]]);
+    assert.equal(li.querySelector('.krs-mine-drop').textContent,
+      'hotel.png: 숙박 증빙으로 보관했습니다 · 사후정산을 올렸습니다 — 숙박 고양호텔 1박 150,000원 · 고양호텔: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내');
+    assert.deepEqual([askOf(li), m.up.busy[1], storage.data[UP_BUSY_KEY]], [null, { 'X-4': NOW }, {}]);
+    assert.equal(markOf(li, 'lodge').title, '숙박 증빙 1장 — hotel.png');
+    assert.deepEqual([m.panelCalls.length, m.storage.data[JUMP_KEY]], [0, undefined]);
+  });
+  await ta('물을 숙박 줄이 둘이면 둘 다 고른 뒤에 올린다 — 고른 줄의 버튼은 걷힌다', async () => {
+    const storage = fakeStorage();
+    const asks = [CAP_ASK, { ...CAP_ASK, key: 'inn.png', question: '실제 금액 130,000원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?' }];
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up: capUp(storage, asks) });
+    drag(m, tripLis(m)[0], [file('hotel.png'), file('inn.png')]);
+    await landed(m);
+    assert.equal(tripLis(m)[0].querySelectorAll('.krs-mine-ask').length, 2);
+    picks(tripLis(m)[0])[0].click();
+    await until(() => tripLis(m)[0].querySelectorAll('.krs-mine-ask').length === 1, '고른 줄의 버튼 걷기');
+    assert.deepEqual([m.up.calls.length, picks(tripLis(m)[0])[0].dataset.key], [1, 'inn.png']);
+    picks(tripLis(m)[0])[1].click();
+    await until(() => m.up.calls.length === 2, '다 고른 뒤 올리기');
+    await landed(m);
+    assert.deepEqual([m.up.calls.length, m.up.calls[1].settle, askOf(tripLis(m)[0])], [2, { 'hotel.png': 'cap', 'inn.png': 'real' }, null]);
+  });
+  await ta('고르기를 기다리는 사이에 그 증빙이 올라가면(패널의 출장 카드에서 올렸다) 버튼을 걷는다', async () => {
+    const storage = fakeStorage();
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up: capUp(storage) });
+    drag(m, tripLis(m)[0], [file('hotel.png')]);
+    await landed(m);
+    assert.ok(askOf(tripLis(m)[0]));
+    await storage.set({ [MARKS_KEY]: { 'X-4': [{ name: 'hotel.png', label: '숙박 증빙' }] } });
+    await until(() => !askOf(tripLis(m)[0]), '버튼 걷기');
+    assert.deepEqual([askOf(tripLis(m)[0]), tripLis(m)[0].querySelector('.krs-mine-drop').textContent], [null, 'hotel.png: 숙박 증빙으로 보관했습니다']);
+  });
+  // 2026-10-05 사용자가 보관만 된 줄을 보고: "왜 안올려주고 저장만 하지 사후정산에 업로드도 같이 할 수 있게 해줘" — 고르기 전에 홈을
+  // 새로고침했거나 올리다 막혀 "아직 안 올림"으로 남은 증빙은 그 줄의 버튼으로 올린다(다시 넣지 않는다).
+  const KEPT_TODO = { 'X-4': [{ name: 'Receipt.pdf', label: '숙박 증빙', todo: true }, { name: 'Confirmation.pdf', label: '숙박 증빙', todo: true }, { name: 'lunch.png', label: '출장지 영수증' }] };
+  // 같은 날 이어서: "왜 '사후정산에 올리기' 버튼이 아직 까지 있는 거지? 올리라고" — 버튼을 누르지 않아도 홈을 열면 올린다(한 번).
+  // 버튼은 올려 봤는데 안 됐을 때만 선다("안올라가서 그 버튼이 있는거면 나두고").
+  await ta('보관만 하고 사후정산에 안 올린 증빙이 남아 있으면 홈을 열 때 누르지 않아도 올린다 — 다시 읽지 않고, 올라가면 표시가 걷힌다. 올리기 버튼은 없다', async () => {
+    const storage = fakeStorage({ [MARKS_KEY]: structuredClone(KEPT_TODO) });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]) });
+    await until(() => m.up.calls.length === 1, '올리는 길에 닿기');
+    assert.deepEqual([upBtn(tripLis(m)[0]), tripLis(m)[1].querySelector('.krs-mine-todo')], [null, null], '올리는 동안에도, 안 올린 증빙이 없는 출장 줄에도 버튼은 없다');
+    await landed(m);
+    assert.deepEqual([m.keep.calls.length, m.up.calls.map((c) => [c.docNo, c.row.seq, c.settle]), m.up.busy[0], storage.data[UP_BUSY_KEY]],
+      [0, [['X-4', '501', {}]], { 'X-4': NOW }, {}]);
+    assert.equal(tripLis(m)[0].querySelector('.krs-mine-drop').textContent, '보관해 둔 증빙 2장 · 사후정산을 올렸습니다 — 숙박 고양호텔 1박 110,000원');
+    assert.equal(upBtn(tripLis(m)[0]), null);
+    assert.deepEqual([m.panelCalls.length, m.storage.data[JUMP_KEY]], [0, undefined], '패널은 열지 않는다');
+    await tick(30);
+    assert.equal(m.up.calls.length, 1, '저절로 올리는 것은 한 번이다');
+  });
+  await ta('안 보이는 창에서는 저절로 올리지 않는다 — 보이면 올린다. 다른 창의 홈이 그 출장을 올리는 중이면 건너뛴다', async () => {
+    let shown = false;
+    const storage = fakeStorage({ [MARKS_KEY]: structuredClone(KEPT_TODO) });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), visible: () => shown });
+    await tick(40);
+    assert.equal(m.up.calls.length, 0);
+    shown = true;
+    m.doc.dispatchEvent(new m.doc.defaultView.Event('visibilitychange'));
+    await until(() => m.up.calls.length === 1, '보이면 올리기');
+    const busy = fakeStorage({ [MARKS_KEY]: structuredClone(KEPT_TODO), [UP_BUSY_KEY]: { 'X-4': NOW } });
+    const other = await mount({ storage: busy, plans: fakePlans(HR), trips: fakeTrips([doc501]) });
+    await tick(40);
+    assert.deepEqual([other.up.calls.length, upBtn(tripLis(other)[0])], [0, null]);
+  });
+  await ta('저절로 올리다 숙박비가 상한액을 넘으면 그 줄에 고르는 아이콘이 바로 선다 — 고르면 그 금액으로 곧바로 올린다', async () => {
+    const storage = fakeStorage({ [MARKS_KEY]: { 'X-4': [{ name: 'hotel.png', label: '숙박 증빙', todo: true }] } });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up: capUp(storage) });
+    await landed(m);
+    const li = tripLis(m)[0];
+    assert.deepEqual([li.querySelector('.krs-mine-drop'), upBtn(li), askOf(li).textContent], [null, null, '정산금액 선택'], '묻는 동안에는 올리기 버튼 대신 고르는 아이콘이 선다');
+    assert.deepEqual(picks(li).map((b) => pickTip(b).split(' — ')[0]), ['상한액 120,000원으로', '실제 금액 150,000원으로 · 부서장 승인']);
+    picks(li)[0].click();
+    await until(() => m.up.calls.length === 2, '고른 것으로 다시 올리기');
+    await landed(m);
+    assert.deepEqual(m.up.calls.map((c) => c.settle), [{}, { 'hotel.png': 'cap' }]);
+    assert.equal(tripLis(m)[0].querySelector('.krs-mine-drop').textContent, '보관해 둔 증빙 1장 · 사후정산을 올렸습니다 — 숙박 고양호텔 1박 120,000원(상한액)');
+    assert.deepEqual([askOf(tripLis(m)[0]), upBtn(tripLis(m)[0])], [null, null]);
+  });
+  await ta('여비계산서를 모르는 출장이면 저절로 올리지 않는다 — 버튼도 세우지 않는다', async () => {
+    const storage = fakeStorage({ [MARKS_KEY]: { 'T-1': [{ name: 'hotel.png', label: '숙박 증빙', todo: true }] } });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]) });
+    await tick(40);
+    assert.deepEqual([m.up.calls.length, upBtn(tripLis(m)[1]), tripLis(m)[1].querySelector('.krs-mine-drop')], [0, null, null]);
+  });
+  await ta('올려 봤는데 안 됐으면 까닭 아래에 `다시 올리기`가 선다 — 누르면 다시 읽지 않고 한 번 더 올려 본다', async () => {
+    const storage = fakeStorage({ [MARKS_KEY]: { 'X-4': [{ name: 'hotel.png', label: '숙박 증빙', todo: true }] } });
+    let fail = true;
+    const up = fakeUp(() => (fail ? { ok: false, sent: false, hold: true, text: '사후정산에 올리지 못했습니다 — 로그인이 필요합니다 · 예약 패널의 출장 카드에서 올려 주세요' }
+      : { ok: true, sent: true, hold: false, text: '사후정산을 올렸습니다 — 숙박 고양호텔 1박 110,000원' }), { storage });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up });
+    await landed(m);
+    const li = tripLis(m)[0];
+    assert.match(li.querySelector('.krs-mine-drop').textContent, /^보관해 둔 증빙 1장 · 사후정산에 올리지 못했습니다 — 로그인이 필요합니다/);
+    assert.deepEqual([upBtn(li).textContent, li.querySelector('.krs-mine-todo').textContent, m.up.calls.length], ['다시 올리기', '다시 올리기', 1]);
+    assert.match(upBtn(li).title, /^hotel\.png — 보관해 둔 증빙을 다시 읽지 않고 사후정산에 한 번 더 올려 봅니다$/);
+    await tick(30);
+    assert.equal(m.up.calls.length, 1, '저절로 다시 올리지는 않는다');
+    fail = false;
+    upBtn(li).click();
+    await until(() => m.up.calls.length === 2, '다시 올리기');
+    await landed(m);
+    assert.deepEqual([tripLis(m)[0].querySelector('.krs-mine-drop').textContent, upBtn(tripLis(m)[0]), m.keep.calls.length],
+      ['보관해 둔 증빙 1장 · 사후정산을 올렸습니다 — 숙박 고양호텔 1박 110,000원', null, 0]);
+  });
+  // 2026-10-05 사용자 지정: "출장 기간동안의 내용이 아니면 알림을 줘 안맞다고, 맞는것만 선별취급 해서 올리고 해당 없는거는 문서보관에 알림표지 하고
+  // 확정 해주기 전까지는 보내기 해도 같이 보내지 말고"
+  await ta('출장 기간의 것이 아닌 증빙은 그 줄에 안 맞다고 알린다 — 알림 표시로 보관하고, 맞는 것만 사후정산에 올린다. 아이콘은 맞는 것만 센다', async () => {
+    const storage = fakeStorage();
+    const WHY = '묵은 기간(9/20~9/21)이 출장 기간(9/10~9/11) 밖입니다';
+    const base = fakeKeep({}, { storage });
+    // 배경(src/intake.js)이 하듯 기간 밖의 것은 warn 을 붙여 담고 "아직 안 올림"은 붙이지 않는다.
+    const keep = async (ask) => {
+      if (ask.file.name !== 'jeju.png') return base(ask);
+      const marks = structuredClone(storage.data[MARKS_KEY] || {});
+      (marks[ask.docNo] ||= []).push({ name: 'jeju.png', label: '숙박 증빙', warn: WHY });
+      await storage.set({ [MARKS_KEY]: marks });
+      return { ok: true, kept: true, name: 'jeju.png', label: '숙박 증빙', note: '', warn: WHY, todo: false };
+    };
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), keep });
+    drag(m, tripLis(m)[0], [file('jeju.png'), file('hotel.png')]);
+    await landed(m);
+    const li = tripLis(m)[0];
+    const note = li.querySelector('.krs-mine-drop');
+    assert.deepEqual([note.textContent, note.classList.contains('error')], [
+      `jeju.png: 숙박 증빙 ⚠ ${WHY} — 알림 표시로 보관했습니다(예약 패널의 출장 카드에서 확정하기 전에는 올리지도 보내지도 않습니다)`
+      + ' · hotel.png: 숙박 증빙으로 보관했습니다 · 사후정산을 올렸습니다 — 숙박 고양호텔 1박 110,000원', true]);
+    assert.equal(m.up.calls.length, 1, '맞는 것이 있으니 올리는 길은 부른다 — 무엇을 올릴지는 그 길이 가린다(알림 표시로 둔 것은 뺀다)');
+    assert.deepEqual([markOf(li, 'lodge').classList.contains('on'), markOf(li, 'lodge').title],
+      [true, '숙박 증빙 1장 — hotel.png · 출장 기간과 안 맞아 확정을 기다리는 증빙(예약 패널의 출장 카드에서 확정) 1장 — jeju.png']);
+    assert.equal(upBtn(li), null, '알림 표시로 둔 것은 "안 올린 증빙"으로 세지 않는다');
+    // 기간 밖의 것만 넣었으면 올리는 길을 부르지 않는다 — 아이콘도 켜지지 않는다
+    const only = await mount({ storage: fakeStorage(), plans: fakePlans(HR), trips: fakeTrips([doc501]),
+      keep: async () => ({ ok: true, kept: true, name: 'jeju.png', label: '숙박 증빙', note: '', warn: WHY, todo: false }) });
+    drag(only, tripLis(only)[0], [file('jeju.png')]);
+    await landed(only);
+    assert.deepEqual([only.up.calls.length, tripLis(only)[0].querySelector('.krs-mine-drop').classList.contains('error')], [0, true]);
+    assert.deepEqual(tripMarks({ kept: [{ name: 'jeju.png', label: '숙박 증빙', warn: WHY }] }).slice(2, 3).map((x) => [x.on, x.title]),
+      [[false, '숙박 증빙 없음 — 출장 기간과 안 맞아 확정을 기다리는 증빙(예약 패널의 출장 카드에서 확정) 1장 — jeju.png']]);
+  });
+  // 2026-10-05 사용자 지정(길게 적힌 알림을 보고): "알림 끄거나 보거나 제거 하는 기능이 안보임"
+  const noteBtn = (li, act) => li.querySelector(`.krs-mine-drop button[data-act="${act}"]`);
+  const noteText = (li) => li.querySelector('.krs-mine-drop-text');
+  await ta('끝난 일의 알림은 접혀서 선다 — 올린 것의 요약 한 줄이고, 화살표로 펴서 전부 보고 다시 접으며, × 로 지운다. 사이트에는 아무것도 가지 않는다', async () => {
+    const storage = fakeStorage();
+    const FULL = '사후정산을 올렸습니다 — 숙박 아고다 1박 177,101원 · 추가 정보 — Receipt.pdf: 예약 번호 2048075129 · SONO CALM GOYANG: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내';
+    const up = fakeUp({ ok: true, sent: true, hold: false, brief: '사후정산을 올렸습니다 — 숙박 아고다 1박 177,101원 · 부서장 승인 필요', text: FULL }, { storage });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up });
+    drag(m, tripLis(m)[0], [file('Receipt.pdf', 'application/pdf')]);
+    await landed(m);
+    let li = tripLis(m)[0];
+    const whole = `Receipt.pdf: 숙박 증빙으로 보관했습니다 · ${FULL}`;
+    assert.deepEqual([li.querySelector('.krs-mine-drop').className, noteText(li).textContent, noteText(li).title],
+      ['krs-mine-drop shut', '사후정산을 올렸습니다 — 숙박 아고다 1박 177,101원 · 부서장 승인 필요', whole], '접혀 있으면 요약 한 줄이고, 전부는 풍선말에 있다');
+    assert.deepEqual(['drop-more', 'drop-close'].map((a) => [noteBtn(li, a).getAttribute('aria-label'), noteBtn(li, a).dataset.doc]), [['알림 펴 보기', 'X-4'], ['알림 지우기', 'X-4']]);
+    assert.equal(noteBtn(li, 'drop-more').getAttribute('aria-expanded'), 'false');
+    noteBtn(li, 'drop-more').click();
+    li = tripLis(m)[0];
+    assert.deepEqual([li.querySelector('.krs-mine-drop').className, noteText(li).textContent, noteBtn(li, 'drop-more').getAttribute('aria-label'), noteBtn(li, 'drop-more').getAttribute('aria-expanded')],
+      ['krs-mine-drop open', whole, '알림 접기', 'true'], '펴면 전부 보인다');
+    noteBtn(li, 'drop-more').click();
+    assert.equal(tripLis(m)[0].querySelector('.krs-mine-drop').className, 'krs-mine-drop shut');
+    noteBtn(tripLis(m)[0], 'drop-close').click();
+    await tick(20);
+    assert.deepEqual([tripLis(m)[0].querySelector('.krs-mine-drop'), m.up.calls.length, m.panelCalls.length], [null, 1, 0], '지우면 사라진다 — 다시 올리지도, 패널을 열지도 않는다');
+  });
+  await ta('알릴 것이 있는 알림(못 올렸다)은 펴져서 선다 — 지워도 안 올린 증빙이 남아 있으면 `다시 올리기`는 남는다. 하는 중이거나 금액을 묻는 중에는 버튼이 없다', async () => {
+    const storage = fakeStorage();
+    const up = fakeUp({ ok: false, sent: false, hold: true, text: '사후정산에 올리지 못했습니다 — 로그인이 필요합니다 · 예약 패널의 출장 카드에서 올려 주세요' }, { storage });
+    const m = await mount({ storage, plans: fakePlans(HR), trips: fakeTrips([doc501]), up });
+    drag(m, tripLis(m)[0], [file('hotel.png')]);
+    assert.equal(noteBtn(tripLis(m)[0], 'drop-close'), null, '읽는 중인 글에는 버튼이 없다');
+    await landed(m);
+    let li = tripLis(m)[0];
+    assert.deepEqual([li.querySelector('.krs-mine-drop').className, noteBtn(li, 'drop-more').getAttribute('aria-expanded'), upBtn(li).textContent], ['krs-mine-drop error open', 'true', '다시 올리기']);
+    noteBtn(li, 'drop-close').click();
+    await tick(30);
+    li = tripLis(m)[0];
+    assert.deepEqual([li.querySelector('.krs-mine-drop'), upBtn(li).textContent, m.up.calls.length], [null, '다시 올리기', 1], '글만 지워진다 — 저절로 다시 올리지도 않는다');
+    // 금액을 묻는 줄에는 알림 글이 없으니 버튼도 없다
+    const s2 = fakeStorage();
+    const asking = await mount({ storage: s2, plans: fakePlans(HR), trips: fakeTrips([doc501]), up: capUp(s2) });
+    drag(asking, tripLis(asking)[0], [file('hotel.png')]);
+    await landed(asking);
+    assert.deepEqual([tripLis(asking)[0].querySelector('.krs-mine-drop'), tripLis(asking)[0].querySelector('.krs-mine-drop-btn')], [null, null]);
+  });
+  await ta('사후정산에 올릴 것이 없는 증빙(출장지 영수증)만 넣었으면 올리는 길을 부르지 않는다', async () => {
+    const keep = fakeKeep({ 'lunch.png': { ok: true, kept: true, name: 'lunch.png', label: '출장지 영수증', note: '', todo: false } });
+    const m = await mount({ plans: fakePlans(HR), trips: fakeTrips([doc501]), keep });
+    drag(m, tripLis(m)[0], [file('lunch.png')]);
+    await landed(m);
+    assert.deepEqual([m.up.calls.length, tripLis(m)[0].querySelector('.krs-mine-drop').textContent], [0, 'lunch.png: 출장지 영수증으로 보관했습니다']);
   });
   await ta('받는 동안에는 무엇을 읽는 중인지 줄에 적는다', async () => {
     let release;

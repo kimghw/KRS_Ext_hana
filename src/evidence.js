@@ -7,6 +7,8 @@
 //   숙박 증빙      숙박 영수증·예약서 — 사후정산의 숙박 줄에 첨부로도 올라간다
 //
 // 출장지에서 결제하지 않은 영수증·기차표처럼 증빙으로 쓸 수 없는 것은 담지 않는다.
+// **출장 기간의 것이 아닌 문서는 알림 표시(warn — 그 까닭)를 붙여 담는다**(2026-10-05 사용자 지정) — 사람이 확정(confirm)하기 전에는
+// 사후정산에 올리지도 담당자에게 보내지도 않는다. 보내는 쪽은 warn 이 붙은 것을 뺀다(src/send.js 의 sendable).
 // 홈의 WORKSPACE 카드에서 출장 줄에 놓거나 붙여 넣은 증빙도 여기에 담긴다(2026-10-04 사용자 지정 — 받는 길은 src/intake.js).
 //
 // **보내는 쪽은 여기 없다** — 꺼내 쓰는 길만 있다:
@@ -22,7 +24,7 @@ export const EVIDENCE_DB = 'krsWorkspace';
 export const EVIDENCE_STORE = 'tripEvidence';
 
 /**
- * 보관함에 무엇이 들어 있는지를 출장마다 줄여 적어 두는 storage 키 — { 신청서 번호: [{ name, label, todo? }] }.
+ * 보관함에 무엇이 들어 있는지를 출장마다 줄여 적어 두는 storage 키 — { 신청서 번호: [{ name, label, todo?, warn? }] }.
  * 홈의 WORKSPACE 카드(콘텐츠 스크립트)는 확장의 IndexedDB 를 못 읽는다 — 출장 줄의 아이콘(숙박·항공권·출장증빙)은 이것을 본다.
  * 담거나 뺄 때마다 보관함 전체에서 다시 지어 적는다(파일은 적지 않는다).
  */
@@ -32,7 +34,7 @@ export const MARKS_KEY = 'evidenceMarks';
 export function marksOf(all) {
   const out = {};
   for (const x of [...(all || [])].sort((a, b) => a.savedAt - b.savedAt)) {
-    (out[x.docNo] ||= []).push({ name: x.name, label: x.label || '증빙', ...(x.todo ? { todo: true } : {}) });
+    (out[x.docNo] ||= []).push({ name: x.name, label: x.label || '증빙', ...(x.todo ? { todo: true } : {}), ...(x.warn ? { warn: x.warn } : {}) });
   }
   return out;
 }
@@ -91,7 +93,8 @@ export function createEvidenceStore(backend = idbBackend(), { now = () => Date.n
      * @param {string} docNo HR 출장 신청서 번호
      * @param {{name:string, type?:string, dataUrl:string, label:string, summary?:string, date?:string|null, total?:number|null, trip?:object,
      *          todo?:boolean, record?:object}[]} items todo·record 는 홈 카드에서 받은 증빙에 붙는다(src/intake.js) — 읽은 기록과,
-     *          사후정산에 아직 올리지 않았다는 표시다. 패널이 그 증빙을 사후정산에 올리면서 다시 담으면 없어진다
+     *          사후정산에 아직 올리지 않았다는 표시다. 홈 카드가 곧바로 올리면 표시가 걷히고(settle), 못 올려 남은 것은
+     *          패널이 사후정산에 올리면서 다시 담을 때 없어진다
      */
     async keep(docNo, items) {
       for (const it of items || []) await backend.set(keyOf(docNo, it.name), { ...it, docNo, savedAt: now() });
@@ -104,6 +107,42 @@ export function createEvidenceStore(backend = idbBackend(), { now = () => Date.n
     async remove(docNo, name) {
       await backend.delete(keyOf(docNo, name));
       await quietSync();
+    },
+    /**
+     * 홈 카드에서 받은 증빙을 사후정산에 올렸다(src/afterup.js) — "아직 안 올림" 표시(todo)를 걷는다. 읽은 기록(record)과 담은 차례는
+     * 그대로 둔다 — 항공권의 기록은 다음 항공권을 넣을 때 같이 묶인다.
+     * @returns {Promise<number>} 표시를 걷은 장 수
+     */
+    async settle(docNo, names) {
+      let n = 0;
+      for (const x of await backend.all()) {
+        if (x.docNo !== docNo || !x.todo || !(names || []).includes(x.name)) continue;
+        const { todo: _todo, ...rest } = x;
+        await backend.set(keyOf(docNo, x.name), rest);
+        n++;
+      }
+      if (n) await quietSync();
+      return n;
+    },
+    /**
+     * 출장 기간과 안 맞아 알림 표시(warn)로 담아 둔 증빙을 사람이 이 출장의 증빙이 맞다고 확정했다 — 표시를 걷고 확정했다고 적는다
+     * (confirmed — 읽은 기록에도 적어, 다시 묶을 때 기간을 따지지 않는다). 그때부터 담당자에게 보낼 때 같이 간다.
+     * todo 를 주면(사후정산에도 올라가야 하는 숙박 증빙·항공권) 읽은 기록이 있을 때 "아직 안 올림" 표시를 붙인다 — 올리는 것은
+     * 출장 카드·홈 카드가 한다.
+     * @returns {Promise<object|null>} 확정한 뒤의 그 증빙(파일 포함). 알림 표시가 붙은 그런 증빙이 없으면 null
+     */
+    async confirm(docNo, name, { todo = false } = {}) {
+      const hit = (await backend.all()).find((x) => x.docNo === docNo && x.name === name && x.warn);
+      if (!hit) return null;
+      const { warn: _warn, ...rest } = hit;
+      const next = {
+        ...rest, confirmed: true,
+        ...(hit.record ? { record: { ...hit.record, confirmed: true } } : {}),
+        ...(todo && hit.record ? { todo: true } : {}),
+      };
+      await backend.set(keyOf(docNo, name), next);
+      await quietSync();
+      return next;
     },
     sync,
   };

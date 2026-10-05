@@ -22,14 +22,19 @@
 // 줄)은 Teams MCP 를 다시 본다 — 닿지 않으면 까닭을 카드에 적고 쪽지로 둔다. 팝업에서 확인한 길과 보내는 순간의 길이 다르면
 // 아무것도 보내지 않는다.
 //
-// 숙박·비행기가 있는 출장인데 사후정산을 아직 완료하지 않았으면(2026-10-03 사용자 지정) 버튼이 둘이다 — `사후정산 저장`은 카드에
-// 있는 대로 저장만 하고, `보내기`는 저장 → 확정 → 송부를 잇는다. 저장과 확정은 attendpanel.js 가 한다(ctx.save·ctx.confirm).
-// 완료한 사후정산을 출장 카드에서 다시 작성하는 중일 때도(ctx.reopen, 2026-10-04 사용자 지정) 같은 두 버튼이 선다.
-// 숙박·비행기 출장은 보관한 증빙이 없어도 보낸다 — 여비계산서의 출력만 나간다(2026-10-04 사용자 지정, src/send.js sendGate).
-// `사후정산 저장`은 실제 계산서를 바꾸는 누름이라 두 번 눌러야 나간다(confirmOf — 첫 누름에는 무엇을 할지만 적어 보여 준다).
-// `보내기`는 팝업이 그 확인을 맡는다 — 저장·확정부터 한다는 것도 팝업에 적힌다.
+// 숙박·비행기가 있는 출장인데 사후정산을 아직 완료하지 않았으면 `보내기`가 사후정산 저장 → 확정 → 송부를 잇는다(2026-10-03 사용자 지정).
+// 저장과 확정은 attendpanel.js 가 한다(ctx.save·ctx.confirm). **저장만 하거나 확정만 하는 버튼은 두지 않는다**(2026-10-05 사용자 지정:
+// "파일올라가면 다 자동 저장인거고" · "보내기 하면 그때 '확정' 하고 보내라고") — 증빙을 넣으면 그때 저장되고, 확정은 보낼 때 한다.
+// 처음에는 `사후정산 저장` 버튼이 `보내기` 옆에 있었다. 완료한 사후정산을 출장 카드에서 다시 작성하는 중일 때도(ctx.reopen, 2026-10-04
+// 사용자 지정) `보내기`가 저장 → 확정부터 한다. 숙박·비행기 출장은 보관한 증빙이 없어도 보낸다 — 여비계산서의 출력만 나간다
+// (2026-10-04 사용자 지정, src/send.js sendGate). `보내기`는 팝업이 확인을 맡는다 — 저장·확정부터 한다는 것도 팝업에 적힌다.
+//
+// 2026-10-05 사용자 지정(정산을 마치고 보낸 카드를 보고): "여기에서 사후정산 다시하기, 사전정산 다시하기 기능이 있으면 좋겠어. 맨 아래
+// 다시 보내기 했으면 좋겠고 … 보내기 이력에서.. 이력을 삭제할 수도 있으면 좋겠어" — 맨 아래의 보내기 바로 위에 `사전정산 다시하기`·
+// `사후정산 다시하기`가 서고(ctx.redo — 무엇을 하는지는 attendpanel.js), 이전에 보낸 곳의 줄마다 × 가, 보낸 기록(`보냈습니다 — …`)
+// 옆에도 × 가 선다. 지우는 것은 패널이 기억해 둔 것뿐이다. 사후정산을 완료한 출장에 넣은 증빙은 읽어서 사후정산에 반영한다(ctx.read).
 
-import { sendGate, channelOf, teamsWhy, wantOf, wantOfLabel, WAYS, pushRecent, pdfName, calName, sendTitle, sendLines, packCount, SETTLED_LABEL, RECENT_MAX } from './src/send.js';
+import { sendGate, sendable, heldNote, channelOf, teamsWhy, wantOf, wantOfLabel, WAYS, pushRecent, pdfName, calName, sendTitle, sendLines, packCount, SETTLED_LABEL, RECENT_MAX } from './src/send.js';
 import { buildPdf } from './src/pdf.js';
 import { tripCalPdf } from './src/trip.js';
 import { memoSuggest, memoSend, memoHtml } from './src/memo.js';
@@ -42,9 +47,12 @@ const SUGGEST_WAIT_MS = 250;
 const HITS_MAX = 8;
 /** 보낸 기록을 몇 건까지 남기는가(출장 한 건에 하나). */
 const DONE_MAX = 60;
-const SAVE_TITLE = '사후정산을 카드에 있는 대로 저장합니다 — 바꾼 가는 편·오는 편이 교통비 내역으로 올라가고, 확정은 하지 않습니다';
 const GO_TITLE = '사후정산을 저장하고 확정(완료)한 뒤에 증빙을 보냅니다';
 const SET_TITLE = '이 과제·계정과 받는 사람, 보내는 길로 보냅니다';
+const SET_DEL_TITLE = '이 줄을 이전에 보낸 곳에서 지웁니다';
+const DONE_DEL_TITLE = '이 보낸 기록을 지웁니다 — 패널의 기록만 지웁니다(보낸 것이 취소되지는 않습니다)';
+const ADD_READ = '읽어서 사후정산에 반영합니다';
+const ADD_READ_TITLE = '숙박 증빙·항공권이면 읽어서 사후정산에 다시 올리고, 그 밖의 문서는 보낼 증빙으로 담습니다';
 const FOLD_TITLE = '과제·계정, 받는 사람, 보내는 길을 직접 고릅니다';
 const WAY_RETRY = 'Teams 서버(localhost:5003)를 켠 뒤';
 // 이전에 보낸 줄에 적는 보내는 길의 아이콘 — Teams 는 Teams 로고(제 색 그대로), 쪽지는 말풍선이다.
@@ -127,8 +135,7 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     probe();
   }
 
-  // 사후정산을 저장하기 전에 사람이 정해 줄 것이 남았으면(ctx.hold) 저장도, 저장부터 하는 보내기도 잠긴다.
-  const canSave = (gate, s, ctx) => gate.settle && !ctx.hold && !s.busy;
+  // 사후정산을 저장하기 전에 사람이 정해 줄 것이 남았으면(ctx.hold) 저장부터 하는 보내기가 잠긴다.
   const canGo = (gate, s, ctx) => gate.ready && !!s.account.trim() && !!s.person && !s.busy && !(gate.settle && ctx.hold);
   /** 그 줄이 지금 보내는 곳인가 — 과제·계정과 받는 사람이 같고, 줄에 길이 적혀 있으면 가려는 길도 같다. */
   const setOn = (x, s) => x.account === s.account.trim() && x.person.id === s.person?.id
@@ -151,7 +158,10 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     const gate = sendGate(ctx);
     if (!canGo(gate, s, ctx) || ctx.locked) return;
     closePop();
-    const { trip, me, kept, it } = ctx;
+    const { trip, me, it } = ctx;
+    // 출장 기간과 안 맞아 확정을 기다리는 증빙은 묶지 않는다 — 무엇이 빠지는지 팝업에 적는다.
+    const kept = sendable(ctx.kept);
+    const held = heldNote(ctx.kept);
     const account = s.account.trim();
     // 사후정산을 확정한 뒤에 나가는 글이다 — 단계는 그때의 것을 적는다.
     const stage = gate.settle ? { ...ctx.stage, label: SETTLED_LABEL } : ctx.stage;
@@ -167,6 +177,7 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       + `<dt>보내는 길</dt><dd>${escapeHtml(`${way.label} · ${packCount(kept)} → PDF 1개`)}</dd></dl>`
       + `<div class="at-pop-body"><strong>${escapeHtml(sendTitle({ account, me, trip }))}</strong>${lines.map((l) => `<span>${escapeHtml(l)}</span>`).join('')}</div>`
       + (gate.settle ? `<p class="at-pop-note">${escapeHtml(`${GO_TITLE} — 여비계산서 ${trip.seq}`)}</p>` : '')
+      + (held ? `<p class="at-pop-note at-pop-held">${escapeHtml(held)}</p>` : '')
       + '<div class="at-pop-btns"><button type="button" class="ghost" data-pop="cancel">취소</button>'
       + `<button type="button" class="primary" data-pop="go">${gate.settle ? '저장·확정 후 보내기' : '보내기'}</button></div></div>`;
     // 닫은 뒤에는 카드의 보내기 버튼으로 초점을 돌린다 — 그 사이 카드가 다시 그려졌을 수 있어 그때 다시 찾는다.
@@ -202,11 +213,17 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
    *   it 은 신청 내역의 출장 한 건, trip·stage 는 그 여비계산서와 단계, need 는 사후정산 대상인가, kept 는 보관함의 증빙이다.
    *   reopen 은 완료한 사후정산을 출장 카드에서 다시 작성하는 중인가다(그러면 완료하기 전처럼 저장 → 확정부터 한다).
    *   save·confirm 은 사후정산을 저장·확정하는 길(진행 글을 받는 함수를 넘긴다, 못 하면 던진다), again 은 그 뒤의 사정을 다시 주는 길,
-   *   hold 는 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭이다
+   *   hold 는 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭이다.
+   *   redo 는 맨 아래 보내기 위에 서는 `사전정산 다시하기`·`사후정산 다시하기`({pre, post} — 저마다 {on, title} 이거나, 그 버튼이 설 때가
+   *   아니면 null), read 는 사후정산을 완료한 출장에 넣은 증빙을 읽어 사후정산에 반영하는 길이다(없으면 읽지 않고 그대로 담는다)
    */
   function html(ctx) {
-    const { it, trip, stage, kept = [], locked } = ctx;
+    const { it, trip, stage, locked } = ctx;
     if (!trip || !stage) return '';
+    // all 은 보관함의 증빙 전부, kept 는 그 가운데 보내는 것이다 — 출장 기간과 안 맞아 알림 표시가 붙은 것은 확정하기 전에는 빠진다.
+    const all = ctx.kept || [];
+    const kept = sendable(all);
+    const held = heldNote(all);
     const s = of(it.docNo);
     // 손대지 않은 카드에는 가장 최근에 보낸 세트를 깔아 둔다 — 보통 같은 과제를 같은 사람에게 같은 길로 보낸다.
     if (!s.touched && !s.account && !s.person && box.sets[0]) Object.assign(s, { account: box.sets[0].account, person: box.sets[0].person, want: wantOf(box.sets[0].way) });
@@ -217,19 +234,33 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     const noTeams = teamsWhy(box.teams);
     const wayNote = way.note || (wantNow(s) === 'teams' && noTeams ? `${noTeams} — 지금은 쪽지로 갑니다` : '');
     const head = (how) => `<div class="at-send-head"><strong>여비증빙 송부</strong><span class="at-send-how"${wayNote ? ` title="${escapeHtml(wayNote)}"` : ''}>${escapeHtml(how)}</span></div>`;
-    const doneNote = done ? `<p class="at-send-note ok">${escapeHtml(`보냈습니다 — ${stamp(done.at)} · ${done.channel} · ${done.to} · ${done.account}`)}</p>` : '';
-    // 아직 보낼 때가 아니면(정산이 덜 끝났다) 까닭 한 줄만 적는다.
-    if (!gate.staged) return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(gate.why)}${doneNote}</div>`;
-
     const off = locked || s.busy ? ' disabled' : '';
+    // 보낸 기록은 × 로 지울 수 있다(2026-10-05 사용자 지정: "보내기 이력에서.. 이력을 삭제") — 패널의 기록만 지운다.
+    const doneNote = done ? `<div class="at-send-done"><p class="at-send-note ok">${escapeHtml(`보냈습니다 — ${stamp(done.at)} · ${done.channel} · ${done.to} · ${done.account}`)}</p>`
+      + `<button type="button" class="small ghost at-kept-drop" data-act="send-done-del" title="${DONE_DEL_TITLE}" aria-label="보낸 기록 지우기"${off}>×</button></div>` : '';
+    // 정산을 다시 하는 버튼(2026-10-05 사용자 지정: "여기에서 사후정산 다시하기, 사전정산 다시하기 … 맨 아래 다시 보내기") — 맨 아래의
+    // 보내기 바로 위에 선다. 켜진 버튼이 지금 다시 하는 중인 정산이고, 다시 누르면 그만둔다. 누름은 attendpanel.js 가 받는다.
+    const redoBtn = (r, act, label) => (!r ? '' : `<button type="button" class="small ghost at-redo${r.on ? ' active' : ''}" data-act="${act}" `
+      + `aria-pressed="${!!r.on}" title="${escapeHtml(r.title || '')}"${off}>${label}</button>`);
+    const redo = !ctx.redo?.pre && !ctx.redo?.post ? '' : `<div class="at-send-redo" role="group" aria-label="정산 다시하기">`
+      + `${redoBtn(ctx.redo.pre, 'pre-redo', '사전정산 다시하기')}${redoBtn(ctx.redo.post, 'after-reopen', '사후정산 다시하기')}</div>`;
+    // 아직 보낼 때가 아니면(정산이 덜 끝났다) 까닭 한 줄만 적는다.
+    if (!gate.staged) return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(gate.why)}${doneNote}${redo}</div>`;
+
     // 사후정산이 완료된 카드에는 사후정산 칸(보관 중인 증빙 목록)이 없다 — 무엇이 묶이는지 여기에 적는다.
     // 완료한 사후정산을 다시 작성하는 중이면(gate.settle) 사후정산 칸이 다시 서 있어 거기에 적힌다.
-    const files = !gate.settle && stage.phase === 'post' && stage.done && kept.length
-      ? `<ul class="at-send-files">${kept.map((k) => `<li><span>${escapeHtml(`${k.label} · ${k.name}`)}</span><button type="button" class="small ghost at-kept-drop" data-act="kept-drop" `
+    // 알림 표시가 붙은 증빙에는 까닭과 `확정` 버튼이 선다 — 확정하면 그때부터 같이 간다.
+    const okBtn = (k) => (!k.warn ? '' : `<button type="button" class="small ghost at-kept-ok" data-act="kept-ok" data-name="${escapeHtml(k.name)}" `
+      + `title="이 출장의 증빙이 맞다고 확정합니다 — 그때부터 보낼 때 같이 갑니다"${off}>확정</button>`);
+    const files = !gate.settle && stage.phase === 'post' && stage.done && all.length
+      ? `<ul class="at-send-files">${all.map((k) => `<li${k.warn ? ' class="warn"' : ''}><span${k.warn ? ` title="${escapeHtml(k.warn)}"` : ''}>${escapeHtml(`${k.label} · ${k.name}${k.warn ? ` · ⚠ ${k.warn}` : ''}`)}</span>${okBtn(k)}`
+        + `<button type="button" class="small ghost at-kept-drop" data-act="kept-drop" `
         + `data-name="${escapeHtml(k.name)}" title="보관함에서 빼기" aria-label="${escapeHtml(k.name)} 보관함에서 빼기"${off}>×</button></li>`).join('')}</ul>` : '';
     // 사후정산을 쓰는 중이면 증빙은 위의 사후정산 칸(증빙 넣는 곳)이 읽어서 올리고 보관한다 — 읽지 않고 담는 칸을 여기에 또 두지 않는다.
-    const add = gate.settle ? '' : `<label class="at-send-add"><input type="file" multiple accept="${EVIDENCE_ACCEPT}" data-send="file" aria-label="보낼 증빙 넣기"${off} />`
-      + `<span>${kept.length ? '증빙 더 넣기' : '증빙 넣기'} · 읽지 않고 그대로 묶습니다</span></label>`;
+    // 사후정산을 완료한 출장에 넣는 증빙은 읽어서, 숙박 증빙·항공권이면 사후정산에 다시 올린다(ctx.read — 2026-10-05 사용자 지정:
+    // "사후정산을 완료 후 보낸 후 증빙을 … 추가 하면 다시 사후정산을 업데이트"). 읽을 길이 없으면(ctx.read 가 없다) 전처럼 그대로 묶는다.
+    const add = gate.settle ? '' : `<label class="at-send-add"${ctx.read ? ` title="${ADD_READ_TITLE}"` : ''}><input type="file" multiple accept="${EVIDENCE_ACCEPT}" data-send="file" aria-label="보낼 증빙 넣기"${off} />`
+      + `<span>${all.length ? '증빙 더 넣기' : '증빙 넣기'} · ${ctx.read ? ADD_READ : '읽지 않고 그대로 묶습니다'}</span></label>`;
     // 이전에 보낸 곳(2026-10-04 사용자 지정) — 한 줄이 과제·계정 · 받는 사람 · 보내는 길이고, 누르면 그 셋으로 보낸다. 켜진 줄이
     // 지금 보내는 곳이다. 길은 아이콘으로 적고(이름은 낭독기와 마우스를 올렸을 때만), Teams 로 보냈던 줄인데 지금 Teams 로 못 가면
     // 아이콘이 흐리다. 직접 고르는 칸은 접혀 있고 첫 줄 오른쪽의 목록 아이콘으로 편다 — 켜진 줄이 없으면(이전에 보낸 곳이 없거나,
@@ -242,10 +273,13 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       return `<span class="at-send-set-way${dim ? ' dim' : ''}" title="${escapeHtml(dim ? `${w.label} — ${noTeams}` : w.label)}">${WAY_ICON[w.channel]}<span class="sr-only">${escapeHtml(w.label)}</span></span>`;
     };
     const setTitle = (x) => `${personText(x.person)} — ${SET_TITLE}${x.way === 'teams' && noTeams ? ` (${noTeams} — 누르면 다시 확인합니다)` : ''}`;
+    // 줄마다 오른쪽 끝의 × 가 그 줄을 이전에 보낸 곳에서 지운다(2026-10-05 사용자 지정: "보내기 이력에서.. 이력을 삭제").
     const rows = box.sets.map((x, i) => `<button type="button" class="at-send-set${setOn(x, s) ? ' active' : ''}" data-act="send-set" data-i="${i}" aria-pressed="${setOn(x, s)}" `
       + `title="${escapeHtml(setTitle(x))}"${off}><strong>${escapeHtml(x.account)}</strong><span class="at-send-set-who">${escapeHtml(whoText(x.person))}</span>${wayTag(x)}</button>`);
+    const dels = box.sets.map((x, i) => `<button type="button" class="small ghost at-send-set-del" data-act="send-set-del" data-i="${i}" title="${SET_DEL_TITLE}" `
+      + `aria-label="${escapeHtml(`${x.account} · ${whoText(x.person)} 지우기`)}"${off}>×</button>`);
     const fold = `<button type="button" class="at-send-fold" data-act="send-fold" aria-expanded="${open}" aria-label="직접 고르기" title="${FOLD_TITLE}"${anyOn(s) ? '' : ' hidden'}>${FOLD_ICON}</button>`;
-    const sets = !rows.length ? '' : `<div class="at-send-sets" role="group" aria-label="이전에 보낸 곳">${rows[0]}${fold}${rows.slice(1).join('')}</div>`;
+    const sets = !rows.length ? '' : `<div class="at-send-sets" role="group" aria-label="이전에 보낸 곳">${rows[0]}${fold}${dels[0]}${rows.slice(1).map((r, i) => r + dels[i + 1]).join('')}</div>`;
     const person = s.person
       ? `<span class="at-send-picked" title="${escapeHtml(personText(s.person))}"><span class="at-send-who">${escapeHtml(personText(s.person))}</span><button type="button" class="small ghost at-kept-drop" data-act="send-person-clear" title="받는 사람 바꾸기" aria-label="받는 사람 바꾸기"${off}>×</button></span>`
       : `<input type="text" data-send="person" value="${escapeHtml(s.query)}" placeholder="이름·ID 로 찾기" aria-label="받는 사람 찾기" autocomplete="off"${off} />`
@@ -257,11 +291,10 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     const ways = '<div class="at-send-row at-send-way" role="group" aria-label="보내는 길"><span class="at-label">보내는 길</span><span class="at-chips">'
       + WAYS.map((w) => `<button type="button" class="at-chip${w.channel === way.channel ? ' active' : ''}${w.channel === 'teams' && noTeams ? ' dim' : ''}" data-act="send-way" `
         + `data-way="${w.channel}" aria-pressed="${w.channel === way.channel}" title="${escapeHtml(wayTitle(w))}"${off}>${escapeHtml(w.label)}</button>`).join('') + '</span></div>';
-    // 사후정산을 아직 완료하지 않은 출장 — 저장만 하는 버튼이 보내기 옆에 서고, 보내기는 저장 → 확정 → 송부를 잇는다.
+    // 사후정산을 아직 완료하지 않은 출장 — 버튼은 보내기 하나이고, 보내기가 저장 → 확정 → 송부를 잇는다(확정은 보낼 때 한다).
     // 저장·확정부터 한다는 안내는 카드에 적지 않는다(2026-10-04 사용자 지정) — 보내기 버튼의 title 과 팝업에 적혀 있다.
     // 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭(ctx.hold)만 적는다.
     const settleNote = gate.settle && ctx.hold ? `<p class="at-send-note error">${escapeHtml(ctx.hold)}</p>` : '';
-    const saveBtn = !gate.settle ? '' : `<button type="button" class="small ghost at-send-save" data-act="send-save" title="${SAVE_TITLE}"${canSave(gate, s, ctx) && !locked ? '' : ' disabled'}>사후정산 저장</button>`;
     // 직접 고르는 칸 — 과제·계정과 받는 사람은 한 줄에 나란히 선다(2026-10-04 사용자 지정, 칸이 좁아 과제·계정의 안내 글은 짧게
     // 적는다). 그 아래가 보내는 길이다.
     const form = !open ? '' : `<div class="at-send-pair"><div class="at-send-row" role="group" aria-label="과제·계정"><span class="at-label">과제·계정</span>`
@@ -270,21 +303,13 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       + ways;
     return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(how)}${doneNote}${files}${add}${sets}${form}`
       + settleNote
+      + (held ? `<p class="at-send-note error at-send-held">${escapeHtml(held)}</p>` : '')
       + (s.busy ? `<p class="at-send-note">${escapeHtml(s.stage || '보내는 중...')}</p>` : '')
       + (s.error ? `<p class="at-send-note error">${escapeHtml(s.error)}</p>` : '')
-      + `<div class="at-send-btns">${saveBtn}<button type="button" class="small at-request at-send-go" data-act="send-go" aria-haspopup="dialog" `
+      + redo
+      + `<div class="at-send-btns"><button type="button" class="small at-request at-send-go" data-act="send-go" aria-haspopup="dialog" `
       + `title="${gate.settle ? `${GO_TITLE} — ` : ''}보낼 내용을 먼저 보여 줍니다"`
       + `${canGo(gate, s, ctx) && !locked ? '' : ' disabled'}>${done ? '다시 보내기' : '보내기'}</button></div></div>`;
-  }
-
-  /**
-   * 두 번 눌러야 나가는 누름인가 — 사후정산을 저장하는 누름(`사후정산 저장`)이다. 그렇다면 첫 누름에 버튼에 적을 글(label)과
-   * 상태 줄에 적을 글(status — 무엇을 하는지)을 돌려주고, 아니면 null 이다. `보내기`는 팝업이 확인을 맡아 여기에 걸리지 않는다.
-   */
-  function confirmOf(btn, ctx) {
-    if (btn.dataset.act !== 'send-save' || !sendGate(ctx).settle) return null;
-    const { it, trip } = ctx;
-    return { label: '한 번 더 → 저장', status: `저장할 사후정산 — 여비계산서 ${trip.seq} · ${it.summary} · 카드에 있는 대로 저장합니다(확정은 하지 않습니다)` };
   }
 
   /** 글 칸을 친 뒤 — 카드를 새로 그리지 않고 버튼과 이전에 보낸 줄(켜짐, 접을 수 있는가)만 맞춘다. */
@@ -332,7 +357,9 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       if (e.type !== 'change') return true;
       const files = [...(target.files || [])];
       target.value = '';
-      addFiles(ctx, files);
+      // 사후정산을 완료한 출장이면 읽어서 사후정산에 반영하는 길로 넘긴다(ctx.read) — 읽을 길이 없으면 그대로 담는다.
+      if (ctx.read) ctx.read(files);
+      else addFiles(ctx, files);
     } else if (kind === 'account') {
       // 치는 칸은 펴 둔다 — 친 글이 이전에 보낸 줄과 같아져도 다음에 그릴 때 접히지 않는다.
       Object.assign(s, { account: target.value, touched: true, open: true });
@@ -365,24 +392,6 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       setStatus(`증빙을 보관하지 못했습니다: ${err.message}`, 'error');
     }
     await refresh();
-  }
-
-  /** `사후정산 저장` — 카드에 있는 대로 사후정산을 저장만 한다(확정도 송부도 하지 않는다). 무엇이 저장됐는지는 attendpanel.js 가 적는다. */
-  async function save(ctx) {
-    const s = of(ctx.it.docNo);
-    if (s.busy || !canSave(sendGate(ctx), s, ctx)) return;
-    const step = (text) => { s.stage = text; repaint(); };
-    Object.assign(s, { busy: true, error: '' });
-    step('사후정산을 저장하는 중...');
-    try {
-      await ctx.save(step);
-    } catch (err) {
-      s.error = `사후정산 저장 실패: ${err.message}`;
-      setError(err, '사후정산 저장 실패');
-    } finally {
-      Object.assign(s, { busy: false, stage: '' });
-      repaint();
-    }
   }
 
   /**
@@ -424,7 +433,8 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
         if (!trip || !stage) throw new Error('확정한 뒤 여비계산서 목록을 다시 읽지 못했습니다. 신청 내역을 새로 읽은 뒤 보내기를 눌러 주세요.');
         failed = '';
       }
-      const kept = await evidence.list(it.docNo);
+      // 출장 기간과 안 맞아 확정을 기다리는 증빙은 묶지 않는다(2026-10-05 사용자 지정) — 보관함에는 그대로 남는다.
+      const kept = sendable(await evidence.list(it.docNo));
       const gate = sendGate({ trip, stage, need, kept });
       if (!gate.ready || gate.settle) throw new Error(gate.why || '사후정산이 완료되지 않아 보내지 않았습니다');
       // 확정한 여비계산서를 출력(PDF)해 증빙 앞에 붙인다(2026-10-04 사용자 지정) — 받지 못하면 증빙만 보내지 않고 멈춘다.
@@ -488,13 +498,45 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     await chrome.storage.local.set({ sendWay: want });
   }
 
+  /**
+   * 이전에 보낸 곳의 한 줄을 지운다(2026-10-05 사용자 지정: "보내기 이력에서.. 이력을 삭제") — 패널이 기억해 둔 줄만 지운다.
+   * 그 줄을 고르고 있던 카드는 비운다 — 손대지 않은 카드가 되어 남은 맨 윗줄이 다시 깔리고, 남은 줄이 없으면 직접 고르는 칸이 펴진다.
+   */
+  async function dropSet(i) {
+    const x = box.sets[i];
+    if (!x) return;
+    box.sets = box.sets.filter((_, n) => n !== i);
+    for (const s of Object.values(box.by)) {
+      if (s.busy || s.account.trim() !== x.account || s.person?.id !== x.person.id) continue;
+      clearTimeout(s.timer);
+      Object.assign(s, { account: '', person: null, want: '', open: false, query: '', hits: null, hitsError: '', error: '', touched: false });
+    }
+    repaint();
+    await chrome.storage.local.set({ sendSets: box.sets });
+    setStatus(`이전에 보낸 곳에서 지웠습니다 — ${x.account} · ${whoText(x.person)}`);
+  }
+
+  /** 그 출장의 보낸 기록을 지운다 — 패널의 기록만 지운다(보낸 것이 취소되지는 않는다). 버튼은 `보내기`로 돌아간다. */
+  async function dropDone(docNo) {
+    const d = box.done[docNo];
+    if (!d) return;
+    const { [docNo]: _gone, ...left } = box.done;
+    box.done = left;
+    repaint();
+    await chrome.storage.local.set({ sendDone: box.done });
+    const what = `${stamp(d.at)} · ${d.channel} · ${d.to} · ${d.account}`;
+    setStatus(`보낸 기록을 지웠습니다 — ${what}`);
+    logEvent('trip', true, `여비증빙 보낸 기록 지움: ${docNo} — ${what}`, { docNo });
+  }
+
   /** 송부 칸의 버튼을 눌렀을 때(data-act 가 send- 로 시작하는 것). */
   function click(btn, ctx) {
     const s = of(ctx.it.docNo);
     const a = btn.dataset.act;
     if (a === 'send-go') return pop(btn, ctx);
-    if (a === 'send-save') return save(ctx);
     if (a === 'send-way') return pickWay(btn.dataset.way, s);
+    if (a === 'send-set-del') return s.busy ? undefined : dropSet(+btn.dataset.i);
+    if (a === 'send-done-del') return s.busy ? undefined : dropDone(ctx.it.docNo);
     if (a === 'send-fold') {
       // 직접 고르는 칸을 펴고 접는다 — 고른 것은 그대로다.
       s.open = !s.open;
@@ -525,5 +567,5 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     return undefined;
   }
 
-  return { load, html, input, click, confirmOf, add: addFiles, state: box };
+  return { load, html, input, click, add: addFiles, state: box };
 }

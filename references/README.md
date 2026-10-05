@@ -15,7 +15,7 @@ YAML(여기서 고친다) ──(npm run gen)──▶ src/travelspec.js · src/
 | [`review.md`](review.md) | **확장이 실제로 쓰는 값의 표** — 운임 전 구간·도시→역·규칙·마일리지, 출처와 기준일 | 고치지 않는다(생성물) | 아래 YAML 들 |
 | [`ktx-fares.yaml`](ktx-fares.yaml) | KTX 운임 **보정**(한 구간 고치기·더하기), 도시→타는 역, 갈아타는 역, 구간 소요 시간 | **손으로** | 조사·어림(머리말에 까닭) |
 | [`ktx-fares-official.yaml`](ktx-fares-official.yaml) | 코레일 공식 KTX 운임표 542구간 | 고치지 않는다 — `/refdata ktx` 가 다시 가져온다 | 코레일 엑셀(파일의 `source`·`basis`·`imported`) |
-| [`travel-rules.yaml`](travel-rules.yaml) | 여비 규칙 — 출장기간 구분, 일비, 식수, 교통편, 좌석 등급 | **손으로** | 사용자 지정 · eclass 화면 |
+| [`travel-rules.yaml`](travel-rules.yaml) | 여비 규칙 — 출장기간 구분, 일비, 식수, 교통편, 좌석 등급, 숙박비 상한액 초과(1.5배까지 부서장 승인) | **손으로** | 사용자 지정 · eclass 화면 |
 | [`air-mileage.yaml`](air-mileage.yaml) | 항공 마일리지 — 구간 마일, 좌석 등급별 적립률, 공항 이름 | **손으로**(원본과 맞춰 보고) | 항공사 안내 페이지(`source`), 맞춰 본 날은 `checked` |
 | [`input.yaml`](input.yaml) | LLM 이 말을 구조로 바꿀 때의 명세 — 칸·형·범위·규칙 | **손으로**(개발자) | — |
 
@@ -40,6 +40,7 @@ YAML(여기서 고친다) ──(npm run gen)──▶ src/travelspec.js · src/
 | 출장지에서 내릴 역 바꾸기 | `ktx-fares.yaml` 의 `places` | `고양: 행신` |
 | 한 구간의 소요 시간 바꾸기 | `ktx-fares.yaml` 의 `times.routes` | `- { a: 부산, b: 대전, hours: 3 }` |
 | 아침·저녁을 세는 시각 바꾸기 | `travel-rules.yaml` 의 `meals` | `first_day_depart_hour_at_most: 7` |
+| 상한액을 넘는 숙박비의 승인 범위 바꾸기 | `travel-rules.yaml` 의 `lodging.over_cap` | `approve_rate: 1.5` · `approver: 부서장` |
 | 마일리지 구간 고치기·더하기 | `air-mileage.yaml` 의 그 항공사 `routes` | `- { a: 김포, b: 김해, miles: 215 }` |
 | 코레일이 운임을 바꿨다 | 손대지 않는다 | `/refdata ktx` (스킬) |
 

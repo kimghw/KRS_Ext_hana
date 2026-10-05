@@ -56,6 +56,9 @@ export function checkRules(rules) {
   for (const g of ['standard', 'first']) {
     if (typeof rules.transport?.train?.grade_labels?.[g] !== 'string') at(`transport.train.grade_labels.${g} 이 없습니다`);
   }
+  const over = rules.lodging?.over_cap;
+  if (!(typeof over?.approve_rate === 'number' && over.approve_rate >= 1)) at('lodging.over_cap.approve_rate 는 1 이상의 수입니다(상한액의 몇 배까지 승인으로 정산하는가)');
+  if (!(typeof over?.approver === 'string' && over.approver.trim())) at('lodging.over_cap.approver 가 없습니다(누구의 승인인가)');
   return errors;
 }
 
@@ -300,6 +303,8 @@ export function renderReview(rulesText, faresText, officialText, mileageText) {
       + `저녁은 마지막 날 ${rules.meals.dinner.last_day_arrive_hour_at_least}시 이상에 닿았을 때 센다`,
     `- **교통편** — ${rules.transport.choices.map((c) => `${c.label}${c.auto ? '(교통편 내역을 자동으로 넣음)' : ''}`).join(' · ')} — 기본은 ${choice(rules.transport.default)}`,
     `- **기차 좌석 등급** — ${Object.values(rules.transport.train.grade_labels).join(' · ')} — 기본은 ${rules.transport.train.grade_labels[rules.transport.train.grade]}`,
+    `- **숙박비 상한액 초과** — 상한액으로 정산할지 실제 금액으로 정산할지 고른다. 상한액의 ${rules.lodging.over_cap.approve_rate}배까지는 ${rules.lodging.over_cap.approver} 승인을 받아 실제 금액으로 정산한다`
+      + `(${rules.lodging.over_cap.source}${rules.lodging.over_cap.checked ? ` · 맞춰 본 날 ${rules.lodging.over_cap.checked}` : ''})`,
     '',
     '## KTX 운임',
     '',

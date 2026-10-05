@@ -1,6 +1,6 @@
 // 여비계산서 증빙 송부의 규칙(src/send.js)과 Teams MCP 확인(src/teams.js) — 언제 보내는지, 어느 길로, 무슨 글로, 최근 과제·계정.
 import assert from 'node:assert/strict';
-import { sendGate, channelOf, teamsWhy, wantOf, wantOfLabel, WAYS, pushRecent, pdfName, sendTitle, sendLines, evidenceCount, RECENT_MAX } from '../src/send.js';
+import { sendGate, sendable, heldNote, channelOf, teamsWhy, wantOf, wantOfLabel, WAYS, pushRecent, pdfName, sendTitle, sendLines, evidenceCount, RECENT_MAX } from '../src/send.js';
 import { teamsState, teamsSendFile, rpcReply, FILE_TOOL, TEAMS_MCP_URL } from '../src/teams.js';
 
 let pass = 0;
@@ -19,6 +19,16 @@ t('숙박도 비행기도 없으면(당일) 사전정산을 마친 뒤 당일증
   assert.deepEqual(gate({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [KEPT[0]] }), [true, true, 'day', '']);
   assert.deepEqual(gate({ trip: DAY, stage: pre(false), need: { needed: false }, kept: [KEPT[0]] }), [false, false, 'day', '사전정산이 완료된 뒤에 보냅니다']);
   assert.deepEqual(gate({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [] }), [false, true, 'day', '당일증빙(출장지에서 결제한 영수증)을 넣어 주세요']);
+});
+// 2026-10-05 사용자 지정: "출장 기간동안의 내용이 아니면 … 문서보관에 알림표지 하고 확정 해주기 전까지는 보내기 해도 같이 보내지 말고"
+t('출장 기간과 안 맞아 알림 표시(warn)가 붙은 증빙은 확정하기 전에는 보내는 것에 들지 않는다 — 무엇이 빠지는지 한 줄로 말하고, 당일증빙으로도 치지 않는다', () => {
+  const held = { label: '당일출장 증명', name: '늦은점심.png', warn: '결제일(9/15)이 출장 기간(9/9) 밖입니다' };
+  assert.deepEqual(sendable([KEPT[0], held, KEPT[1]]), [KEPT[0], KEPT[1]]);
+  assert.deepEqual([sendable(null), heldNote(KEPT), heldNote(null)], [[], '', '']);
+  assert.equal(heldNote([KEPT[0], held, { ...held, name: '제주.png' }]), '출장 기간과 안 맞아 확정하지 않은 증빙 2장은 보내지 않습니다 — 늦은점심.png · 제주.png');
+  assert.deepEqual(gate({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [held] }), [false, true, 'day', '당일증빙(출장지에서 결제한 영수증)을 넣어 주세요']);
+  assert.deepEqual(gate({ trip: DAY, stage: pre(true), need: { needed: false }, kept: [held, KEPT[0]] }), [true, true, 'day', '']);
+  assert.deepEqual(gate({ trip: TRIP, stage: post(true), need: null, kept: [held] }), [true, true, 'after', ''], '숙박·비행기 출장은 여비계산서만이라도 나간다');
 });
 t('숙박했거나 비행기를 탔으면 사후정산이 완료된 뒤에 보낸다 — 아직이면 송부 칸은 열리고, 보내기가 사후정산을 저장·확정부터 한다(settle)', () => {
   const settle = (o) => sendGate(o).settle;

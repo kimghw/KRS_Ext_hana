@@ -576,6 +576,42 @@ export function legPlan({ trip, picks = {}, rows = [], seats = {}, workplace = '
   return { legs, problems: legs.filter((l) => l.problem).map((l) => `${l.label}: ${l.problem}`), notes, changed: !sameTrans(out, had) };
 }
 
+/**
+ * 사전정산을 다시 작성할 때의 가는 편·오는 편(2026-10-05 사용자 지정: "사전정산 다시하기") — 출장 카드에서 편마다 교통편을 다시 고르면
+ * 사전정산 입력 화면의 교통편 줄을 그것으로 바꿔 다시 저장한다. 여기는 무엇을 지우고(drop) 무엇을 새로 넣는지(add)만 셈한다 —
+ * 본문은 preEditBody 가 짓고, 보내는 것은 src/trip.js 의 tripPreSave 다.
+ *
+ * 편마다 — 손대지 않았거나 사전정산의 줄과 같은 것을 골랐으면 그 줄 그대로다. 기차면 운임표의 정가이고(legPlan), 비행기·버스면
+ * **줄을 넣지 않는다** — 신청할 때와 같다(settlePlan: 요금이 그때그때 달라 교통편 내역은 비워 둔다. 비행기는 다녀온 뒤 사후정산에
+ * 항공권으로 올린다). 바꾼 편의 새 줄에는 출발·도착 시를 적는다(legTimesAll).
+ *
+ * **한 편만 바꿔도 교통편 줄은 모두 지우고 차례대로(가는 편 → 오는 편 → 그 뒤의 줄) 다시 넣는다** — 바꾸지 않은 편의 줄은 값 그대로
+ * 다시 들어간다. 가는 편의 줄만 새로 넣으면 그 줄이 오는 편의 줄보다 뒤에 서서(새 줄은 번호가 크다), 다음에 읽을 때 첫 줄을 가는 편으로
+ * 보는 규칙(legsOfRows)에서 두 편이 뒤바뀐다.
+ *
+ * @param {{trip:object, picks?:{go?:object,back?:object}, rows?:object[], workplace?:string, sHour?:number|null, eHour?:number|null}} ctx
+ *   rows 는 사전정산의 지금 줄(parseTransRows), sHour·eHour 는 출장의 출발 시·도착 시다
+ * @returns {{legs: object[], drop: string[], add: object[], problems: string[], notes: string[], changed: boolean}}
+ *   legs 는 legPlan 의 편(줄을 넣지 않는 편은 row 가 null 이고 blank 가 그 말이다), drop 은 지울 줄의 번호(tr_seq), add 는 새로 넣을 줄이다.
+ *   바꾼 편이 없으면 drop·add 가 비어 있다
+ */
+export function prePlan({ trip, picks = {}, rows = [], workplace = '', sHour = null, eHour = null }) {
+  const route = legPlan({ trip, picks, rows, workplace });
+  const legs = route.legs.map((l) => (picks[l.key]?.t && picks[l.key].t !== GRADED && l.source !== 'site' && !l.row
+    ? { ...l, problem: '', blank: `${labelOf(picks[l.key].t)} — 사전정산에는 교통편 줄을 넣지 않습니다` } : l));
+  // 그 편의 줄이 달라지는가 — 손대지 않았거나 사전정산의 줄과 같으면 아니고, 줄이 없던 편에 줄을 넣지 않는 것도 달라지는 것이 아니다.
+  const moved = (l) => !!picks[l.key]?.t && l.source !== 'site' && !l.problem && !!(l.site || l.row);
+  const changed = legs.some(moved);
+  const kept = new Set(legs.flatMap((l) => legParts(l.site)));
+  const lines = (l) => (l.problem || !moved(l) ? legParts(l.site) : legTimesAll(l.key, l.row, { sHour, eHour }).map((at, i) => ({ ...legParts(l.row)[i], ...at })));
+  return {
+    legs,
+    drop: changed ? rows.map((r) => r.seq).filter(Boolean) : [],
+    add: changed ? [...legs.flatMap(lines), ...rows.filter((r) => !kept.has(r))].map((r) => ({ ...r })) : [],
+    problems: legs.filter((l) => l.problem).map((l) => `${l.label}: ${l.problem}`), notes: route.notes, changed,
+  };
+}
+
 /** 교통편 줄 하나를 한 마디로 — "KTX 부산→서울 일반석 54,400원", 갈아타는 편이면 "KTX 부산→오송→목포 일반석 69,500원". 카드와 확인 문구에 쓴다. */
 export function describeTrans(row) {
   const name = row.transport === SITE_OF[GRADED] ? 'KTX' : labelOf(VALUE_OF[row.transport]) || row.transport;
@@ -794,6 +830,33 @@ function transLine(t) {
   return [['tr_seq', ''], ['tr_del', '0'], ['tr_trseq', String(t.trseq || '')], ['tr_revno', String(t.revno || '')],
     ['tr_smn', '0'], ['tr_emn', '0'], ['tr_date', t.date], ['tr_dep', t.dep], ['tr_shr', String(t.shr ?? 0)], ['tr_arr', t.arr], ['tr_ehr', String(t.ehr ?? 0)],
     ['tr_transport', t.transport], ['tr_grade', t.grade], ['tr_total', String(t.total)], ['tr_currency', t.currency]];
+}
+
+/**
+ * 이미 있는 여비계산서의 사전정산 입력 화면(고치기)에서 읽은 칸으로 **다시 저장할** 본문을 짓는다 — 교통편 줄만 바꾼다(prePlan 의
+ * drop·add). 지울 줄은 화면의 × 가 하듯 그 줄의 tr_del 을 1 로 바꾸고(2026-10-05 실제 화면의 delRow: 번호가 있는 줄은 지움 표시만 한다),
+ * 새 줄은 토큰 앞에 넣는다. 나머지 칸은 화면에 있던 그대로다 — 바꿀 것이 없으면 화면의 `저장`만 누른 것과 같다.
+ * 그 계산서의 화면이 아니거나(번호가 다르다) 토큰이 없거나 지울 줄이 화면에 없으면 던진다 — 다른 문서나 다른 줄을 건드리면 안 된다.
+ * @param {[string,string][]} fields formFields 의 결과
+ * @param {string} seq 계산서 번호
+ * @param {{drop?: string[], add?: object[]}} change 지울 줄의 번호와 새로 넣을 줄(trseq·revno 는 trip.js 가 채워 넣는다)
+ * @returns {string} application/x-www-form-urlencoded
+ */
+export function preEditBody(fields, seq, { drop = [], add = [] } = {}) {
+  const get = (name) => fields.find(([n]) => n === name)?.[1];
+  if (!seq || get('seq') !== String(seq)) throw new Error('이 여비계산서의 사전정산 입력 화면이 아닙니다.');
+  if (!get(TOKEN)) throw new Error('여비계산서 화면에서 요청 확인 토큰을 찾지 못했습니다.');
+  const gone = new Set(drop.map(String));
+  const body = new URLSearchParams();
+  let cur = '';   // 지금 지나는 교통편 줄의 번호 — 줄마다 tr_seq 바로 뒤가 tr_del 이다
+  for (const [name, value] of fields) {
+    if (name === TOKEN) for (const t of add) for (const [n, v] of transLine(t)) body.append(n, v);
+    if (name === 'tr_seq') cur = value;
+    const kill = name === 'tr_del' && gone.delete(cur);
+    body.append(name, kill ? '1' : value);
+  }
+  if (gone.size) throw new Error('지울 교통편 줄이 사전정산 화면에 없습니다(그 사이에 바뀌었을 수 있습니다). 신청 내역을 새로 읽어 주세요.');
+  return body.toString();
 }
 
 /**

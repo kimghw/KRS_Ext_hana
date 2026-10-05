@@ -39,6 +39,27 @@ await ta('하나를 빼면 그것만 없어진다', async () => {
   await store.remove('TR-1', '점심.png');
   assert.deepEqual((await store.list('TR-1')).map((x) => x.name), ['항공권.pdf']);
 });
+// 2026-10-05 사용자 지정: 출장 기간의 것이 아닌 문서는 알림 표시를 붙여 보관하고, 확정하기 전에는 올리지도 보내지도 않는다.
+await ta('알림 표시(warn)로 담은 증빙을 확정하면 표시가 걷히고 확정했다고 적힌다 — 읽은 기록에도 적고, 올려야 하는 것이면 "아직 안 올림"이 붙는다', async () => {
+  const marks = [];
+  const store = createEvidenceStore(fakeBackend(), { mirror: (m) => { marks.push(m); } });
+  const WHY = '묵은 기간(9/15~9/16)이 출장 기간(9/9) 밖입니다';
+  await store.keep('TR-1', [
+    { ...PNG('hotel.png', '숙박 증빙'), warn: WHY, record: { docType: 'lodging_receipt', checkIn: '2026-09-15', checkOut: '2026-09-16' } },
+    { ...PNG('lunch.png', '당일출장 증명'), warn: '결제일(9/8)이 출장 기간(9/9) 밖입니다', record: { docType: 'other_receipt', payDate: '2026-09-08' } },
+    PNG('점심.png', '당일출장 증명'),
+  ]);
+  assert.deepEqual(marks.at(-1)['TR-1'], [{ name: 'hotel.png', label: '숙박 증빙', warn: WHY },
+    { name: 'lunch.png', label: '당일출장 증명', warn: '결제일(9/8)이 출장 기간(9/9) 밖입니다' }, { name: '점심.png', label: '당일출장 증명' }], '줄여 적은 것에도 알림 표시가 있다');
+  const hotel = await store.confirm('TR-1', 'hotel.png', { todo: true });
+  assert.deepEqual([hotel.warn, hotel.confirmed, hotel.todo, hotel.record.confirmed, hotel.dataUrl], [undefined, true, true, true, 'data:image/png;base64,AAAA']);
+  const lunch = await store.confirm('TR-1', 'lunch.png');
+  assert.deepEqual([lunch.warn, lunch.confirmed, lunch.todo, lunch.record.confirmed], [undefined, true, undefined, true], '올릴 것이 없는 영수증에는 "아직 안 올림"을 붙이지 않는다');
+  assert.deepEqual(marks.at(-1)['TR-1'], [{ name: 'hotel.png', label: '숙박 증빙', todo: true }, { name: 'lunch.png', label: '당일출장 증명' }, { name: '점심.png', label: '당일출장 증명' }]);
+  assert.deepEqual((await store.list('TR-1')).map((x) => [x.name, !!x.warn, !!x.confirmed]), [['hotel.png', false, true], ['lunch.png', false, true], ['점심.png', false, false]]);
+  assert.deepEqual([await store.confirm('TR-1', '점심.png'), await store.confirm('TR-1', '없는것.png'), await store.confirm('TR-1', 'hotel.png')], [null, null, null],
+    '알림 표시가 없는 것·없는 파일·이미 확정한 것은 건드리지 않는다');
+});
 await ta('IndexedDB 가 없는 환경에서는 던진다 — 부르는 쪽(패널)이 잡아 "보관하지 못했다"고 말한다', async () => {
   assert.deepEqual([EVIDENCE_DB, EVIDENCE_STORE], ['krsWorkspace', 'tripEvidence']);
   const store = createEvidenceStore(idbBackend({ idb: undefined }));

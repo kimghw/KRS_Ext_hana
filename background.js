@@ -84,7 +84,7 @@ async function readReceipt(msg) {
 /**
  * 홈의 WORKSPACE 카드가 출장 줄에 놓거나 붙여 넣은 증빙 한 장을 받아 달라고 한다(2026-10-04 사용자 지정). 카드는 콘텐츠 스크립트라
  * Claude 도 보관함(확장의 IndexedDB)도 쓸 수 없다. 패널의 출장 카드와 같은 판단(src/intake.js)으로 읽어 증빙으로 쓸 수 있는 것만
- * 보관함에 담는다 — 여비계산서는 바꾸지 않는다(사후정산에 올리는 것은 패널의 출장 카드가 한다). 무엇을 받았는지는 활동 기록에 남긴다.
+ * 보관함에 담는다 — 여기서는 여비계산서를 바꾸지 않는다(사후정산에는 홈 카드가 이어서 올린다 — src/afterup.js). 무엇을 받았는지는 활동 기록에 남긴다.
  * @returns {Promise<{ok: boolean, kept?: boolean, name?: string, label?: string, note?: string, todo?: boolean, error?: string}>}
  */
 async function keepEvidence(msg) {
@@ -95,7 +95,8 @@ async function keepEvidence(msg) {
       store: createEvidenceStore(),
       read: (file, ctx) => receiptSmart(file, ctx, { apiKey, useNative: true }),
     });
-    const what = r.ok ? (r.kept ? `${r.label} 보관` : `${r.label} — 증빙으로 쓸 수 없음(${r.note})`) : `실패 — ${r.error}`;
+    const what = !r.ok ? `실패 — ${r.error}` : !r.kept ? `${r.label} — 증빙으로 쓸 수 없음(${r.note})`
+      : r.warn ? `${r.label} — 출장 기간과 안 맞아 알림 표시로 보관(${r.warn})` : `${r.label} 보관`;
     createLogbook({ storage: chrome.storage.local })
       .add('trip', { ok: r.ok, text: `홈 카드에서 받은 증빙: ${r.name || msg?.file?.name || '?'} · ${what}`, data: { docNo: msg?.docNo, seq: msg?.trip?.seq, todo: !!r.todo } })
       .catch(() => {});
@@ -113,12 +114,48 @@ function syncMarks() {
   );
 }
 
+/**
+ * 홈의 WORKSPACE 카드가 넣은 증빙을 그 자리에서 사후정산에 올릴 때(src/afterup.js) 보관함에 부탁하는 것들 — 카드는 보관함을 못 읽는다.
+ *   evidenceGiven  그 출장의 증빙 가운데 읽은 기록이 붙은 것(파일은 빼고) — 아직 안 올린 것(todo)과 앞서 올린 항공권이다
+ *   evidenceFile   증빙 한 장의 파일(숙박 줄의 첨부로 올라간다)
+ *   evidenceDone   올렸다 — "아직 안 올림" 표시를 걷는다
+ * 던지지 않는다 — 못 하면 까닭을 답한다.
+ */
+function shelf(work) {
+  return Promise.resolve().then(() => work(createEvidenceStore())).then(
+    (r) => ({ ok: true, ...r }),
+    (err) => ({ ok: false, error: err?.message || String(err) }),
+  );
+}
+const givenEvidence = (msg) => shelf(async (store) => ({
+  // 출장 기간과 안 맞아 알림 표시로 둔 것(warn)은 주지 않는다 — 확정하기 전에는 올리지 않는다.
+  items: (await store.list(String(msg?.docNo || ''))).filter((k) => k.record && !k.warn)
+    .map((k) => ({ name: k.name, type: k.type || '', label: k.label, todo: !!k.todo, record: k.record })),
+}));
+const evidenceFile = (msg) => shelf(async (store) => {
+  const hit = (await store.list(String(msg?.docNo || ''))).find((k) => k.name === msg?.name);
+  if (!hit) throw new Error('보관함에 그 파일이 없습니다.');
+  return { dataUrl: hit.dataUrl };
+});
+const evidenceDone = (msg) => shelf(async (store) => ({ settled: await store.settle(String(msg?.docNo || ''), Array.isArray(msg?.names) ? msg.names : []) }));
+
+/** 홈의 WORKSPACE 카드가 여비계산서에 한 일(사전정산 완료·사후정산 올리기)을 활동 기록에 남겨 달라고 한다 — 기록은 한 곳에서 줄 세워 쓴다. */
+function logTrip(msg) {
+  return createLogbook({ storage: chrome.storage.local })
+    .add('trip', { ok: msg?.ok !== false, text: String(msg?.text || ''), data: msg?.data })
+    .then(() => ({ ok: true }), (err) => ({ ok: false, error: err?.message || String(err) }));
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'openSidePanel') openSidePanel(sender).then(sendResponse);
   else if (msg?.type === 'hrPlans') readPlans(!!msg.force).then(sendResponse);
   else if (msg?.type === 'receiptRead') readReceipt(msg).then(sendResponse);
   else if (msg?.type === 'evidenceKeep') keepEvidence(msg).catch((err) => ({ ok: false, error: err?.message || String(err) })).then(sendResponse);
   else if (msg?.type === 'evidenceMarks') syncMarks().then(sendResponse);
+  else if (msg?.type === 'evidenceGiven') givenEvidence(msg).then(sendResponse);
+  else if (msg?.type === 'evidenceFile') evidenceFile(msg).then(sendResponse);
+  else if (msg?.type === 'evidenceDone') evidenceDone(msg).then(sendResponse);
+  else if (msg?.type === 'tripLog') logTrip(msg).then(sendResponse);
   else return false;
   return true;   // 답은 나중에 준다
 });

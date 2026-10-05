@@ -1,8 +1,10 @@
-// 홈의 WORKSPACE 카드에서 넣어 둔 증빙을 패널의 출장 카드가 사후정산에 올린다(attendpanel.js) — 2026-10-04 사용자 지정.
+// 홈의 WORKSPACE 카드에서 넣은 증빙과 패널의 출장 카드(attendpanel.js) — 2026-10-04 사용자 지정.
 //
-// 홈 카드는 증빙을 읽어서 보관만 한다(src/intake.js — 숙박 증빙·항공권에는 읽은 기록 record 와 "아직 안 올림" todo 를 붙인다).
-// 출장 카드는 그것을 알아보고 `홈에서 넣은 증빙을 사후정산에 올리기` 버튼을 세우며, 두 번 누르면 **다시 읽지 않고** 그때 읽은 기록으로
+// 홈 카드는 증빙을 읽어서 보관하고(src/intake.js — 숙박 증빙·항공권에는 읽은 기록 record 와 "아직 안 올림" todo 를 붙인다) **곧바로
+// 사후정산에 올린다**(src/afterup.js — 같은 날 사용자 지정: "올리면 바로 사후등록"). 그렇게 못 올려 남은 것(정산금액을 물어야 한다 등)은
+// 출장 카드가 알아보고 `홈에서 넣은 증빙을 사후정산에 올리기` 버튼을 세우며, 두 번 누르면 **다시 읽지 않고** 그때 읽은 기록으로
 // 올린다. 올리기 전에는 여비증빙 송부 칸의 저장·보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다.
+// 앞쪽은 남은 증빙을 버튼으로 올리는 길이고, 뒤쪽은 홈 카드가 곧바로 올렸을 때 펴 둔 출장 카드가 따라오는 것이다.
 // eclass 여비계산서와 Claude 는 흉내 낸다 — **실제 사이트에는 아무것도 보내지 않는다.**
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -131,7 +133,7 @@ const goBtn = () => doc.querySelector('#atList button[data-act="kept-go"]');
 const status = () => doc.getElementById('atStatus').textContent;
 const sendNote = () => doc.querySelector('#atList .at-send .at-send-note')?.textContent || '';
 
-console.log('홈 카드에서 넣은 증빙 — 출장 카드가 알아본다');
+console.log('홈 카드에서 넣었는데 거기서 못 올린 증빙 — 출장 카드가 알아본다');
 await ta('홈 카드가 증빙을 넣으면(보관함이 바뀌면) 펴 둔 출장 카드가 보관함을 다시 읽는다 — 사후정산에 안 올린 증빙이라고 적고, 올리는 버튼을 세운다', async () => {
   assert.equal(goBtn(), null);
   const a = await fromHome('hotel.png', HOTEL);
@@ -143,9 +145,9 @@ await ta('홈 카드가 증빙을 넣으면(보관함이 바뀌면) 펴 둔 출�
   assert.equal(goBtn().textContent, '홈에서 넣은 증빙을 사후정산에 올리기');
   assert.equal(goBtn().closest('.at-leg-go').querySelector('.at-after-note').textContent, '홈 카드에서 넣은 증빙 1장은 사후정산에 아직 올리지 않았습니다');
 });
-t('올리기 전에는 여비증빙 송부 칸의 사후정산 저장·보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다', () => {
+t('올리기 전에는 여비증빙 송부 칸의 보내기가 잠긴다 — 숙박 줄이 빠진 사후정산이 확정되면 안 된다', () => {
   assert.equal(sendNote(), '홈 카드에서 넣은 증빙을 사후정산 칸에서 먼저 올려 주세요');
-  assert.deepEqual(['send-save', 'send-go'].map((act) => doc.querySelector(`#atList button[data-act="${act}"]`).disabled), [true, true]);
+  assert.equal(doc.querySelector('#atList button[data-act="send-go"]').disabled, true);
 });
 
 console.log('사후정산에 올리기 — 다시 읽지 않고 그때 읽은 기록으로');
@@ -173,17 +175,100 @@ await ta('올린 뒤에는 "아직 안 올림" 표시가 없어진다 — 버튼
   assert.deepEqual([hotel.label, hotel.todo, 'record' in hotel], ['숙박 증빙', undefined, false]);
   assert.deepEqual(store[MARKS_KEY]['TR-1'].find((k) => k.name === 'hotel.png'), { name: 'hotel.png', label: '숙박 증빙' });
   assert.equal(sendNote(), '', '막는 까닭이 걷힌다 — 저장·확정부터 한다는 안내는 카드에 적지 않는다');
-  assert.equal(doc.querySelector('#atList button[data-act="send-save"]').disabled, false);
+  assert.equal(doc.querySelector('#atList button[data-act="send-go"]').disabled, true, '과제·계정과 받는 사람을 아직 고르지 않아 보내기는 잠겨 있다 — 막는 까닭은 없다');
 });
-await ta('같은 증빙을 홈 카드에 또 넣어도 같은 숙박 줄을 두 번 올리지 않는다', async () => {
+// 2026-10-05 사용자 지정(올라가 있는 숙박 줄 아래의 올리기 버튼을 보고): "왜 여전히 이 버튼이 있는지 모르겠어. 이게 확인이 안되나? 출장이랑 맞잖아"
+await ta('같은 증빙을 홈 카드에 또 넣으면 이미 올라가 있는 줄인 것을 알아본다 — 올리는 버튼 없이 "안 올림" 표시가 걷히고, 사이트에는 아무것도 가지 않는다', async () => {
   await fromHome('hotel.png', HOTEL);
-  await until(() => !!goBtn(), '버튼 다시 서기');
+  await until(() => /^이미 사후정산에 올라가 있는 숙박 줄의 증빙입니다/.test(status()) && !goBtn(), '이미 올라간 줄 알아보기');
+  assert.equal(status(), '이미 사후정산에 올라가 있는 숙박 줄의 증빙입니다 — 다시 올리지 않습니다(hotel.png)');
+  assert.equal(site.saves.length, 1, '다시 올리지 않는다');
+  assert.deepEqual(kept().filter((s) => /안 올림/.test(s)), []);
+  assert.deepEqual(store[MARKS_KEY]['TR-1'].find((k) => k.name === 'hotel.png'), { name: 'hotel.png', label: '숙박 증빙' }, '홈 카드가 보는 것에서도 걷힌다');
+  assert.equal(sendNote(), '', '송부 칸도 잠기지 않는다');
+});
+
+console.log('홈 카드가 곧바로 올린다(src/afterup.js) — 펴 둔 출장 카드는 따라온다');
+const { afterUp, UP_BUSY_KEY } = await import('../src/afterup.js');
+const tripSite = await import('../src/trip.js');
+const INN = { ...HOTEL, vendor: '일산여관', bizNo: '128-81-11111', total: 99000, supply: 90000, vat: 9000, summary: '일산여관 1박 99,000원' };
+/** 홈 카드가 하는 것과 같은 길 — 보관함은 배경이 하듯 이 보관함에서 꺼내고, 여비계산서는 진짜 길(src/trip.js)로 가짜 eclass 와 말한다. */
+const homeUp = () => afterUp({ docNo: 'TR-1', row: { seq: '145580', from: '2026-09-09', to: '2026-09-10' }, me: '김거화' }, {
+  storage: chrome.storage.local,
+  given: async (docNo) => (await evidence.list(docNo)).filter((k) => k.record).map((k) => ({ name: k.name, type: k.type, label: k.label, todo: !!k.todo, record: k.record })),
+  fileOf: async (docNo, name) => (await evidence.list(docNo)).find((k) => k.name === name)?.dataUrl || '',
+  done: (docNo, names) => evidence.settle(docNo, names),
+  log: (ok, text) => { logs.push({ kind: 'trip', ok, text }); },
+  // 사전정산의 교통편은 카드가 읽어 둔 것과 같다(가짜 eclass 에는 작성 화면이 없다).
+  site: { list: tripSite.tripList, preDetail: async () => st.after['145580'].detail, preConfirm: tripSite.tripPreConfirm, lodgeMax: tripSite.tripLodgeMax, afterSave: tripSite.tripAfterSave },
+});
+const lodgeRows = () => [...doc.querySelectorAll('#atList .at-lodge')].map((n) => `${n.querySelector('.at-lodge-company').textContent} ${n.querySelector('.at-lodge-total').textContent} ${n.querySelector('.at-lodge-src').textContent}`);
+await ta('홈 카드가 받아 올리는 중이면 패널의 버튼은 올리지 않는다 — 같은 숙박 줄이 두 번 올라가지 않게', async () => {
+  await chrome.storage.local.set({ [UP_BUSY_KEY]: { 'TR-1': Date.now() } });
+  await fromHome('inn.png', INN);
+  await until(() => !!goBtn(), '버튼 서기');
   goBtn().click();
   await wait(20);
   goBtn().click();
-  await until(() => !st.after['145580'].busy && !goBtn(), '다시 올리기');
-  assert.equal(site.saves.length, 1, '같은 줄이 이미 있어 보내지 않는다');
-  assert.match(status(), /같은 숙박 줄이 사후정산에 이미 있어 다시 올리지 않았습니다/);
+  await wait(50);
+  assert.equal(site.saves.length, 1, '올리지 않는다');
+  assert.match(status(), /^홈 카드가 이 증빙을 사후정산에 올리는 중입니다/);
+  assert.equal(goBtn().textContent, '홈에서 넣은 증빙을 사후정산에 올리기');
+});
+await ta('홈 카드가 올리면 펴 둔 출장 카드가 따라온다 — "안 올림"과 버튼이 걷히고, 숙박비 내역에 그 줄이 증빙으로 올린 줄로 선다. 다시 읽지 않는다', async () => {
+  const r = await homeUp();
+  await chrome.storage.local.set({ [UP_BUSY_KEY]: {} });
+  assert.deepEqual([r.ok, r.sent, r.text], [true, true, '사후정산을 올렸습니다 — 숙박 일산여관 1박 99,000원']);
+  assert.equal(site.saves.length, 2);
+  const row = site.saves[1].rows.at(-1);
+  assert.deepEqual([row.seq, row.company, row.total, row.samount, row.vat, site.saves[1].file?.name], ['', '일산여관', '99000', '90000', '9000', 'inn.png']);
+  assert.equal(site.asks.length, 0, 'Claude 는 부르지 않는다');
+  await until(() => !goBtn() && lodgeRows().length === 2, '카드가 따라오기');
+  assert.deepEqual(kept().filter((s) => /안 올림/.test(s)), []);
+  assert.deepEqual(lodgeRows(), ['킨텍스호텔 110,000원 증빙', '일산여관 99,000원 증빙']);
+  assert.equal(store.attendLodgeMine['145580']['81562'], 'inn.png');
+  assert.equal(sendNote(), '', '송부 칸이 풀린다');
+});
+
+// 2026-10-05 사용자 지정: "출장 기간동안의 내용이 아니면 알림을 줘 안맞다고, 맞는것만 선별취급 해서 올리고 해당 없는거는 문서보관에 알림표지 하고
+// 확정 해주기 전까지는 보내기 해도 같이 보내지 말고"
+console.log('출장 기간의 것이 아닌 증빙 — 알림 표시로 보관하고, 확정하기 전에는 올리지도 보내지도 않는다');
+const JEJU = { ...HOTEL, vendor: '제주호텔', bizNo: '616-81-22222', payDate: '2026-09-21', checkIn: '2026-09-20', checkOut: '2026-09-21', total: 90000, supply: null, vat: null, summary: '제주호텔 1박 90,000원' };
+const WHY = '묵은 기간(9/20~9/21)이 출장 기간(9/9~9/10) 밖입니다';
+const keptLi = (name) => [...doc.querySelectorAll('#atList .at-kept li')].find((li) => li.querySelector(`button[data-act="kept-drop"][data-name="${name}"]`));
+const heldNote = () => doc.querySelector('#atList .at-send .at-send-held')?.textContent || '';
+await ta('홈 카드에 넣은 기간 밖의 숙박 영수증은 알림 표시로 담긴다 — 홈 카드가 올리는 길은 그것을 올리지 않고, 출장 카드의 보관 중인 증빙에 ⚠ 와 `확정`이 선다', async () => {
+  const r = await fromHome('jeju.png', JEJU);
+  assert.deepEqual([r.kept, r.warn, r.todo], [true, WHY, false]);
+  assert.deepEqual(store[MARKS_KEY]['TR-1'].find((k) => k.name === 'jeju.png'), { name: 'jeju.png', label: '숙박 증빙', warn: WHY });
+  const up = await homeUp();
+  assert.deepEqual([up.sent, up.hold, up.text, site.saves.length], [false, false, '', 2], '올릴 것이 없다 — 사이트에는 아무것도 가지 않는다');
+  await until(() => !!keptLi('jeju.png'), '보관함 다시 읽기');
+  assert.deepEqual([keptLi('jeju.png').classList.contains('warn'), keptLi('jeju.png').querySelector('span').textContent], [true, `숙박 증빙 · jeju.png · ⚠ ${WHY}`]);
+  assert.equal(goBtn(), null, '확정하기 전에는 올리는 버튼이 없다');
+});
+t('확정하기 전에는 보낼 때도 빠진다 — 송부 칸에 무엇이 빠지는지 적히고, 묶이는 증빙 수에 들지 않는다', () => {
+  assert.equal(heldNote(), '출장 기간과 안 맞아 확정하지 않은 증빙 1장은 보내지 않습니다 — jeju.png');
+  // 맞는 증빙 셋(출장지 영수증 1 · 숙박 증빙 2)만 센다. 과제·계정과 받는 사람을 아직 고르지 않아 보내기는 잠겨 있다.
+  assert.match(doc.querySelector('#atList .at-send .at-send-how').textContent, /여비계산서 1부 · 출장지 영수증 1장 · 숙박 증빙 2장 → PDF 1개$/);
+});
+await ta('`확정`하면 알림이 걷히고 "사후정산에 안 올림"이 된다 — 올리기 전에는 송부 칸이 잠기고, 올리는 버튼으로 그때 읽은 기록대로 올라간다', async () => {
+  keptLi('jeju.png').querySelector('button[data-act="kept-ok"]').click();
+  await until(() => /^이 출장의 증빙으로 확정했습니다 — jeju\.png/.test(status()), '확정');
+  assert.equal(site.saves.length, 2, '확정만으로는 사이트에 아무것도 가지 않는다');
+  assert.deepEqual([keptLi('jeju.png').classList.contains('warn'), keptLi('jeju.png').querySelector('span').textContent], [false, '숙박 증빙 · jeju.png · 사후정산에 안 올림']);
+  assert.deepEqual([heldNote(), sendNote()], ['', '확정한 증빙을 사후정산 칸에서 먼저 올려 주세요']);
+  assert.equal(goBtn().textContent, '보관한 증빙을 사후정산에 올리기');
+  assert.deepEqual(store[MARKS_KEY]['TR-1'].find((k) => k.name === 'jeju.png'), { name: 'jeju.png', label: '숙박 증빙', todo: true });
+  goBtn().click();
+  await wait(20);
+  goBtn().click();
+  await until(() => site.saves.length === 3 && !st.after['145580'].busy, '확정한 증빙 올리기');
+  const row = site.saves[2].rows.at(-1);
+  assert.deepEqual([row.seq, row.paydate, row.sday, row.company, row.total, site.saves[2].file?.name], ['', '2026-09-21', '1', '제주호텔', '90000', 'jeju.png']);
+  assert.equal(site.asks.length, 0, '다시 읽지 않는다');
+  await until(() => !goBtn(), '버튼 걷기');
+  assert.equal(sendNote(), '');
 });
 
 console.log(`\n통과 ${pass}건`);

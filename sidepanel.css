@@ -537,7 +537,7 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-after-head strong { color: var(--fg); }
 .attend .at-after-why { color: var(--muted); }
 .attend .at-after-head button.at-web { margin-left: auto; min-height: 28px; padding: 4px 8px; color: var(--muted); }
-/* 완료한 사후정산을 다시 작성하는 버튼(정산 내역의 `다시 작성`)과 그만두는 버튼 — 머리 줄 오른쪽 끝이고, 옆에 ↗ 가 있으면 그 왼쪽이다. */
+/* 다시 작성하는 것을 그만두는 버튼(사후정산·사전정산 칸 머리의 `그만두기`) — 머리 줄 오른쪽 끝이고, 옆에 ↗ 가 있으면 그 왼쪽이다. */
 .attend .at-after-head button.at-reopen { margin-left: auto; min-height: 26px; padding: 2px 8px; border: 1px solid var(--line); font-size: 12px; white-space: nowrap; }
 .attend .at-after-head button.at-reopen + button.at-web { margin-left: 0; }
 .attend .at-after-head button.at-web svg { width: 14px; height: 14px; pointer-events: none; }
@@ -592,6 +592,10 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-kept li { display: flex; align-items: center; gap: 6px; }
 .attend .at-kept li span { flex: 1; min-width: 0; color: var(--fg); overflow-wrap: anywhere; }
 .attend .at-kept button.at-kept-drop { flex: none; width: 22px; min-height: 22px; padding: 0; color: var(--muted); }
+/* 출장 기간과 안 맞아 알림 표시로 둔 증빙 — 확정하기 전에는 올리지도 보내지도 않는다. */
+.attend .at-kept li.warn span, .attend .at-send-files li.warn span { color: var(--danger); }
+.attend button.at-kept-ok { flex: none; min-height: 22px; padding: 0 8px; }
+.attend .at-pop-note.at-pop-held { color: var(--danger); }
 /* 출장 카드의 가는 편·오는 편 — 편 이름 · 교통편 아이콘 셋 · 그 편으로 올라갈 값. 좁으면 값이 다음 줄로 내려간다. */
 .attend .at-legs { display: grid; gap: 4px; margin-top: 8px; }
 .attend .at-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
@@ -800,9 +804,16 @@ button.danger:hover { filter: brightness(1.08); }
 /* 이전에 보낸 곳(2026-10-04 사용자 지정) — 한 줄이 과제·계정 · 받는 사람 · 보내는 길이고, 켜진 줄이 지금 보내는 곳이다.
    보내는 길은 아이콘이다(Teams 로고 · 쪽지 말풍선) — Teams 로 보냈던 줄인데 지금 Teams 로 못 가면 아이콘이 흐리다.
    첫 줄 오른쪽의 목록 아이콘(`직접 고르기`)이 과제·계정, 받는 사람, 보내는 길 칸을 편다 — 그 아이콘이 없을 때는 줄이 칸 폭을 다 쓴다. */
-.attend .at-send-sets { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; margin-top: 8px; }
-.attend .at-send-sets:has(> .at-send-fold[hidden]) .at-send-set { grid-column: 1 / -1; }
-.attend .at-send-set { grid-column: 1; justify-content: flex-start; gap: 6px; width: 100%; min-height: 30px; padding: 4px 8px 4px 10px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; text-align: left; }
+.attend .at-send-sets { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px; margin-top: 8px; }
+/* 줄은 첫 칸부터 목록 아이콘의 칸까지 쓴다 — 첫 줄만 목록 아이콘에 그 칸을 내준다. 맨 오른쪽 칸은 줄마다의 × (그 줄 지우기)다. */
+.attend .at-send-set { grid-column: 1 / 3; justify-content: flex-start; gap: 6px; width: 100%; min-height: 30px; padding: 4px 8px 4px 10px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; text-align: left; }
+.attend .at-send-sets:not(:has(> .at-send-fold[hidden])) > .at-send-set:first-child { grid-column: 1; }
+/* 이전에 보낸 곳의 한 줄을 지우는 × (2026-10-05 사용자 지정) — 줄의 오른쪽 끝에 선다. */
+.attend .at-send-set-del { grid-column: 3; width: 22px; min-height: 30px; padding: 0; color: var(--muted); }
+.attend .at-send-set-del:hover:not(:disabled) { color: var(--danger); }
+/* 보낸 기록(`보냈습니다 — …`)과 그것을 지우는 × 가 한 줄이다. */
+.attend .at-send-done { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.attend .at-send-done .at-send-note { flex: 1; min-width: 0; margin: 0; }
 .attend .at-send-set:hover:not(:disabled) { border-color: var(--pick); background: var(--pick-soft); }
 .attend .at-send-set.active { border-color: var(--pick); background: var(--pick-soft); }
 .attend .at-send-set strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -826,9 +837,12 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-pop-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
 .attend .at-pop-btns button { min-height: 34px; padding: 6px 14px; font-size: 13px; }
 .attend .at-pop-btns button.ghost { border: 1px solid var(--line); }
-/* 버튼 줄: 사후정산을 아직 완료하지 않은 출장이면 `사후정산 저장`이 `보내기` 왼쪽에 선다 */
+/* 정산을 다시 하는 버튼 줄(2026-10-05 사용자 지정) — `사전정산 다시하기`·`사후정산 다시하기`가 나란히 서고, 그 아래 맨 끝이 보내기다.
+   켜진 버튼이 지금 다시 하는 중인 정산이다. */
+.attend .at-send-redo { display: flex; gap: 6px; margin-top: 8px; }
+.attend .at-send-redo button.at-redo { flex: 1 1 0; min-width: 0; min-height: 30px; padding: 4px 6px; border: 1px solid var(--line); background: var(--surface); font-size: 12px; white-space: nowrap; }
+.attend .at-send-redo button.at-redo:hover:not(:disabled), .attend .at-send-redo button.at-redo.active { border-color: var(--pick); background: var(--pick-soft); color: var(--pick); }
+/* 버튼 줄: 보내기 하나다 — 사후정산을 아직 완료하지 않은 출장이면 보내기가 저장 → 확정부터 한다 */
 .attend .at-send-btns { display: flex; gap: 6px; margin-top: 8px; }
 .attend .at-send-btns button { min-height: 34px; font-size: 12px; }
 .attend .at-send-go { flex: 1; }
-.attend .at-send-save { flex: none; padding: 4px 12px; }
-.attend .at-send-save:not(.armed) { border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-weight: 600; }

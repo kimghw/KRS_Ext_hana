@@ -2,7 +2,9 @@
 // 교통비는 가는 편·오는 편에서 나온다: 처음에는 사전정산대로, 표를 넣거나 카드에서 고르면 그 편이 바뀐다.
 // DOM·네트워크 없이 돈다. 폼 칸 이름(lodge_*, tr_*, air_*)은 2026-10-03 실제 사후정산 입력 화면 소스와 같다.
 import assert from 'node:assert/strict';
-import { afterNeed, afterPlan, afterSummary, afterFields, nightsBetween, evidenceOf, AFTER_TRANSPORT, PRE_PLANE } from '../src/after.js';
+import { afterNeed, afterPlan, afterSummary, afterFields, nightsBetween, evidenceOf, periodMiss, needsAfter, AFTER_TRANSPORT, PRE_PLANE } from '../src/after.js';
+import { lodgeAsk, lodgeSettle, lodgeOver, lodgeChoices, lodgeApproval, lodgeDecide } from '../src/after.js';
+import { TRAVEL_RULES } from '../src/travelspec.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
@@ -40,22 +42,61 @@ t('카드에서 가는 편·오는 편에 비행기를 골랐으면 사전정산
   assert.equal(afterNeed(DAY, { transports: ['Train'] }, { back: { t: 'train', g: 'first' } }).needed, false, '기차 특실로 바꾼 것은 비행기가 아니다');
 });
 t('증빙은 무엇의 증명인지 가른다 — 항공권은 항공기 증명, 숙박은 숙박 증빙. 기차표·버스표는 증빙으로 받지 않는다(KTX 는 정가)', () => {
-  assert.deepEqual(evidenceOf(rec({ docType: 'flight_ticket' }), DAY), { label: '항공기 증명', ok: true, note: '' });
-  assert.deepEqual(evidenceOf(rec({ docType: 'flight_receipt' }), TRIP), { label: '항공기 증명', ok: true, note: '' });
-  assert.deepEqual(evidenceOf(rec({ docType: 'lodging_receipt' }), TRIP), { label: '숙박 증빙', ok: true, note: '' });
+  assert.deepEqual(evidenceOf(rec({ docType: 'flight_ticket' }), DAY), { label: '항공기 증명', ok: true, note: '', warn: '' });
+  assert.deepEqual(evidenceOf(rec({ docType: 'flight_receipt' }), TRIP), { label: '항공기 증명', ok: true, note: '', warn: '' });
+  assert.deepEqual(evidenceOf(rec({ docType: 'lodging_receipt' }), TRIP), { label: '숙박 증빙', ok: true, note: '', warn: '' });
   assert.deepEqual(['train_ticket', 'bus_ticket'].map((docType) => evidenceOf(rec({ docType }), DAY)),
-    Array(2).fill({ label: '기차·버스표', ok: false, note: '증빙으로 받지 않습니다(KTX 는 운임표의 정가로 넣습니다)' }));
-  assert.deepEqual(evidenceOf(rec({ docType: 'unknown', summary: '메모' }), DAY), { label: '모르는 문서', ok: false, note: '무슨 문서인지 읽지 못했습니다(메모)' });
+    Array(2).fill({ label: '기차·버스표', ok: false, note: '증빙으로 받지 않습니다(KTX 는 운임표의 정가로 넣습니다)', warn: '' }));
+  assert.deepEqual(evidenceOf(rec({ docType: 'unknown', summary: '메모' }), DAY), { label: '모르는 문서', ok: false, note: '무슨 문서인지 읽지 못했습니다(메모)', warn: '' });
 });
-t('당일 출장의 증빙은 그 출장지에서, 출장일에 결제한 영수증이다 — 다른 곳·다른 날의 영수증이나 어디서 결제했는지 모르는 영수증은 쓸 수 없다', () => {
+t('당일 출장의 증빙은 그 출장지에서, 출장일에 결제한 영수증이다 — 다른 곳의 영수증이나 어디서 결제했는지 모르는 영수증은 쓸 수 없다', () => {
   const lunch = rec({ docType: 'other_receipt', vendor: '○○식당', payDate: '2026-09-09', payPlace: '경기 고양시 일산서구', atDestination: true, total: 12000 });
-  assert.deepEqual(evidenceOf(lunch, DAY), { label: '당일출장 증명', ok: true, note: '' });
+  assert.deepEqual(evidenceOf(lunch, DAY), { label: '당일출장 증명', ok: true, note: '', warn: '' });
   assert.deepEqual(evidenceOf({ ...lunch, atDestination: false, payPlace: '부산 해운대구' }, DAY),
-    { label: '당일출장 증명', ok: false, note: '출장지에서 결제한 영수증이 아닙니다(부산 해운대구)' });
-  assert.deepEqual(evidenceOf({ ...lunch, atDestination: null }, DAY), { label: '당일출장 증명', ok: false, note: '출장지에서 결제한 것인지 영수증에서 확인하지 못했습니다' });
-  assert.deepEqual(evidenceOf({ ...lunch, payDate: '2026-09-08' }, DAY), { label: '당일출장 증명', ok: false, note: '결제일(9/8)이 출장 기간 밖입니다' });
-  assert.deepEqual(evidenceOf({ ...lunch, payDate: null }, DAY), { label: '당일출장 증명', ok: false, note: '결제일을 읽지 못했습니다' });
-  assert.deepEqual(evidenceOf({ ...lunch, payDate: '2026-09-10' }, TRIP), { label: '출장지 영수증', ok: true, note: '' }, '1박 이상이면 출장 기간 안의 날이면 된다');
+    { label: '당일출장 증명', ok: false, note: '출장지에서 결제한 영수증이 아닙니다(부산 해운대구)', warn: '' });
+  assert.deepEqual(evidenceOf({ ...lunch, atDestination: null }, DAY), { label: '당일출장 증명', ok: false, note: '출장지에서 결제한 것인지 영수증에서 확인하지 못했습니다', warn: '' });
+  assert.deepEqual(evidenceOf({ ...lunch, payDate: null }, DAY), { label: '당일출장 증명', ok: false, note: '결제일을 읽지 못했습니다', warn: '' });
+  assert.deepEqual(evidenceOf({ ...lunch, payDate: '2026-09-10' }, TRIP), { label: '출장지 영수증', ok: true, note: '', warn: '' }, '1박 이상이면 출장 기간 안의 날이면 된다');
+});
+// 2026-10-05 사용자 지정: "출장 기간동안의 내용이 아니면 알림을 줘 안맞다고, 맞는것만 선별취급 해서 올리고 해당 없는거는 문서보관에 알림표지 하고
+// 확정 해주기 전까지는 보내기 해도 같이 보내지 말고"
+t('출장 기간의 것이 아닌 문서는 그 까닭을 알린다(warn) — 숙박은 묵은 기간, 항공권은 탑승일, 그 밖의 영수증은 결제일로 본다. 날짜를 모르면 안 맞다고 하지 않는다', () => {
+  const lunch = rec({ docType: 'other_receipt', payDate: '2026-09-08', atDestination: true });
+  const miss = '결제일(9/8)이 출장 기간(9/9) 밖입니다';
+  assert.deepEqual(evidenceOf(lunch, DAY), { label: '당일출장 증명', ok: false, note: miss, warn: miss });
+  assert.equal(evidenceOf({ ...lunch, atDestination: false }, DAY).warn, '', '출장지에서 결제한 것이 아니면 기간을 따지기 전에 못 쓰는 문서다');
+  assert.equal(periodMiss(lunch, TRIP), '결제일(9/8)이 출장 기간(9/9~9/10) 밖입니다');
+  // 숙박 — 결제일(미리 결제한다)이 아니라 묵은 기간을 본다
+  const hotel = rec({ docType: 'lodging_receipt', payDate: '2026-09-07', checkIn: '2026-09-09', checkOut: '2026-09-10' });
+  assert.equal(periodMiss(hotel, TRIP), '', '미리 결제한 영수증은 묵은 날이 출장 기간이면 맞다');
+  assert.equal(periodMiss({ ...hotel, checkIn: '2026-09-15', checkOut: '2026-09-16' }, TRIP), '묵은 기간(9/15~9/16)이 출장 기간(9/9~9/10) 밖입니다');
+  assert.equal(periodMiss({ ...hotel, checkIn: '2026-09-08' }, TRIP), '묵은 기간(9/8~9/10)이 출장 기간(9/9~9/10) 밖입니다', '하루라도 벗어나면 알린다');
+  assert.equal(periodMiss({ ...hotel, checkIn: null, checkOut: null, payDate: '2026-08-01' }, TRIP), '', '묵은 날을 못 읽었으면 모르는 것이다');
+  assert.deepEqual(evidenceOf({ ...hotel, checkIn: '2026-09-15', checkOut: '2026-09-16' }, TRIP),
+    { label: '숙박 증빙', ok: false, note: '묵은 기간(9/15~9/16)이 출장 기간(9/9~9/10) 밖입니다', warn: '묵은 기간(9/15~9/16)이 출장 기간(9/9~9/10) 밖입니다' });
+  // 항공권 — 탑승일, 왕복이면 돌아오는 날도
+  const ticket = rec({ docType: 'flight_ticket', flightDate: '2026-09-09', retDate: '2026-09-10' });
+  assert.equal(periodMiss(ticket, TRIP), '');
+  assert.equal(periodMiss({ ...ticket, retDate: '2026-09-12' }, TRIP), '탑승일(9/12)이 출장 기간(9/9~9/10) 밖입니다');
+  assert.equal(periodMiss({ ...ticket, flightDate: '2026-10-01', retDate: null }, TRIP), '탑승일(10/1)이 출장 기간(9/9~9/10) 밖입니다');
+  assert.equal(periodMiss({ ...ticket, flightDate: null, retDate: null }, TRIP), '');
+  // 사람이 이 출장의 증빙이 맞다고 확정한 기록은 맞는 것으로 친다
+  assert.deepEqual(evidenceOf({ ...lunch, confirmed: true }, DAY), { label: '당일출장 증명', ok: true, note: '', warn: '' });
+  assert.equal(periodMiss({ ...ticket, flightDate: '2026-10-01', confirmed: true }, TRIP), '');
+  assert.deepEqual([needsAfter(hotel), needsAfter(ticket), needsAfter(lunch)], [true, true, false]);
+});
+t('묶을 때 출장 기간의 것이 아닌 숙박 증빙·항공권은 뺀다 — 맞는 것만 올리고, 뺀 것은 왜 뺐는지 적는다. 확정한 것은 같이 묶는다', () => {
+  const ok = rec({ docType: 'lodging_receipt', vendor: '고양호텔', payDate: '2026-09-10', checkIn: '2026-09-09', checkOut: '2026-09-10', total: 110000, currency: 'KRW', file: PNG });
+  const far = rec({ docType: 'lodging_receipt', vendor: '제주호텔', payDate: '2026-09-21', checkIn: '2026-09-20', checkOut: '2026-09-21', total: 90000, currency: 'KRW', file: { ...PNG, name: '제주.png' } });
+  const late = rec({ docType: 'flight_ticket', airline: '대한항공', flightDate: '2026-09-20', depPlace: '김해', arrPlace: '김포', total: 89000, file: { ...PNG, name: '늦은편.pdf' } });
+  const plan = afterPlan([ok, far, late], { trip: TRIP, detail: TRAIN });
+  assert.deepEqual([plan.lodge.map((l) => l.company), plan.trans, plan.air, plan.problems], [['고양호텔'], [], null, []]);
+  assert.deepEqual(plan.skipped, [
+    '제주.png: 숙박 증빙 — 묵은 기간(9/20~9/21)이 출장 기간(9/9~9/10) 밖입니다 · 사후정산에 넣지 않았습니다',
+    '늦은편.pdf: 항공기 증명 — 탑승일(9/20)이 출장 기간(9/9~9/10) 밖입니다 · 사후정산에 넣지 않았습니다',
+  ]);
+  const sure = afterPlan([ok, { ...far, confirmed: true }], { trip: TRIP, detail: TRAIN });
+  assert.deepEqual([sure.lodge.map((l) => l.company), sure.skipped], [['고양호텔', '제주호텔'], []]);
 });
 
 console.log('숙박비 내역 — 영수증과 예약서를 한 줄로');
@@ -95,6 +136,36 @@ console.log('숙박비 내역 — 영수증과 예약서를 한 줄로');
   t('숙박 일수가 출장 기간과 다르면 알린다', () => {
     const p = afterPlan([rec({ docType: 'lodging_receipt', vendor: '호텔', payDate: '2026-09-11', nights: 2, total: 200000, file: PNG })], ctx);
     assert.ok(p.notes.some((n) => /숙박 일수\(2박\)가 출장 기간\(1박\)과 다릅니다/.test(n)), p.notes.join(' | '));
+  });
+
+  // 2026-10-04 실제로 있던 일(145580): 대행사 영수증은 업체명이 영어, 예약서는 한글이라 두 줄로 갈렸고, 금액 없는 예약서 줄 때문에 올리지 못했다.
+  const stay = { checkIn: '2026-09-09', checkOut: '2026-09-10', nights: 1 };
+  const agoda = rec({ docType: 'lodging_receipt', vendor: 'SONO CALM GOYANG', seller: '아고다', payDate: '2026-09-07', total: 131.57, totalKRW: 177101, currency: 'USD', ...stay,
+    file: { ...PNG, name: 'Receipt.pdf' } });
+  const confirm = rec({ docType: 'lodging_booking', vendor: '소노캄 고양', ...stay, file: { ...PNG, name: 'Confirmation.pdf' } });
+  t('업체명이 달리 적혀도 체크인·체크아웃이 같은 영수증과 예약서는 한 줄이 된다 — 금액 없는 예약서가 따로 서서 막지 않는다', () => {
+    for (const records of [[agoda, confirm], [confirm, agoda]]) {
+      const p = afterPlan(records, ctx);
+      assert.deepEqual(p.problems, []);
+      assert.equal(p.lodge.length, 1);
+      const l = p.lodge[0];
+      assert.deepEqual([l.company, l.paydate, l.sday, l.total, l.file.name], ['아고다', '2026-09-07', 1, 177101, 'Receipt.pdf']);
+      assert.deepEqual([...l.sources].sort(), ['Confirmation.pdf', 'Receipt.pdf']);
+    }
+  });
+  t('체크인·체크아웃이 다른 예약서는 합치지 않는다', () => {
+    // 두 숙박이 다 출장 기간 안이어야 묶인다(기간 밖의 것은 빠진다) — 2박 출장으로 본다.
+    const p = afterPlan([agoda, rec({ ...confirm, checkIn: '2026-09-10', checkOut: '2026-09-11' })], { ...ctx, trip: { ...TRIP, to: '2026-09-11' } });
+    assert.equal(p.lodge.length, 2);
+    assert.deepEqual(p.problems, ['숙박(Confirmation.pdf)에서 정산금액을(를) 읽지 못했습니다']);
+  });
+  t('날짜가 같은 영수증이 둘이면 어느 숙박의 예약서인지 몰라 합치지 않는다', () => {
+    const other = rec({ docType: 'lodging_receipt', vendor: '라마다 고양', payDate: '2026-09-10', total: 143000, currency: 'KRW', ...stay, file: PNG });
+    assert.equal(afterPlan([agoda, other, confirm], ctx).lodge.length, 3);
+  });
+  t('금액이 적힌 예약서는 날짜가 같아도 남의 영수증에 합치지 않는다 — 그것만으로 한 줄이다(다른 숙박일 수 있다)', () => {
+    const p = afterPlan([agoda, rec({ ...confirm, total: 143000, currency: 'KRW' })], ctx);
+    assert.deepEqual([p.lodge.length, p.problems], [2, []]);
   });
 }
 
@@ -328,6 +399,52 @@ console.log('폼 칸 — 화면의 칸에 얹고 줄은 화면의 addLodge()/add
     const p = afterPlan([rec({ docType: 'lodging_receipt', vendor: '호텔A', payDate: '2026-09-10', nights: 1, total: 143000 })], ctx);
     const f = afterFields(base, p);
     assert.deepEqual([f.find(([n]) => n === 'air_abroad')[1], f.some(([n]) => n === 'lodge_file')], ['N', false]);
+  });
+}
+
+// 2026-10-05 사용자 지정: "상한액의 1.5배는 부서장 승인". 상한액(1일)은 사이트가 주고(maxconv), 배수와 승인자는 travel-rules.yaml 에 있다.
+console.log('숙박비 상한액 초과 — 상한액의 1.5배까지는 부서장 승인을 받아 실제 금액으로 정산한다');
+{
+  const row = (actual, over = {}) => lodgeSettle({ stay: '소노캄 고양', company: '아고다', sday: 1, maxconv: '120000', settle: '', notes: [], actual,
+    doc: { currency: 'USD', total: 131.57, supply: null, vat: null }, ...over });
+  t('규칙은 travel-rules.yaml 에서 온다 — 1.5배, 부서장', () => {
+    assert.deepEqual([TRAVEL_RULES.lodging.over_cap.approve_rate, TRAVEL_RULES.lodging.over_cap.approver], [1.5, '부서장']);
+  });
+  t('상한액 안이거나 상한액을 모르면 물을 것도 승인도 없다', () => {
+    assert.deepEqual([lodgeOver(row(120000)), lodgeChoices(row(110000)), lodgeOver(row(177101, { maxconv: '' })), lodgeApproval(row(110000, { settle: 'real' }))], [null, null, null, '']);
+  });
+  t('상한액을 넘고 1.5배 안이면(177,101원 ≤ 180,000원) 실제 금액 버튼에 부서장 승인이라고 적고 까닭을 단다', () => {
+    const l = row(177101);
+    assert.deepEqual(lodgeOver(l), { cap: 120000, limit: 180000, rate: 1.5, approver: '부서장', within: true });
+    assert.deepEqual(lodgeChoices(l), {
+      question: '실제 금액 177,101원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?',
+      choices: [
+        { settle: 'cap', label: '상한액 120,000원으로' },
+        { settle: 'real', label: '실제 금액 177,101원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다' },
+      ],
+    });
+    assert.equal(lodgeOver(row(180000)).within, true, '꼭 1.5배인 금액은 범위 안이다');
+  });
+  t('1.5배를 넘으면 승인 범위를 벗어난다고 적는다 — 고르는 것은 막지 않는다', () => {
+    const l = row(180001);
+    assert.equal(lodgeOver(l).within, false);
+    assert.deepEqual(lodgeChoices(l).choices[1], { settle: 'real', label: '실제 금액 180,001원으로', note: '상한액의 1.5배(180,000원)를 넘어 부서장 승인으로 정산할 수 있는 범위를 벗어납니다' });
+    assert.equal(lodgeApproval({ ...l, settle: 'real' }), '상한액의 1.5배(180,000원) 초과 — 부서장 승인 범위를 벗어남');
+  });
+  t('상한액은 박 수만큼이다 — 2박이면 240,000원, 승인 범위는 360,000원', () => {
+    assert.deepEqual([lodgeOver(row(300000, { sday: 2 })).cap, lodgeOver(row(300000, { sday: 2 })).limit], [240000, 360000]);
+  });
+  t('고르면 정산금액이 정해지고 더 묻지 않는다 — 실제 금액이면 승인 알림이 그 줄과 계획에 붙고, 상한액으로 바꾸면 걷힌다', () => {
+    const l = row(177101);
+    const plan = { lodge: [l], notes: ['추가 정보 — Receipt.pdf: 예약 번호 2048075129'] };
+    assert.equal(lodgeAsk(l), 'cap');
+    lodgeDecide(plan, l, 'real');
+    const note = '소노캄 고양: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내';
+    assert.deepEqual([lodgeAsk(l), l.total, l.capped, l.notes, plan.notes], ['', 177101, false, [note], ['추가 정보 — Receipt.pdf: 예약 번호 2048075129', note]]);
+    lodgeDecide(plan, l, 'real');
+    assert.deepEqual(plan.notes.filter((n) => n === note).length, 1, '두 번 골라도 알림은 한 번이다');
+    lodgeDecide(plan, l, 'cap');
+    assert.deepEqual([l.total, l.capped, l.samount, l.vat, l.notes, plan.notes], [120000, true, 109091, 10909, [], ['추가 정보 — Receipt.pdf: 예약 번호 2048075129']]);
   });
 }
 

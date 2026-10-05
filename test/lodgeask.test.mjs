@@ -334,7 +334,9 @@ await ta('원화 금액을 적으면(쉼표가 있어도) 그것이 실제 금�
   await press('ask-krw');
   assert.deepEqual(site.calls, []);
   assert.equal(ask().querySelector(':scope > ul p').textContent, 'Toyoko INN Gangnam Seoul 1박 — 실제 금액 125,052원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?');
-  assert.deepEqual([...ask().querySelectorAll('.at-ask-row button')].map((b) => b.textContent), ['상한액 120,000원으로', '실제 금액 125,052원으로']);
+  // 실제 금액이 상한액의 1.5배(180,000원) 안이라 부서장 승인으로 정산할 수 있다 — 버튼과 그 아래에 그렇게 적힌다(2026-10-05 사용자 지정).
+  assert.deepEqual([...ask().querySelectorAll('.at-ask-row button')].map((b) => b.textContent), ['상한액 120,000원으로', '실제 금액 125,052원으로 · 부서장 승인']);
+  assert.deepEqual([...ask().querySelectorAll(':scope > ul li > .at-after-note')].map((p) => p.textContent), ['상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다']);
   const [l] = lodgeCells();
   assert.deepEqual([l['정산금액'], l['공급가액'], l['부가세']], ['정하지 않음 — 실제 125,052원이 상한액 120,000원을 넘습니다 · 문서의 금액 88.46 USD', '?', '?'], '고르기 전에는 정산금액이 정해진 것처럼 적지 않는다');
   assert.equal(status(), '사후정산을 아직 올리지 않았습니다 — 출장 카드에서 정산금액을 정해 주세요', '앞의 잘못 적었다는 말이 남아 있지 않다');
@@ -382,8 +384,10 @@ t('이 패널이 올린 줄의 번호를 적어 둔다 — 저장소에도 남�
 
 console.log('같은 증빙을 다시 넣으면 줄이 겹쳐 올라가지 않는다');
 await drop('image.png', { ...AGODA, totalKRW: 125052 });
-await press('ask-cap');
-t('같은 줄이 이미 있으면 다시 올리지 않고 그렇게 말한다', () => {
+await until(() => /이미 있어 다시 올리지 않았습니다/.test(status()), '같은 줄 알아보기');
+// 2026-10-05 사용자 지정("이게 확인이 안되나? 출장이랑 맞잖아"): 이미 올라가 있는 줄이면 상한액을 넘어도 다시 묻지 않는다.
+t('같은 줄이 이미 있으면 다시 올리지 않고 그렇게 말한다 — 어느 금액으로 올릴지도 다시 묻지 않는다', () => {
+  assert.equal(card().querySelector('.at-after-ask'), null, '묻지 않는다');
   assert.deepEqual([site.calls.length, site.lodges.length], [1, 1]);
   assert.equal(status(), '같은 숙박 줄이 사후정산에 이미 있어 다시 올리지 않았습니다');
   assert.equal(card().querySelector('.at-lodged-same').textContent, '같은 숙박 줄이 이미 있어 다시 올리지 않았습니다 — 아고다 · 2026-09-08 · 1박 · 120,000원');
@@ -400,7 +404,9 @@ await ta('문서에 원화 금액이 있으면 원화는 묻지 않고 상한액
   await until(() => site.calls.length === 1, '사후정산 저장');
   assert.deepEqual(site.saves[0].map((x) => [x.company, x.total, x.samount, x.vat]), [['아고다', '125052', '113684', '11368']]);
   chip('81561').click();
-  assert.equal(cellsOf(info())[0]['정산금액'], '125,052원 · 실제 금액으로 정산(상한액 120,000원 초과) · 문서의 금액 88.46 USD');
+  assert.equal(cellsOf(info())[0]['정산금액'], '125,052원 · 실제 금액으로 정산(상한액 120,000원 초과 · 부서장 승인 필요) · 문서의 금액 88.46 USD');
+  assert.ok([...info().querySelectorAll('.at-after-notes li')].some((li) => li.textContent === 'Toyoko INN Gangnam Seoul: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내'),
+    '실제 금액으로 정산한 줄에는 승인이 필요하다는 알림이 남는다');
 });
 await open();
 await drop('image.png', AGODA);
