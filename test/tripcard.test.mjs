@@ -111,7 +111,7 @@ const fields = (body, name) => body.getAll(name);
 console.log('가는 편·오는 편 — 처음에는 사전정산대로');
 t('출장 카드를 펴면 사후정산 칸에 가는 편·오는 편이 날짜와 함께 서고, 사전정산의 교통편(KTX 일반석)이 골라져 있다', () => {
   assert.deepEqual(legs().map((l) => [l.name, l.on, l.what]), [
-    ['가는 편 9/9', ['train'], 'KTX 부산→서울 일반석 53,700원'], ['오는 편 9/10', ['train'], 'KTX 서울→부산 일반석 53,700원'],
+    ['가는 편 9/9', ['train'], 'KTX 부산→서울 일반석 53,700원'], ['오는 편 9/9', ['train'], 'KTX 서울→부산 일반석 53,700원'],
   ]);
   assert.deepEqual(legs()[0].icons.map((b) => [b.dataset.t, b.getAttribute('aria-label'), b.disabled, !!b.querySelector('svg')]),
     [['train', '기차(KTX)', false, true], ['plane', '비행기', false, true], ['bus', '버스', false, true]]);
@@ -347,7 +347,7 @@ t('사후정산이 완료된 출장에는 정산 내역이 보여 주기만 하�
   // 사후정산에 따로 올린 교통 줄이 없으면(수단이 안 적힌 줄은 치지 않는다) 사전정산의 줄이다 — 카드에서 골라 둔 편(오는 편 비행기)은 얹지 않는다.
   assert.deepEqual(store.attendLegs['TR-1'], { back: { t: 'plane', g: 'standard' } });
   assert.deepEqual(legs().map((l) => [l.name, l.on, l.what, l.cls]), [
-    ['가는 편 9/9', ['train'], 'KTX 부산→서울 일반석 53,700원', 'at-leg-what'], ['오는 편 9/10', ['train'], 'KTX 서울→부산 일반석 53,700원', 'at-leg-what'],
+    ['가는 편 9/9', ['train'], 'KTX 부산→서울 일반석 53,700원', 'at-leg-what'], ['오는 편 9/9', ['train'], 'KTX 서울→부산 일반석 53,700원', 'at-leg-what'],
   ]);
   assert.ok(legs().every((l) => l.icons.every((b) => b.disabled)));
   assert.deepEqual(['.at-after-drop', 'button[data-act="after"]', 'button[data-act="legs-go"]', '.at-kept'].map((q) => doneBox().querySelector(q)), [null, null, null, null]);

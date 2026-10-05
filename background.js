@@ -57,6 +57,12 @@ function readPlans(force) {
 const AWAKE_MS = 20_000;
 
 /**
+ * 여기서 남기는 활동 기록은 한 권으로 줄 세워 쓴다 — 홈 카드가 증빙 여러 장을 나란히 읽히면(src/home.js, 2026-10-05) "받은 증빙" 기록이
+ * 거의 같은 때에 온다. 기록마다 따로 읽고-고치고-쓰면 하나가 사라진다(src/logbook.js 의 줄 세우기는 한 권 안에서만 듣는다).
+ */
+const tripBook = createLogbook({ storage: chrome.storage.local });
+
+/**
  * 사후정산 입력 화면(콘텐츠 스크립트 src/afterpage.js)이 증빙 한 장을 읽어 달라고 한다. 로컬 CLI 다리(네이티브 메시징)와
  * API 키는 콘텐츠 스크립트에서 쓸 수 없다. 패널의 출장 카드와 같은 길(src/llm.js 의 receiptSmart — 로컬 CLI → API 키)로 읽고,
  * 명세(input.yaml 의 receipt)를 지난 기록만 돌려준다. 읽기만 한다 — 화면의 칸을 채우는 것은 그 화면의 스크립트다.
@@ -97,7 +103,7 @@ async function keepEvidence(msg) {
     });
     const what = !r.ok ? `실패 — ${r.error}` : !r.kept ? `${r.label} — 증빙으로 쓸 수 없음(${r.note})`
       : r.warn ? `${r.label} — 출장 기간과 안 맞아 알림 표시로 보관(${r.warn})` : `${r.label} 보관`;
-    createLogbook({ storage: chrome.storage.local })
+    tripBook
       .add('trip', { ok: r.ok, text: `홈 카드에서 받은 증빙: ${r.name || msg?.file?.name || '?'} · ${what}`, data: { docNo: msg?.docNo, seq: msg?.trip?.seq, todo: !!r.todo } })
       .catch(() => {});
     return r;
@@ -141,7 +147,7 @@ const evidenceDone = (msg) => shelf(async (store) => ({ settled: await store.set
 
 /** 홈의 WORKSPACE 카드가 여비계산서에 한 일(사전정산 완료·사후정산 올리기)을 활동 기록에 남겨 달라고 한다 — 기록은 한 곳에서 줄 세워 쓴다. */
 function logTrip(msg) {
-  return createLogbook({ storage: chrome.storage.local })
+  return tripBook
     .add('trip', { ok: msg?.ok !== false, text: String(msg?.text || ''), data: msg?.data })
     .then(() => ({ ok: true }), (err) => ({ ok: false, error: err?.message || String(err) }));
 }

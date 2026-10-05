@@ -64,6 +64,10 @@
       <div class="statusline"><span id="atStatus" class="status" role="status" aria-live="polite"></span></div>
       <div class="section-heading at-list-head">
         <h2>신청 내역 <span id="atCount" class="count"></span><span id="atRange" class="head-date"></span></h2>
+        <!-- 4W · 8W — 누르면 4주·8주 전부터 근태를 올려 둔 가장 늦은 날까지를 곧바로 조회한다(2026-10-05 사용자 지정: 조회 기간 칸 안에 있던
+             4주·8주 버튼을 제목 줄의 달력 버튼 왼쪽으로 — "그냥 4W, 8W 라고 하면 될듯"). 켜진 것을 다시 누르면 기본 보기로 돌아온다. -->
+        <button id="atBack4" class="open-inline at-back" type="button" data-back="4" aria-pressed="false" aria-label="4주 전부터 조회" title="4주 전부터 근태를 올려 둔 가장 늦은 날까지 바로 조회합니다 (켜져 있을 때 다시 누르면 기본 보기로 돌아옵니다)">4W</button>
+        <button id="atBack8" class="open-inline at-back" type="button" data-back="8" aria-pressed="false" aria-label="8주 전부터 조회" title="8주 전부터 근태를 올려 둔 가장 늦은 날까지 바로 조회합니다 (켜져 있을 때 다시 누르면 기본 보기로 돌아옵니다)">8W</button>
         <button id="atRangeBtn" class="open-inline" type="button" title="조회 기간 정하기" aria-label="조회 기간 정하기" aria-expanded="false" aria-controls="atRangeBox">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 10h16"/></svg>
         </button>
@@ -72,15 +76,12 @@
         </button>
         <span id="atRangeHint" class="selection-hint">오늘부터 전부 · 정산 중인 출장은 다녀온 뒤 4주까지</span>
       </div>
-      <!-- 조회 기간 — 한 줄이다(2026-10-04 사용자 지정: 지난 내역(히스토리) 버튼을 빼고 날짜 칸 왼쪽에 4주·8주 버튼).
+      <!-- 조회 기간 — 날짜를 직접 정해 조회하는 한 줄이다(시작일 ~ 종료일 · 조회 — 그 기간의 것 전부). 4주·8주 버튼은 2026-10-04 에
+           이 줄의 날짜 칸 왼쪽에 있다가 2026-10-05 에 제목 줄(4W·8W)로 옮겼다(사용자 지정 — 이 줄로 되돌리지 않는다).
            기본 보기는 오늘부터 근태를 올려 둔 가장 늦은 날까지 전부이고, 지난 것은 여비 정산이 덜 끝난 출장만 다녀온 뒤 4주(또는 8주)까지
-           보인다. 4주·8주를 누르면 그만큼 전부터 그 가장 늦은 날까지를 곧바로 조회한다(그 기간의 것 전부 — 같은 날 사용자 지정:
-           누르면 바로 조회). 켜진 것을 다시 누르면 기본 보기로 돌아온다. 마지막에 누른 주 수를 기본 보기와 홈의 WORKSPACE 카드가 따른다.
-           다른 기간은 날짜 칸에 적고 조회를 누른다(그 기간의 것 전부). -->
+           보인다. 마지막에 누른 주 수(4W·8W)를 기본 보기와 홈의 WORKSPACE 카드가 따른다. -->
       <div id="atRangeBox" class="at-range card hidden" role="group" aria-label="신청 내역 조회 기간">
         <div class="at-range-dates">
-          <button type="button" class="small ghost" data-back="4" aria-pressed="false" title="4주 전부터 근태를 올려 둔 가장 늦은 날까지 바로 조회합니다 (켜져 있을 때 다시 누르면 기본 보기로 돌아옵니다)">4주</button>
-          <button type="button" class="small ghost" data-back="8" aria-pressed="false" title="8주 전부터 근태를 올려 둔 가장 늦은 날까지 바로 조회합니다 (켜져 있을 때 다시 누르면 기본 보기로 돌아옵니다)">8주</button>
           <input type="date" id="atRangeFrom" aria-label="조회 시작일" />
           <span aria-hidden="true">~</span>
           <input type="date" id="atRangeTo" aria-label="조회 종료일" />

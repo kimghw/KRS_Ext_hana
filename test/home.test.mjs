@@ -1313,6 +1313,31 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     const done = tripLis(m)[0].querySelector('.krs-mine-drop');
     assert.deepEqual([done.textContent, done.classList.contains('busy'), done.classList.contains('error')], ['lunch.png: 출장지 영수증으로 보관했습니다', false, false]);
   });
+  // 2026-10-05 사용자 지정: 여러 장은 나란히 읽힌다 — 한 장에 6~8초라 차례로 읽으면 장 수만큼 걸렸다(src/pool.js).
+  await ta('여러 장을 넣으면 나란히 읽힌다 — 한꺼번에 세 장까지이고, 줄에는 몇 장이 끝났는지 적히며, 결과는 넣은 차례대로 적힌다', async () => {
+    const waiting = [];
+    const seen = { now: 0, peak: 0 };
+    const keep = async (ask) => {
+      seen.peak = Math.max(seen.peak, ++seen.now);
+      await new Promise((r) => { waiting.push({ name: ask.file.name, done: r }); });
+      seen.now--;
+      return { ok: true, kept: true, name: ask.file.name, label: '출장지 영수증', note: '', todo: false };
+    };
+    const m = await mount({ plans: fakePlans(HR), trips: fakeTrips([doc501]), keep });
+    drag(m, tripLis(m)[0], [file('a.png'), file('b.png'), file('c.png'), file('d.png')]);
+    await tick();
+    const note = () => tripLis(m)[0].querySelector('.krs-mine-drop');
+    assert.deepEqual([waiting.map((w) => w.name), seen.peak, note().textContent, note().classList.contains('busy')],
+      [['a.png', 'b.png', 'c.png'], 3, '증빙 4장을 읽는 중 (0/4)', true], '네 번째 장은 자리가 날 때까지 기다린다');
+    // 나중에 넣은 장이 먼저 끝나도 된다 — 난 자리를 다음 장이 잇는다.
+    waiting.find((w) => w.name === 'c.png').done();
+    await tick();
+    assert.deepEqual([waiting.map((w) => w.name), note().textContent], [['a.png', 'b.png', 'c.png', 'd.png'], '증빙 4장을 읽는 중 (1/4)']);
+    for (const w of waiting) w.done();
+    await landed(m);
+    assert.deepEqual([note().textContent, seen.peak], [
+      'a.png: 출장지 영수증으로 보관했습니다 · b.png: 출장지 영수증으로 보관했습니다 · c.png: 출장지 영수증으로 보관했습니다 · d.png: 출장지 영수증으로 보관했습니다', 3]);
+  });
   await ta('이미지·PDF 가 아니거나 너무 큰 파일, 여비계산서가 없는 출장은 받지 않고 까닭을 적는다 — 배경에 보내지 않는다', async () => {
     const m = await mount({ plans: fakePlans(HR), trips: fakeTrips([doc501]) });
     drag(m, tripLis(m)[0], [file('메모.txt', 'text/plain'), file('big.pdf', 'application/pdf', 11 * 1024 * 1024)]);

@@ -180,7 +180,7 @@ const open = async (docNo) => { st.openDoc = docNo; await panel.reload(); };
 
 console.log('복사 버튼은 없다');
 t('출장 카드의 버튼 줄에 복사가 없다 — 그 상태에서 할 일(변경·취소신청)만 있다', () => {
-  assert.deepEqual([...doc.querySelectorAll('#atList .at-acts button')].map((b) => b.textContent), ['변경', '취소신청']);
+  assert.deepEqual([...doc.querySelectorAll('#atList .at-acts button')].map((b) => b.textContent), ['근태 변경', '취소신청']);
 });
 
 console.log('당일 출장 — 사전정산을 마쳤고 당일증빙이 있으면 보낼 수 있다');
@@ -543,9 +543,12 @@ const afterDrop = () => doc.querySelector('#atList li.open .at-after-drop');
 // 정산을 다시 하는 버튼 줄 — [글, 켜졌는가].
 const redo = () => [...box().querySelectorAll('.at-send-redo button')].map((b) => [b.textContent, b.getAttribute('aria-pressed')]);
 site.calls.length = 0;
-t('완료한 출장의 송부 칸 아래에 `사전정산 다시하기`·`사후정산 다시하기`가 서고 맨 아래가 `다시 보내기`다 — 정산 내역 머리에는 버튼이 없다', () => {
+// 같은 날 뒤이어 사용자 지정(보낸 기록과 증빙 목록을 가리키며): "이 부분이 보내기 아래에 위치 하도록 해줘" — 보낸 기록(보냈습니다 — …)과
+// 묶이는 증빙의 목록은 칸 머리 바로 아래가 아니라 `다시 보내기` 아래에 선다.
+t('완료한 출장의 송부 칸 아래에 `사전정산 다시하기`·`사후정산 다시하기`가 서고 그 아래가 `다시 보내기`다 — 보낸 기록과 증빙 목록은 보내기 아래다. 정산 내역 머리에는 버튼이 없다', () => {
   assert.deepEqual(redo(), [['사전정산 다시하기', 'false'], ['사후정산 다시하기', 'false']]);
-  assert.deepEqual([...box().children].slice(-2).map((n) => n.className), ['at-send-redo', 'at-send-btns'], '다시하기 줄 바로 아래 맨 끝이 보내기다');
+  assert.deepEqual([...box().children].slice(-4).map((n) => n.className), ['at-send-redo', 'at-send-btns', 'at-send-done', 'at-send-files'], '다시하기 줄 → 보내기 → 보낸 기록 → 증빙 목록');
+  assert.equal(box().children[0].className, 'at-send-head', '칸 머리는 그대로 맨 위다');
   assert.deepEqual([...box().querySelectorAll('.at-send-btns button')].map((b) => b.textContent), ['다시 보내기']);
   assert.equal(doc.querySelector('#atList li.open .at-after-head button'), null);
   assert.equal(reopenBtn().title, '완료한 사후정산을 다시 작성합니다 — 증빙을 넣거나 가는 편·오는 편을 바꿔 저장하고, 보내기가 다시 확정한 뒤 보냅니다');

@@ -13,7 +13,7 @@ import { AuthError, siteFetch, directFetch } from './net.js';
 import { TRAVEL_RULES } from './travelspec.js';
 import {
   parseTripList, tripListPages, tripUser, tripDocFor, tripStage, formFields, saveBody, preEditBody, parseFeeRows, pickFeeRow, parseTransRows,
-  parseCalPage, STEP_PRE_WRITING, STEP_POST_WRITING,
+  parseCalPage, STEP_PRE_WRITING, STEP_POST_WRITING, parseStayRows,
 } from './travel.js';
 import { afterFields, lodgeRowsOf, lodgeSame, transRowsOf } from './after.js';
 import { calReport, reportTarget, reportPdf } from './calpdf.js';
@@ -244,8 +244,9 @@ export const tripPreUrl = (seq) => `${BASE}/Write?seq=${seq}&mode=E&returnUrl=${
  * 사전정산 작성 화면(고치기)에서 교통편 줄을 읽는다 — 출장 카드의 가는 편·오는 편이 처음에 이것대로 골라지고,
  * 비행기를 탔는지(사후정산 조건: 비행기 또는 1박)도 여기서 본다. 읽기만 한다.
  * 출장의 출발 시·도착 시(sHour·eHour)도 같이 읽는다 — 사후정산의 KTX 줄에 출발·도착 시각을 적을 때 쓴다(src/travel.js 의 legTimes).
- * @returns {Promise<{rows: object[], transports: string[], plane: boolean, sHour: number|null, eHour: number|null}>}
- *   rows 는 src/travel.js parseTransRows 의 줄이다. sHour·eHour 는 화면에서 못 읽으면 null
+ * 일비·식비 줄(stays)과 출장기간 구분(period)도 읽는다 — 출장 카드가 일비·식비 한 줄을 적고 식수를 고칠 때 쓴다(src/travel.js 의 stayPlan).
+ * @returns {Promise<{rows: object[], transports: string[], plane: boolean, sHour: number|null, eHour: number|null, stays: object[], period: string}>}
+ *   rows 는 src/travel.js parseTransRows 의 줄, stays 는 parseStayRows 의 줄이다. sHour·eHour 는 화면에서 못 읽으면 null
  */
 export async function tripPreDetail(seq) {
   const r = await siteFetch(tripPreUrl(seq));
@@ -258,22 +259,28 @@ export async function tripPreDetail(seq) {
   const transports = rows.map((r) => r.transport).filter(Boolean);
   const fields = formFields(doc) || [];
   const hour = (name) => { const v = fields.find(([n]) => n === name)?.[1]; return /^\d{1,2}$/.test(v ?? '') ? +v : null; };
-  return { rows, transports, plane: transports.includes('Airplane'), sHour: hour('sHour'), eHour: hour('eHour') };
+  return {
+    rows, transports, plane: transports.includes('Airplane'), sHour: hour('sHour'), eHour: hour('eHour'),
+    stays: parseStayRows(doc), period: fields.find(([n]) => n === 'period')?.[1] ?? '',
+  };
 }
 
 /**
  * 사전정산을 **다시 저장한다**(2026-10-05 사용자 지정: "사전정산 다시하기") — 계산서 화면의 `사전정산 입력`으로 들어가 교통편 줄을 고치고
  * `저장`을 누른 것과 같다. 사전정산 입력 화면(고치기)의 폼을 받아, 바꾼 편이 있으면 화면에 있던 교통편 줄을 지움 표시하고 가는 편·오는 편의
  * 줄을 차례대로 다시 얹어 그대로 제출한다(src/travel.js 의 prePlan·preEditBody — 바꾸지 않은 편의 줄은 값 그대로 다시 들어간다).
+ * 카드에서 식수를 고쳤으면(plan.meals — src/travel.js 의 stayPlan, 2026-10-05 사용자 지정) 그 일비·식비 줄의 식수 칸도 바꿔 보낸다.
  * 바꾼 것이 없으면 화면에 있는 그대로 다시 저장한다.
  *
  * 2026-10-05 실제 화면(145580 — 사전·사후정산 모두 완료)을 읽어 확인한 것: 완료된 계산서 화면에도 `사전정산 입력` 링크가 있고, 그 화면의
  * 폼(Write/Save)과 `저장` 버튼이 그대로 선다. **저장을 받은 사이트가 단계를 어떻게 하는지(사전정산 작성으로 되돌리는지)는 모른다 —
- * 실제로 보내 본 적이 없다.** 그래서 사이트의 말을 믿지 않고, 보낸 뒤 화면을 다시 읽어 교통편 줄이 바뀌었는지로 성공을 판정하고,
+ * 실제로 보내 본 적이 없다.** 그래서 사이트의 말을 믿지 않고, 보낸 뒤 화면을 다시 읽어 교통편 줄(과 고친 식수)이 바뀌었는지로 성공을 판정하고,
  * 목록을 다시 읽어 **지금의 단계를 그대로** 돌려준다(패널은 그 단계대로 카드를 그린다).
  *
  * @param {object} row 여비계산서 목록의 한 줄
- * @param {{drop: string[], add: object[]}} plan src/travel.js prePlan 의 결과
+ * @param {{drop: string[], add: object[], set?: Object<string,object>|null, meals?: Object<string,number>|null}} plan src/travel.js prePlan 의 결과
+ *   (set 은 교통편은 그대로 두고 일자·출발 시·도착 시만 고친 줄 — 그 줄의 칸만 바꿔 보낸다). meals 는 식수를 고칠
+ *   일비·식비 줄({줄 번호: 식수} — stayPlan 의 set)
  * @param {{name?:string, onStage?:Function}} who name 은 목록 화면이 아는 내 이름
  * @returns {Promise<{row: object, stage: object, detail: object, linked: number}>} detail 은 다시 읽은 사전정산의 교통편(tripPreDetail)
  */
@@ -289,7 +296,13 @@ export async function tripPreSave(row, plan, { name = '', onStage = () => {} } =
   const add = plan.add.map((t) => ({ ...t }));
   // 새로 지은 줄만 사내 요금표와 잇는다 — 값 그대로 다시 넣는 줄(바꾸지 않은 편)은 화면에 있던 이음(tr_trseq)을 그대로 둔다.
   const linked = await linkFees({ trans: add.filter((t) => !t.trseq), nation: fields.find(([n]) => n === 'nationCD')?.[1] });
-  const body = preEditBody(fields, row.seq, { drop: plan.drop, add });
+  const meals = plan.meals && Object.keys(plan.meals).length ? plan.meals : null;
+  const body = preEditBody(fields, row.seq, { drop: plan.drop, add, meals, set: plan.set || null });
+  // 칸만 고친 줄(일자·출발 시·도착 시 — plan.set)이 저장한 뒤에 서 있어야 할 모양.
+  const fixed = parseTransRows(doc).filter((r) => plan.set?.[r.seq]).map((r) => ({ ...r, ...plan.set[r.seq] }));
+  // 저장한 뒤에 화면에 서 있어야 할 식수의 합 — 사이트가 줄의 번호를 새로 매기더라도 합으로는 가릴 수 있다.
+  const mealSum = (stays, set = {}) => stays.reduce((n, s) => n + (s.seq in set ? Number(set[s.seq]) : s.meal), 0);
+  const wantMeals = meals ? mealSum(parseStayRows(doc), meals) : null;
 
   onStage('여비계산서(사전정산)를 다시 저장하는 중...');
   // 저장은 한 번만 나가야 한다. 읽기가 직접 요청으로 됐으면 저장도 직접 요청으로만 보낸다(탭 경유로 되풀이하지 않는다).
@@ -299,9 +312,14 @@ export async function tripPreSave(row, plan, { name = '', onStage = () => {} } =
   });
 
   const detail = await tripPreDetail(row.seq);
-  const same = (r, t) => r.date === t.date && r.dep === t.dep && r.arr === t.arr && r.transport === t.transport && Number(r.total) === Number(t.total);
-  if (plan.drop.some((seq) => detail.rows.some((r) => r.seq === String(seq))) || add.some((t) => !detail.rows.some((r) => same(r, t)))) {
+  const hr = (v) => Number(v) || 0;
+  const same = (r, t) => r.date === t.date && r.dep === t.dep && r.arr === t.arr && r.transport === t.transport && Number(r.total) === Number(t.total)
+    && hr(r.shr) === hr(t.shr) && hr(r.ehr) === hr(t.ehr);
+  if (plan.drop.some((seq) => detail.rows.some((r) => r.seq === String(seq))) || [...add, ...fixed].some((t) => !detail.rows.some((r) => same(r, t)))) {
     throw new Error('저장을 보냈지만 사전정산의 교통편이 바뀌지 않았습니다. eclass 의 사전정산 입력 화면에서 확인해 주세요.');
+  }
+  if (wantMeals != null && mealSum(detail.stays) !== wantMeals) {
+    throw new Error('저장을 보냈지만 사전정산의 식수가 바뀌지 않았습니다. eclass 의 사전정산 입력 화면에서 확인해 주세요.');
   }
   const after = await tripList({ from: row.from, to: row.to });
   const fresh = after.rows.find((r) => r.seq === row.seq) || null;

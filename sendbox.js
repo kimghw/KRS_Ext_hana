@@ -244,8 +244,8 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       + `aria-pressed="${!!r.on}" title="${escapeHtml(r.title || '')}"${off}>${label}</button>`);
     const redo = !ctx.redo?.pre && !ctx.redo?.post ? '' : `<div class="at-send-redo" role="group" aria-label="정산 다시하기">`
       + `${redoBtn(ctx.redo.pre, 'pre-redo', '사전정산 다시하기')}${redoBtn(ctx.redo.post, 'after-reopen', '사후정산 다시하기')}</div>`;
-    // 아직 보낼 때가 아니면(정산이 덜 끝났다) 까닭 한 줄만 적는다.
-    if (!gate.staged) return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(gate.why)}${doneNote}${redo}</div>`;
+    // 아직 보낼 때가 아니면(정산이 덜 끝났다) 까닭 한 줄만 적는다. 보낸 기록은 여기서도 맨 아래다.
+    if (!gate.staged) return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(gate.why)}${redo}${doneNote}</div>`;
 
     // 사후정산이 완료된 카드에는 사후정산 칸(보관 중인 증빙 목록)이 없다 — 무엇이 묶이는지 여기에 적는다.
     // 완료한 사후정산을 다시 작성하는 중이면(gate.settle) 사후정산 칸이 다시 서 있어 거기에 적힌다.
@@ -301,7 +301,9 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       + `<input type="text" data-send="account" value="${escapeHtml(s.account)}" placeholder="직접 적기" title="과제 또는 계정을 직접 적기" aria-label="과제 또는 계정" autocomplete="off"${off} /></div>`
       + `<div class="at-send-row" role="group" aria-label="받는 사람"><span class="at-label">받는 사람</span>${person}</div></div>`
       + ways;
-    return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(how)}${doneNote}${files}${add}${sets}${form}`
+    // 차례(2026-10-05 사용자 지정: 보낸 기록과 증빙 목록을 가리키며 "이 부분이 보내기 아래에 위치 하도록") — 정산 내역 바로 아래에 보낼 곳과
+    // `보내기`가 서고, 보낸 기록(보냈습니다 — …)과 묶이는 증빙의 목록은 `보내기` 아래다. 그 전에는 칸 머리 바로 아래였다(머리로 되돌리지 않는다).
+    return `<div class="at-send" data-doc="${escapeHtml(it.docNo)}">${head(how)}${add}${sets}${form}`
       + settleNote
       + (held ? `<p class="at-send-note error at-send-held">${escapeHtml(held)}</p>` : '')
       + (s.busy ? `<p class="at-send-note">${escapeHtml(s.stage || '보내는 중...')}</p>` : '')
@@ -309,7 +311,8 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
       + redo
       + `<div class="at-send-btns"><button type="button" class="small at-request at-send-go" data-act="send-go" aria-haspopup="dialog" `
       + `title="${gate.settle ? `${GO_TITLE} — ` : ''}보낼 내용을 먼저 보여 줍니다"`
-      + `${canGo(gate, s, ctx) && !locked ? '' : ' disabled'}>${done ? '다시 보내기' : '보내기'}</button></div></div>`;
+      + `${canGo(gate, s, ctx) && !locked ? '' : ' disabled'}>${done ? '다시 보내기' : '보내기'}</button></div>`
+      + `${doneNote}${files}</div>`;
   }
 
   /** 글 칸을 친 뒤 — 카드를 새로 그리지 않고 버튼과 이전에 보낸 줄(켜짐, 접을 수 있는가)만 맞춘다. */

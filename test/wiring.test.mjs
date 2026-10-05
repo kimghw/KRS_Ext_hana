@@ -400,7 +400,8 @@ console.log('내 예약 모드로 시작 (조기 return 회귀 방지)');
     assert.equal(doc.querySelector('.schedule .selection-hint').textContent, '누르면 그 날짜·근태로 갑니다');
   });
   {
-    // 신청 내역의 조회 기간 — 한 줄이다(2026-10-04 사용자 지정): 4주 · 8주 · 시작일 ~ 종료일 · 조회. 지난 내역(히스토리) 버튼은 뺐다.
+    // 신청 내역의 조회 기간 — 한 줄이다: 시작일 ~ 종료일 · 조회. 지난 내역(히스토리) 버튼은 뺐다(2026-10-04 사용자 지정).
+    // 4주·8주 버튼은 제목 줄의 달력 버튼 왼쪽에 4W·8W 로 선다(2026-10-05 사용자 지정 — 그 전에는 이 줄의 날짜 칸 왼쪽이었다).
     // 4주·8주는 기본 보기(오늘부터 전부 + 여비 정산이 덜 끝난 다녀온 출장)에서 지난 출장을 언제까지 보일지다.
     const now = new Date();
     const ago = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d; };
@@ -410,7 +411,7 @@ console.log('내 예약 모드로 시작 (조기 return 회귀 방지)');
     const one = (d, bare) => (bare ? mdOf(d) : `${String(d.getFullYear()).slice(2)}/${mdOf(d)}`);
     // 머리 줄의 기간 글 — 올해 안이면 "9/6 ~ 10/4", 올해 밖에 걸치면 해를 붙인다.
     const span = (a, b) => { const bare = a.getFullYear() === now.getFullYear() && b.getFullYear() === now.getFullYear(); return `${one(a, bare)} ~ ${one(b, bare)}`; };
-    const back = (n) => doc.querySelector(`#atRangeBox button[data-back="${n}"]`);
+    const back = (n) => doc.querySelector(`.at-list-head button[data-back="${n}"]`);
     const pressed = () => [4, 8].map((n) => [back(n).getAttribute('aria-pressed'), back(n).classList.contains('active')].join());
     const head = () => [doc.getElementById('atRange').textContent, doc.getElementById('atRangeHint').textContent];
     const query = (from, to) => {
@@ -418,15 +419,17 @@ console.log('내 예약 모드로 시작 (조기 return 회귀 방지)');
       doc.getElementById('atRangeTo').value = to;
       doc.getElementById('atRangeGo').click();
     };
-    t('히스토리 버튼은 없다 — 머리 줄의 아이콘은 달력과 HR 열기 둘이다', () => {
+    t('히스토리 버튼은 없다 — 머리 줄에는 4W · 8W · 달력 · HR 열기가 차례로 선다', () => {
       assert.equal(doc.getElementById('atHistoryBtn'), null);
       assert.equal(doc.getElementById('atRangeBtn').nextElementSibling.id, 'atOpenHr');
+      assert.deepEqual([...doc.querySelectorAll('.at-list-head > button')].map((b) => b.id || b.textContent), ['atBack4', 'atBack8', 'atRangeBtn', 'atOpenHr']);
+      assert.deepEqual([4, 8].map((n) => back(n).getAttribute('aria-label')), ['4주 전부터 조회', '8주 전부터 조회']);
     });
-    t('조회 기간은 한 줄이다 — 4주 · 8주 · 시작일 ~ 종료일 · 조회. 처음엔 둘 다 꺼져 있다(안 봄·2주·지난 1·3·6개월·1년 버튼은 없다)', () => {
+    t('조회 기간은 한 줄이다 — 시작일 ~ 종료일 · 조회. 4W·8W 는 처음엔 둘 다 꺼져 있다(안 봄·2주·지난 1·3·6개월·1년 버튼은 없다)', () => {
       const box = doc.getElementById('atRangeBox');
       assert.equal(box.children.length, 1);
-      assert.deepEqual([...box.firstElementChild.children].map((n) => n.id || n.dataset.back || n.textContent), ['4', '8', 'atRangeFrom', '~', 'atRangeTo', 'atRangeGo']);
-      assert.deepEqual([...box.querySelectorAll('button[data-back]')].map((b) => b.textContent), ['4주', '8주']);
+      assert.deepEqual([...box.firstElementChild.children].map((n) => n.id || n.dataset.back || n.textContent), ['atRangeFrom', '~', 'atRangeTo', 'atRangeGo']);
+      assert.deepEqual([...box.querySelectorAll('button[data-back]')], [], '4주·8주는 이 칸에 없다 — 제목 줄의 4W·8W 다');
       assert.deepEqual(pressed(), ['false,false', 'false,false']);
       assert.equal(box.querySelector('button[data-months]'), null);
     });
@@ -450,7 +453,7 @@ console.log('내 예약 모드로 시작 (조기 return 회귀 방지)');
       assert.deepEqual(head(), [span(ago(56), now), '근태 날짜 기준 · 8주 전부터 전부']);
       assert.deepEqual([doc.getElementById('atRangeFrom').value, doc.getElementById('atRangeTo').value], [ymdOf(ago(56)), ymdOf(now)]);
       assert.deepEqual([store.tripBackWeeks, pressed()], [8, ['false,false', 'true,true']]);
-      assert.equal(doc.getElementById('atRangeBtn').classList.contains('active'), true);
+      assert.equal(doc.getElementById('atRangeBtn').classList.contains('active'), false, '켜진 것은 바로 옆의 8W 다 — 달력 버튼은 날짜를 직접 정해 조회할 때만 켜진다');
     });
     back(8).click();
     t('켜져 있는 것을 다시 누르면 기본 보기로 돌아온다 — 정산 중인 출장은 마지막에 누른 8주까지', () => {
@@ -829,7 +832,8 @@ console.log('근태 탭');
     assert.ok(wired.get('atKinds')?.has('click'));
     assert.ok(wired.get('atFields')?.has('input') && wired.get('atFields')?.has('change'));
     assert.ok(wired.get('atFields')?.has('click'), '칩(갈래·구분·며칠간)');
-    assert.ok(wired.get('atRangeBtn')?.has('click') && wired.get('atRangeBox')?.has('click') && wired.get('atRangeGo')?.has('click'), '조회 기간');
+    assert.ok(wired.get('atRangeBtn')?.has('click') && wired.get('atRangeGo')?.has('click'), '조회 기간');
+    assert.ok(wired.get('atBack4')?.has('click') && wired.get('atBack8')?.has('click'), '제목 줄의 4W · 8W');
     assert.ok(wired.get('atChatGo')?.has('click'));
     assert.ok(wired.get('atChatInput')?.has('keydown'));
     assert.ok(wired.get('atSubmit')?.has('click'));
@@ -1414,7 +1418,7 @@ console.log('근태 탭');
     doc.getElementById('atRangeTo').value = '2026-08-31';
     doc.getElementById('atRangeGo').click();
   };
-  const week4 = () => doc.querySelector('#atRangeBox button[data-back="4"]').click();
+  const week4 = () => doc.getElementById("atBack4").click();
   const backToDefault = () => { week4(); week4(); };
   query();
   t('기간을 정해 조회하면 신청 폼이 접힌다 — 접은 것으로 적어 두지는 않는다', () =>

@@ -48,6 +48,7 @@ import { TRANSPORTS, tripDocFor, tripStage, tripIconState, legsOfRows, pickOfRow
 import { MARKS_KEY } from './evidence.js';
 import { INTAKE_LIMIT } from './intake.js';
 import { UP_BUSY_KEY, upBusy } from './afterup.js';
+import { READ_POOL, mapPool } from './pool.js';
 
 /** 훑은 결과를 담는 storage 키. 패널은 예약·취소 뒤 이 키를 지워 카드에게 알린다. */
 export const CACHE_KEY = 'homeMine';
@@ -1025,12 +1026,29 @@ export function createHomeCard(doc, deps = {}) {
     let todo = false;
     const lock = !settled && files.length > 0;
     try {
-      for (const [i, f] of files.entries()) {
-        if (lock) await markUp(it.docNo, true);
-        if (disposed) return;
-        say({ busy: true, text: `증빙을 ${settled ? '담는' : '읽는'} 중 (${i + 1}/${files.length}) — ${f.name}` });
+      // 여러 장이면 나란히 읽힌다(2026-10-05 사용자 지정 — 한 장에 6~8초라 차례로 읽으면 장 수만큼 걸렸다). 한꺼번에 도는 수는
+      // 묶여 있고(src/pool.js), 줄에 적는 차례는 넣은 차례 그대로다. 같은 이름의 다른 그림이 서로 덮지 않게 담는 것은 배경이 줄을 세운다(src/intake.js).
+      let read = 0;
+      const progress = () => say({
+        busy: true,
+        text: files.length > 1 ? `증빙 ${files.length}장을 ${settled ? '담는' : '읽는'} 중 (${read}/${files.length})`
+          : `증빙을 ${settled ? '담는' : '읽는'} 중 (1/1) — ${files[0].name}`,
+      });
+      if (lock) await markUp(it.docNo, true);
+      if (disposed) return;
+      if (files.length) progress();
+      const got = await mapPool(files, READ_POOL, async (f) => {
+        if (disposed) return null;
         const r = await keepEvidence({ docNo: it.docNo, trip, me, file: f, settled }).catch((err) => ({ ok: false, error: err.message }));
-        if (disposed) return;
+        read++;
+        // 장 수가 많아 오래 걸려도 잠금(afterUpBusy)이 기한을 넘기지 않게, 한 장이 끝날 때마다 다시 적는다.
+        if (lock && !disposed) await markUp(it.docNo, true);
+        if (!disposed && read < files.length) progress();
+        return r;
+      });
+      if (disposed) return;
+      for (const [i, f] of files.entries()) {
+        const r = got[i];
         if (r?.ok && r.kept && r.warn) {
           // 출장 기간의 것이 아닌 문서다 — 안 맞다고 알리고(2026-10-05 사용자 지정), 맞는 것만 아래에서 올린다.
           bad = true;

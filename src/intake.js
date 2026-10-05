@@ -38,6 +38,18 @@ export function uniqueName(name, dataUrl, kept) {
 }
 
 /**
+ * 보관함에 담는 일은 줄을 세운다 — 홈 카드가 여러 장을 나란히 읽혀도(src/home.js 의 takeFiles, 2026-10-05) 이름 고르기(uniqueName —
+ * 그때 보관함에 있는 것을 본다)와 담기가 서로 끼어들지 않게. 줄을 세우지 않으면 이름이 같은 다른 그림 두 장이 서로를 못 보고 같은
+ * 이름으로 담겨 한 장이 덮인다. 읽기(Claude)는 줄 밖에서 나란히 돈다.
+ */
+let shelfLine = Promise.resolve();
+function inLine(work) {
+  const run = shelfLine.then(work);
+  shelfLine = run.catch(() => {});
+  return run;
+}
+
+/**
  * 증빙 한 장을 받는다. 던지지 않는다 — 못 받으면 까닭을 답한다.
  * @param {{docNo: string, trip: {seq?: string, from: string, to: string, location?: string}, me?: string,
  *          file: {name: string, type?: string, dataUrl: string}, settled?: boolean}} ask
@@ -52,13 +64,21 @@ export async function intakeEvidence({ docNo, trip, me = '', file, settled = fal
   if (typeof file?.dataUrl !== 'string' || !file.dataUrl.startsWith('data:')) return { ok: false, error: '받을 파일이 없습니다.' };
   if (sizeOf(file.dataUrl) > INTAKE_LIMIT) return { ok: false, error: `${file.name || '파일'} 이 너무 큽니다. 10MB 이하로 넣어 주세요.` };
   try {
-    // 보관함을 못 읽어도 증빙은 읽는다 — 담을 때 다시 말한다.
-    const kept = await store.list(docNo).catch(() => []);
-    const f = { name: uniqueName(String(file.name || 'image.png'), file.dataUrl, kept), type: String(file.type || ''), dataUrl: file.dataUrl };
+    const f = { name: String(file.name || 'image.png'), type: String(file.type || ''), dataUrl: file.dataUrl };
     const ref = { seq: trip.seq || '', from: trip.from, to: trip.to || trip.from, location: trip.location || '' };
+    /**
+     * 담는다 — 이름은 담는 그때 보관함에 있는 것을 보고 고른다(uniqueName). 한 번에 한 장씩이다(inLine).
+     * 보관함을 못 읽어도 담아 본다 — 못 담으면 그때 까닭이 나온다. 담은 이름을 돌려준다.
+     */
+    const keep = (item) => inLine(async () => {
+      const kept = await store.list(docNo).catch(() => []);
+      const name = uniqueName(f.name, f.dataUrl, kept);
+      await store.keep(docNo, [{ ...f, name, ...item }]);
+      return name;
+    });
     if (settled) {
-      await store.keep(docNo, [{ ...f, label: PLAIN_LABEL, summary: '', date: null, total: null, trip: ref }]);
-      return { ok: true, kept: true, name: f.name, label: PLAIN_LABEL, note: '', summary: '', todo: false };
+      const name = await keep({ label: PLAIN_LABEL, summary: '', date: null, total: null, trip: ref });
+      return { ok: true, kept: true, name, label: PLAIN_LABEL, note: '', summary: '', todo: false };
     }
     const { record } = await read(f, { trip: ref, me });
     const e = evidenceOf(record, ref);
@@ -66,18 +86,18 @@ export async function intakeEvidence({ docNo, trip, me = '', file, settled = fal
     // 출장 기간의 것이 아닌 문서(2026-10-05 사용자 지정) — 버리지 않고 알림 표시(warn)를 붙여 담는다. 사후정산에 올리지 않고
     // (todo 를 붙이지 않는다), 사람이 확정하기 전에는 담당자에게 보낼 때도 빠진다. 읽은 기록은 같이 둔다 — 확정하면 그 기록으로 올린다.
     if (e.warn) {
-      await store.keep(docNo, [{
-        ...f, label: e.label, summary, date: record.payDate || record.flightDate || null, total: record.total ?? null, trip: ref, warn: e.warn, record,
-      }]);
-      return { ok: true, kept: true, name: f.name, label: e.label, note: '', warn: e.warn, summary, todo: false };
+      const name = await keep({
+        label: e.label, summary, date: record.payDate || record.flightDate || null, total: record.total ?? null, trip: ref, warn: e.warn, record,
+      });
+      return { ok: true, kept: true, name, label: e.label, note: '', warn: e.warn, summary, todo: false };
     }
     if (!e.ok) return { ok: true, kept: false, name: f.name, label: e.label, note: e.note, summary, todo: false };
     const todo = NEEDS_AFTER.test(record.docType || '');
-    await store.keep(docNo, [{
-      ...f, label: e.label, summary, date: record.payDate || record.flightDate || null, total: record.total ?? null, trip: ref,
+    const name = await keep({
+      label: e.label, summary, date: record.payDate || record.flightDate || null, total: record.total ?? null, trip: ref,
       ...(todo ? { todo: true, record } : {}),
-    }]);
-    return { ok: true, kept: true, name: f.name, label: e.label, note: '', summary, todo };
+    });
+    return { ok: true, kept: true, name, label: e.label, note: '', summary, todo };
   } catch (err) {
     return { ok: false, name: String(file.name || ''), error: err?.message || String(err) };
   }

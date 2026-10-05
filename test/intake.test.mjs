@@ -122,6 +122,25 @@ await ta('붙여 넣은 그림은 이름이 같다 — 내용이 다르면 번�
   assert.deepEqual([a.name, b.name, c.name], ['image.png', 'image (2).png', 'image.png']);
   assert.deepEqual((await store.list('TR-1')).map((k) => k.name).sort(), ['image (2).png', 'image.png']);
 });
+// 2026-10-05: 홈 카드가 여러 장을 나란히 읽힌다(src/home.js) — 읽기는 겹쳐 돌아도 이름 고르기와 담기는 한 장씩이어야 한다.
+await ta('나란히 받아도 같은 이름의 다른 그림이 서로를 덮지 않는다 — 읽기는 겹쳐 돌고, 담는 것은 줄을 서서 이름에 번호가 붙는다', async () => {
+  const { store, mirrored } = fakeStore();
+  const seen = { now: 0, peak: 0 };
+  const read = async () => {
+    seen.peak = Math.max(seen.peak, ++seen.now);
+    await new Promise((r) => setTimeout(r, 20));
+    seen.now--;
+    return { record: RECORDS['lunch.png'] };
+  };
+  const got = await Promise.all(['AAAA', 'BBBB', 'CCCC'].map((body) => intakeEvidence(ask(png('image.png', body)), { store, read })));
+  assert.equal(seen.peak, 3, '세 장을 한꺼번에 읽는다');
+  assert.deepEqual(got.map((r) => [r.ok, r.kept]), [[true, true], [true, true], [true, true]]);
+  assert.deepEqual(got.map((r) => r.name).sort(), ['image (2).png', 'image (3).png', 'image.png']);
+  const kept = await store.list('TR-1');
+  assert.deepEqual(kept.map((k) => k.name).sort(), ['image (2).png', 'image (3).png', 'image.png'], '세 장이 다 남는다');
+  assert.deepEqual(new Set(kept.map((k) => k.dataUrl)).size, 3);
+  assert.equal(mirrored.at(-1)['TR-1'].length, 3, '줄여 적은 것도 마지막에 세 장을 다 본다');
+});
 t('이름 고르기 — 다른 내용의 같은 이름이 있으면 빈 번호를 찾는다(확장자 앞에)', () => {
   const kept = [{ name: 'a.png', dataUrl: 'x' }, { name: 'a (2).png', dataUrl: 'y' }, { name: '메모', dataUrl: 'z' }];
   assert.deepEqual([uniqueName('a.png', 'x', kept), uniqueName('a.png', 'q', kept), uniqueName('메모', 'q', kept), uniqueName('b.png', 'q', kept)],

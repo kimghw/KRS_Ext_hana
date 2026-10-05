@@ -392,6 +392,50 @@ export function parseTransRows(doc) {
   return out;
 }
 
+/**
+ * 사전정산 작성 화면의 일비·식비 줄을 읽는다(지움 표시가 된 줄은 뺀다). 줄이 없으면 빈 목록이다.
+ * 금액 칸(stay_dailyamt·stay_mealamt)은 화면에서 늘 0 이라(2026-10-05 실제 화면 145580 — 금액은 계산서가 셈한다) 읽지 않는다.
+ * @param {Document} doc
+ * @returns {{seq:string, day:number, daily:number, long:number, meal:number}[]} day 는 일수, daily 는 일비 일수, long 은 장기일비 일수, meal 은 식수
+ */
+export function parseStayRows(doc) {
+  const out = [];
+  for (const el of doc.querySelectorAll('form#frm input[name="stay_meal"]')) {
+    const tr = el.closest('tr');
+    const val = (name) => { const f = tr?.querySelector(`[name="${name}"]`); return f ? fieldValue(f) : ''; };
+    if (!tr || val('stay_del') === '1') continue;
+    const num = (name) => Number(val(name).replace(/,/g, '')) || 0;
+    out.push({ seq: val('stay_seq'), day: num('stay_day'), daily: num('stay_daily'), long: num('stay_long'), meal: num('stay_meal') });
+  }
+  return out;
+}
+
+/**
+ * 출장 카드에 적는 사전정산의 일비·식비 한 줄(2026-10-05 사용자 지정: "정산내역에서 사전정산에서의 일비랑 식비를 한줄에 표기하고..
+ * 식비는 아이콘으로 줄이거나 늘릴 수 있게") — 일비 일수와 식수다. **일수가 적힌 줄만 센다**: 화면에는 값이 모두 0 인 빈 줄이 남아
+ * 있기도 하다(2026-10-05 실제 화면 145580 의 둘째 줄).
+ *
+ * 식수를 카드에서 고칠 수 있는 것은 그런 줄이 하나일 때다(국내 출장은 한 줄이다) — 줄이 여럿이면(나라가 여럿) 어느 줄의 식수인지
+ * 카드에서는 가릴 수 없어 합만 적는다. 식수는 0 부터 일수 × 하루 세 끼까지다(이미 그보다 많이 적혀 있으면 그 값까지).
+ * 당일출장(주재국)은 사이트가 일비·식비 내역을 받지 않아 null 이다.
+ *
+ * @param {{stays?: object[], period?: string, want?: number|null}} ctx stays 는 parseStayRows 의 줄, period 는 화면의 출장기간 구분,
+ *   want 는 카드에서 고쳐 둔 식수다(없으면 사전정산의 값 그대로)
+ * @returns {{daily:number, meal:number, had:number, min:number, max:number, editable:boolean, changed:boolean, set:Object<string,number>|null}|null}
+ *   had 는 사전정산에 지금 적힌 식수, set 은 다시 저장할 때 고칠 줄({줄 번호: 식수} — preEditBody 의 meals)이다. 고친 것이 없으면 null
+ */
+export function stayPlan({ stays = [], period = '', want = null } = {}) {
+  if (String(period) === RULES.period.day_trip.code) return null;
+  const live = (stays || []).filter((s) => s.day > 0);
+  if (!live.length) return null;
+  const sum = (key) => live.reduce((n, s) => n + s[key], 0);
+  const had = sum('meal');
+  const row = live.length === 1 && live[0].seq ? live[0] : null;
+  const max = row ? Math.max(had, RULES.meals.per_day * Math.ceil(row.day)) : had;
+  const meal = row && Number.isInteger(want) ? Math.min(max, Math.max(0, want)) : had;
+  return { daily: sum('daily'), meal, had, min: 0, max, editable: !!row, changed: meal !== had, set: meal !== had ? { [row.seq]: meal } : null };
+}
+
 /** 사이트 줄 하나를 패널의 선택({t: 교통편, g: 기차 등급})으로. 패널이 모르는 수단(지하철·선박)은 t 가 빈 글이다. 줄이 없으면 null. */
 export const pickOfRow = (row) => (row ? { t: VALUE_OF[row.transport] || '', g: /특|^F$/i.test(row.grade || '') ? 'first' : DEFAULT_GRADE } : null);
 
@@ -589,27 +633,113 @@ export function legPlan({ trip, picks = {}, rows = [], seats = {}, workplace = '
  * 다시 들어간다. 가는 편의 줄만 새로 넣으면 그 줄이 오는 편의 줄보다 뒤에 서서(새 줄은 번호가 크다), 다음에 읽을 때 첫 줄을 가는 편으로
  * 보는 규칙(legsOfRows)에서 두 편이 뒤바뀐다.
  *
- * @param {{trip:object, picks?:{go?:object,back?:object}, rows?:object[], workplace?:string, sHour?:number|null, eHour?:number|null}} ctx
- *   rows 는 사전정산의 지금 줄(parseTransRows), sHour·eHour 는 출장의 출발 시·도착 시다
- * @returns {{legs: object[], drop: string[], add: object[], problems: string[], notes: string[], changed: boolean}}
- *   legs 는 legPlan 의 편(줄을 넣지 않는 편은 row 가 null 이고 blank 가 그 말이다), drop 은 지울 줄의 번호(tr_seq), add 는 새로 넣을 줄이다.
- *   바꾼 편이 없으면 drop·add 가 비어 있다
+ * **편의 일자·출발 시·도착 시는 여비계산서에 저장된 값이 바탕이고, 카드에서 고친 것(edits)을 그 위에 얹는다**(2026-10-05 사용자 지정:
+ * "여비계산서 상의 값을 기본적으로 갖어오도록 해줘, 갖어온 상태에서 수정을 할 수 있게") — 일자는 그 편의 모든 줄, 출발 시는 첫 줄,
+ * 도착 시는 마지막 줄에 들어간다. 교통편은 그대로 두고 일자·시각만 고쳤으면 줄을 지우고 다시 넣지 않고 **그 줄의 칸만 고친다**(set —
+ * 화면에서 그 칸을 고쳐 적은 것과 같다). 교통편을 바꾼 편이 있으면 줄을 모두 다시 넣으므로 고친 값은 다시 넣는 줄에 실린다.
+ *
+ * @param {{trip:object, picks?:{go?:object,back?:object}, rows?:object[], workplace?:string, sHour?:number|null, eHour?:number|null,
+ *   edits?:{go?:{date?:string,shr?:number,ehr?:number}, back?:object}}} ctx
+ *   rows 는 사전정산의 지금 줄(parseTransRows), sHour·eHour 는 출장의 출발 시·도착 시, edits 는 카드에서 고친 편마다의 일자·출발 시·도착 시다
+ * @returns {{legs: object[], drop: string[], add: object[], set: Object<string,{date?:string,shr?:number,ehr?:number}>|null, problems: string[], notes: string[], changed: boolean}}
+ *   legs 는 legPlan 의 편(줄을 넣지 않는 편은 row 가 null 이고 blank 가 그 말이다)에 when(여비계산서에 설 일자·출발 시·도착 시 — legWhen)·
+ *   base(고치기 전의 그것)·edited(고친 것이 있는가)를 더한 것이다. drop 은 지울 줄의 번호(tr_seq), add 는 새로 넣을 줄, set 은 칸만 고칠 줄
+ *   ({줄 번호: 고칠 칸})이다. 바꾼 것이 없으면 drop·add 가 비어 있고 set 이 null 이다
  */
-export function prePlan({ trip, picks = {}, rows = [], workplace = '', sHour = null, eHour = null }) {
+export function prePlan({ trip, picks = {}, rows = [], workplace = '', sHour = null, eHour = null, edits = {} }) {
   const route = legPlan({ trip, picks, rows, workplace });
-  const legs = route.legs.map((l) => (picks[l.key]?.t && picks[l.key].t !== GRADED && l.source !== 'site' && !l.row
+  const planned = route.legs.map((l) => (picks[l.key]?.t && picks[l.key].t !== GRADED && l.source !== 'site' && !l.row
     ? { ...l, problem: '', blank: `${labelOf(picks[l.key].t)} — 사전정산에는 교통편 줄을 넣지 않습니다` } : l));
   // 그 편의 줄이 달라지는가 — 손대지 않았거나 사전정산의 줄과 같으면 아니고, 줄이 없던 편에 줄을 넣지 않는 것도 달라지는 것이 아니다.
   const moved = (l) => !!picks[l.key]?.t && l.source !== 'site' && !l.problem && !!(l.site || l.row);
-  const changed = legs.some(moved);
+  const anyMoved = planned.some(moved);
+  const hr = (v) => Number(v) || 0;
+  const differs = (r, b) => r.date !== b.date || hr(r.shr) !== hr(b.shr) || hr(r.ehr) !== hr(b.ehr);
+  // 편마다 여비계산서에 설 줄 — 바꾼 편은 새 줄(출발·도착 시를 채워서)이고, 아니면 저장된 줄 그대로다. 그 위에 카드에서 고친 일자·시각을 얹는다.
+  const legs = planned.map((l) => {
+    const base = l.problem || !moved(l) ? legParts(l.site) : legTimesAll(l.key, l.row, { sHour, eHour }).map((at, i) => ({ ...legParts(l.row)[i], ...at }));
+    const e = edits?.[l.key] || {};
+    const lines = base.map((r, i) => ({ ...r, ...(DATE_RE.test(e.date || '') ? { date: e.date } : {}),
+      ...(i === 0 && isHour(e.shr) ? { shr: e.shr } : {}), ...(i === base.length - 1 && isHour(e.ehr) ? { ehr: e.ehr } : {}) }));
+    return { ...l, lines, when: legWhen({ parts: lines }), base: legWhen({ parts: base }), edited: lines.some((r, i) => differs(r, base[i])) };
+  });
+  const edited = legs.some((l) => l.edited);
   const kept = new Set(legs.flatMap((l) => legParts(l.site)));
-  const lines = (l) => (l.problem || !moved(l) ? legParts(l.site) : legTimesAll(l.key, l.row, { sHour, eHour }).map((at, i) => ({ ...legParts(l.row)[i], ...at })));
+  // 교통편은 그대로이고 일자·시각만 고친 줄 — 달라진 칸만 적는다.
+  const set = {};
+  if (!anyMoved) {
+    for (const l of legs) {
+      l.lines.forEach((r, i) => {
+        const b = legParts(l.site)[i];
+        if (!r.seq || !differs(r, b)) return;
+        set[r.seq] = { ...(r.date !== b.date ? { date: r.date } : {}), ...(hr(r.shr) !== hr(b.shr) ? { shr: hr(r.shr) } : {}), ...(hr(r.ehr) !== hr(b.ehr) ? { ehr: hr(r.ehr) } : {}) };
+      });
+    }
+  }
   return {
     legs,
-    drop: changed ? rows.map((r) => r.seq).filter(Boolean) : [],
-    add: changed ? [...legs.flatMap(lines), ...rows.filter((r) => !kept.has(r))].map((r) => ({ ...r })) : [],
-    problems: legs.filter((l) => l.problem).map((l) => `${l.label}: ${l.problem}`), notes: route.notes, changed,
+    drop: anyMoved ? rows.map((r) => r.seq).filter(Boolean) : [],
+    add: anyMoved ? [...legs.flatMap((l) => l.lines), ...rows.filter((r) => !kept.has(r))].map((r) => ({ ...r })) : [],
+    set: Object.keys(set).length ? set : null,
+    problems: legs.filter((l) => l.problem).map((l) => `${l.label}: ${l.problem}`), notes: route.notes, changed: anyMoved || edited,
   };
+}
+
+/**
+ * 편의 줄이 여비계산서에 적힌 일자·출발 시·도착 시 — 일자와 출발 시는 첫 줄, 도착 시는 마지막 줄의 것이다(갈아타는 편은 구간마다 줄이 있다).
+ * 시각 0 은 적지 않은 것이다(화면의 첫 선택지 — 계산서에는 00:00 으로 찍힌다). 줄이 없으면 null.
+ * @returns {{date:string, shr:number, ehr:number}|null}
+ */
+export function legWhen(row) {
+  const parts = legParts(row);
+  return parts.length ? { date: parts[0].date || '', shr: Number(parts[0].shr) || 0, ehr: Number(parts.at(-1).ehr) || 0 } : null;
+}
+
+/**
+ * 그 편의 **사이트에 저장된 줄**이 출장 일정·운임표로 지은 값과 어디가 다른가(2026-10-05 사용자 지정: "저장된 값이 다르면 다른 부분을
+ * 확인할 수 있도록"). 카드는 편을 출장 일정의 날짜로 부르고("오는 편 9/10") 시각은 적지 않아서, 저장된 줄의 일자가 다르거나 출발·도착 시가
+ * 비어 있어도 보이지 않았다(2026-10-05 실제 계산서 145580 — 오는 편의 일자가 출발일이고 두 줄 모두 0시, 요금은 사내 요금표의 53,700원).
+ *
+ * 줄마다(갈아타는 편은 구간마다) 견주는 것:
+ *   일자   그 편의 날(가는 편 = 출발일, 오는 편 = 도착일)
+ *   시각   출발·도착 시가 비어 있는데(0시) 출장의 출발·도착 시와 구간의 소요 시간으로 채울 수 있을 때(legTimesAll — 적혀 있는 시각은 견주지 않는다)
+ *   요금   KTX 줄이면 운임표의 정가(그 줄의 두 역·그 등급)
+ * 줄의 역은 견주지 않는다 — 사이트에서 고친 역이 먼저다(그 길을 기억해 다음에도 쓴다). **등급 글도 견주지 않는다** — 사내 요금표에서 고른 줄은
+ * 그 표의 글("일반"·"E")이 적혀 있어 패널이 적는 글("일반석")과 달라도 같은 등급이다(2026-10-05 실제 계산서 145580: 사용자가 사이트에서
+ * 요금표의 정가로 고친 뒤 등급 글만 달라 `다름 1`이 남았다 — 다른 곳이 없으면 표시도 없어야 한다). 카드에서 다시 고른 편(저장된 줄 그대로가 아닌 편)과
+ * 줄이 없는 편은 견줄 것이 없다.
+ *
+ * @param {object} leg legPlan·prePlan 의 편
+ * @param {{sHour?: number|null, eHour?: number|null}} when 출장의 출발 시·도착 시(tripPreDetail)
+ * @returns {{key:'date'|'time'|'fare', label:string, saved:string, by:string, want:string, fix?:object}[]} label 은 항목의 이름(갈아타는
+ *   편이면 구간을 앞에 붙인다), saved 는 저장된 값, by 는 무엇에 견준 값인지, want 는 그 값이다. 다른 곳이 없으면 빈 목록
+ */
+export function legDiffs(leg, { sHour = null, eHour = null } = {}) {
+  if (!leg?.site || leg.source !== 'site') return [];
+  // 사후정산 화면에서 읽은 줄(src/after.js transRowsOf)은 시각이 글이다 — 수로 맞춘다.
+  const parts = legParts(leg.site).map((p) => ({ ...p, shr: Number(p.shr) || 0, ehr: Number(p.ehr) || 0 }));
+  const times = legTimesAll(leg.key, parts.length > 1 ? { parts } : parts[0], { sHour, eHour });
+  const hour = (h) => (h == null ? '?' : `${h}시`);
+  const out = [];
+  parts.forEach((p, i) => {
+    const name = (what) => (parts.length > 1 ? `${p.dep}→${p.arr} ${what}` : what);
+    // fix 는 카드에서 그 값으로 고칠 때 쓰는 값이다(prePlan 의 edits 모양) — 갈아타는 편은 구간마다 고칠 길이 카드에 없어 주지 않는다.
+    const one = parts.length === 1;
+    if (DATE_RE.test(p.date || '') && p.date !== leg.date) {
+      out.push({ key: 'date', label: name('일자'), saved: md(p.date), by: '출장 일정', want: md(leg.date), ...(one ? { fix: { date: leg.date } } : {}) });
+    }
+    const t = times[i];
+    if ((t.shr != null && t.shr !== p.shr) || (t.ehr != null && t.ehr !== p.ehr)) {
+      const [shr, ehr] = [t.shr ?? p.shr, t.ehr ?? p.ehr];
+      out.push({ key: 'time', label: name('시각'), saved: p.shr || p.ehr ? `${hour(p.shr || null)} → ${hour(p.ehr || null)}` : '없음',
+        by: '출장 시각으로', want: `${hour(shr || null)} → ${hour(ehr || null)}`, ...(one ? { fix: { shr, ehr } } : {}) });
+    }
+    if (p.transport !== SITE_OF[GRADED]) return;
+    const g = pickOfRow(p).g;
+    const f = fareOf(stationOf(p.dep), stationOf(p.arr), leg.date, g);
+    if (f && f.fare !== Number(p.total)) out.push({ key: 'fare', label: name('요금'), saved: `${won(p.total)}원`, by: '운임표', want: `${won(f.fare)}원` });
+  });
+  return out;
 }
 
 /** 교통편 줄 하나를 한 마디로 — "KTX 부산→서울 일반석 54,400원", 갈아타는 편이면 "KTX 부산→오송→목포 일반석 69,500원". 카드와 확인 문구에 쓴다. */
@@ -833,29 +963,48 @@ function transLine(t) {
 }
 
 /**
- * 이미 있는 여비계산서의 사전정산 입력 화면(고치기)에서 읽은 칸으로 **다시 저장할** 본문을 짓는다 — 교통편 줄만 바꾼다(prePlan 의
- * drop·add). 지울 줄은 화면의 × 가 하듯 그 줄의 tr_del 을 1 로 바꾸고(2026-10-05 실제 화면의 delRow: 번호가 있는 줄은 지움 표시만 한다),
- * 새 줄은 토큰 앞에 넣는다. 나머지 칸은 화면에 있던 그대로다 — 바꿀 것이 없으면 화면의 `저장`만 누른 것과 같다.
- * 그 계산서의 화면이 아니거나(번호가 다르다) 토큰이 없거나 지울 줄이 화면에 없으면 던진다 — 다른 문서나 다른 줄을 건드리면 안 된다.
+ * 이미 있는 여비계산서의 사전정산 입력 화면(고치기)에서 읽은 칸으로 **다시 저장할** 본문을 짓는다 — 교통편 줄(prePlan 의
+ * drop·add, 일자·시각만 고친 줄은 set — 그 줄의 tr_date·tr_shr·tr_ehr 값만 바꾼다)과 식수(stayPlan 의 set)만 바꾼다. 지울 줄은 화면의 × 가 하듯 그 줄의 tr_del 을 1 로 바꾸고(2026-10-05 실제 화면의 delRow:
+ * 번호가 있는 줄은 지움 표시만 한다), 새 줄은 토큰 앞에 넣는다. 식수는 그 일비·식비 줄의 stay_meal 값만 바꾼다(화면의 칸에 고쳐 적은 것과 같다).
+ * 나머지 칸은 화면에 있던 그대로다 — 바꿀 것이 없으면 화면의 `저장`만 누른 것과 같다.
+ * 그 계산서의 화면이 아니거나(번호가 다르다) 토큰이 없거나 지울 줄·고칠 줄이 화면에 없으면 던진다 — 다른 문서나 다른 줄을 건드리면 안 된다.
  * @param {[string,string][]} fields formFields 의 결과
  * @param {string} seq 계산서 번호
- * @param {{drop?: string[], add?: object[]}} change 지울 줄의 번호와 새로 넣을 줄(trseq·revno 는 trip.js 가 채워 넣는다)
+ * @param {{drop?: string[], add?: object[], meals?: Object<string,number>|null, set?: Object<string,object>|null}} change 지울 줄의 번호와
+ *   새로 넣을 줄(trseq·revno 는 trip.js 가 채워 넣는다), meals 는 식수를 고칠 일비·식비 줄({줄 번호(stay_seq): 식수}),
+ *   set 은 칸만 고칠 교통편 줄({줄 번호(tr_seq): {date?, shr?, ehr?}})
  * @returns {string} application/x-www-form-urlencoded
  */
-export function preEditBody(fields, seq, { drop = [], add = [] } = {}) {
+export function preEditBody(fields, seq, { drop = [], add = [], meals = null, set = null } = {}) {
   const get = (name) => fields.find(([n]) => n === name)?.[1];
   if (!seq || get('seq') !== String(seq)) throw new Error('이 여비계산서의 사전정산 입력 화면이 아닙니다.');
   if (!get(TOKEN)) throw new Error('여비계산서 화면에서 요청 확인 토큰을 찾지 못했습니다.');
   const gone = new Set(drop.map(String));
+  const eat = new Map(Object.entries(meals || {}));
+  // 칸만 고칠 교통편 줄(prePlan 의 set) — 일자·출발 시·도착 시. 줄을 지나며 고친 칸을 지워 가고, 남은 것이 있으면 화면에 없던 줄·칸이다.
+  const SET_OF = { tr_date: 'date', tr_shr: 'shr', tr_ehr: 'ehr' };
+  const fix = new Map(Object.entries(set || {}).map(([k, v]) => [k, { ...v }]));
   const body = new URLSearchParams();
   let cur = '';   // 지금 지나는 교통편 줄의 번호 — 줄마다 tr_seq 바로 뒤가 tr_del 이다
+  let stay = '';  // 지금 지나는 일비·식비 줄의 번호 — 줄마다 stay_seq 가 맨 앞이고 stay_meal 이 그 뒤다
   for (const [name, value] of fields) {
     if (name === TOKEN) for (const t of add) for (const [n, v] of transLine(t)) body.append(n, v);
     if (name === 'tr_seq') cur = value;
+    if (name === 'stay_seq') stay = value;
     const kill = name === 'tr_del' && gone.delete(cur);
-    body.append(name, kill ? '1' : value);
+    const meal = name === 'stay_meal' && eat.has(stay) ? String(eat.get(stay)) : null;
+    if (meal != null) eat.delete(stay);
+    const key = SET_OF[name];
+    const want = key && cur && fix.get(cur)?.[key] != null ? String(fix.get(cur)[key]) : null;
+    if (want != null) {
+      delete fix.get(cur)[key];
+      if (!Object.keys(fix.get(cur)).length) fix.delete(cur);
+    }
+    body.append(name, kill ? '1' : meal ?? want ?? value);
   }
   if (gone.size) throw new Error('지울 교통편 줄이 사전정산 화면에 없습니다(그 사이에 바뀌었을 수 있습니다). 신청 내역을 새로 읽어 주세요.');
+  if (fix.size) throw new Error('일자·시각을 고칠 교통편 줄이 사전정산 화면에 없습니다(그 사이에 바뀌었을 수 있습니다). 신청 내역을 새로 읽어 주세요.');
+  if (eat.size) throw new Error('식수를 고칠 일비·식비 줄이 사전정산 화면에 없습니다(그 사이에 바뀌었을 수 있습니다). 신청 내역을 새로 읽어 주세요.');
   return body.toString();
 }
 

@@ -1,6 +1,7 @@
 // 신청 내역의 기본 보기(attendpanel.js + src/settling.js) — 오늘부터 잡힌 것은 전부(근태를 올려 둔 가장 늦은 날까지), 지난 것은 여비 정산이
 // 덜 끝난 출장만 다녀온 뒤 4주(또는 8주)까지(2026-10-04 사용자 지정). 사후정산을 완료했거나 증빙을 담당자에게 보낸 출장은 빠진다.
-// 조회 기간은 한 줄(4주 · 8주 · 시작일 ~ 종료일 · 조회)이고 지난 내역(히스토리) 버튼은 없다.
+// 조회 기간은 한 줄(시작일 ~ 종료일 · 조회)이고 지난 내역(히스토리) 버튼은 없다. 4주·8주 버튼은 제목 줄의 4W·8W 다(2026-10-05 사용자 지정:
+// "신청내역 조회 할때 그냥 4주전 8주전 이거 여기에 버튼 넣어주라 그냥 4W, 8W 라고 하면 될듯" — 그 전에는 조회 기간 칸 안의 4주·8주였다).
 //
 // 패널을 진짜 화면(sidepanel.html)에 붙이고, HR 문서함(작업 탭 안의 요청)과 eclass 여비계산서 목록은 흉내 낸다.
 // 날짜는 오늘을 기준으로 짓는다 — 패널이 진짜 시계를 본다.
@@ -114,7 +115,7 @@ const spanOf = (from, to) => {
   const one = (s) => (from.slice(0, 4) === year && to.slice(0, 4) === year ? md(s) : `${s.slice(2, 4)}/${md(s)}`);
   return `${one(from)} ~ ${one(to)}`;
 };
-const back = (n) => doc.querySelector(`#atRangeBox button[data-back="${n}"]`);
+const back = (n) => doc.querySelector(`.at-list-head button[data-back="${n}"]`);
 /** 근태 목록과 여비계산서 목록을 둘 다 읽을 때까지. */
 const settle = async (what) => { const n = calls.bt.length; await until(() => calls.bt.length > n && st.trips?.rows, what); await wait(40); };
 
