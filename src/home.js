@@ -342,7 +342,9 @@ async function scanMine(dates, { scanRooms, scanCars, onDay, onProgress, signal 
 
 const STYLE = `${CARD_STYLE}
 .krs-mine:not(:has(.krs-mine-list:not([hidden]) .krs-mine-item, .krs-mine-warn:not(:empty), .krs-mine-bar:not([hidden]))) .krs-mine-body { display: none; }
-.krs-mine .krs-mine-head.can-open { cursor: pointer; }
+.krs-mine .krs-mine-head { cursor: pointer; user-select: none; }
+.krs-mine .krs-mine-head:hover { background: #eef2f8; }
+.krs-mine .krs-mine-body[hidden] { display: none; }
 .krs-mine .krs-mine-bar { height: 3px; margin: 0 0 8px; border-radius: 2px; background: #e3eaf3; overflow: hidden; }
 .krs-mine .krs-mine-bar[hidden] { display: none; }
 .krs-mine .krs-mine-bar > i { display: block; width: 0; height: 100%; background: #1f4e9c; transition: width .3s; }
@@ -439,7 +441,7 @@ ${PLAN_GROUPS.map((g) => `        <span class="krs-card-chip" title="${PLAN_CHIP
         <button type="button" class="krs-card-btn" data-act="all" aria-pressed="false" hidden>${ICON.eye}</button>
         <button type="button" class="krs-card-btn" data-act="refresh" title="새로고침 — 담아 둔 것을 버리고 사이트와 HR 을 다시 읽습니다" aria-label="새로고침">${ICON.refresh}</button>
         <button type="button" class="krs-card-btn" data-act="panel" title="예약 패널 열기 — 확장의 사이드 패널에서 예약·근태를 올리고 고칩니다" aria-label="예약 패널 열기">${ICON.panel}</button>
-        <button type="button" class="krs-card-btn" data-act="toggle" data-role="toggle" aria-expanded="true" hidden>${ICON.chevron}</button>
+        <button type="button" class="krs-card-btn" data-act="toggle" data-role="toggle" aria-expanded="true">${ICON.chevron}</button>
       </span>
     </div>
     <div class="krs-card-body krs-mine-body">
@@ -452,7 +454,7 @@ ${PLAN_GROUPS.map((g) => `        <span class="krs-card-chip" title="${PLAN_CHIP
 </div>`;
   const q = (role) => root.querySelector(`[data-role="${role}"]`);
   return {
-    root, head: root.querySelector('.krs-mine-head'), toggle: q('toggle'),
+    root, head: root.querySelector('.krs-mine-head'), body: root.querySelector('.krs-mine-body'), toggle: q('toggle'),
     rooms: q('rooms'), cars: q('cars'), note: q('note'), bar: q('bar'), fill: q('fill'),
     list: q('list'), warn: q('warn'), planWarn: q('planWarn'),
     plans: Object.fromEntries(PLAN_GROUPS.map((g) => [g.key, q(g.key)])),
@@ -782,15 +784,18 @@ export function createHomeCard(doc, deps = {}) {
     ui.refresh.disabled = on;
   };
 
-  /** 목록을 펴거나 접는다. 접혀 있어도 머리 줄의 건수 칩과 본문의 경고·진행 막대는 보인다. */
+  /**
+   * 카드를 펴거나 접는다 — R&D ERP 현황 카드와 같이(2026-10-06 사용자 지정: "접혔다 폈다 기능을 R&D erp 기준으로 workspace도")
+   * 접으면 본문(목록·경고·진행 막대)이 통째로 숨고 머리 줄(건수 칩·읽은 때·버튼)만 남는다. 접을 것이 없어도 접고 편다.
+   */
   function setOpen(on) {
     open = on;
-    ui.list.hidden = !open;
+    ui.body.hidden = !open;
     const label = open ? '접기' : '펼치기';
     ui.toggle.setAttribute('aria-expanded', String(open));
     ui.toggle.setAttribute('aria-label', label);
     ui.toggle.title = label;
-    ui.head.title = view.all.length ? `클릭: ${label}` : '';
+    ui.head.title = `클릭: ${label}`;
   }
   setOpen(true);
   // 접어 둔 것을 기억해 두었으면 접은 채로 시작한다. 못 읽으면(확장과 끊김) 펴 둔다. 읽는 사이에 이미 접거나 폈으면
@@ -853,10 +858,6 @@ export function createHomeCard(doc, deps = {}) {
       setChip(ui.plans[g.key], view.plans ? plans.filter((p) => p.group === g.key && !p.tucked).length : null);
     }
     ui.list.innerHTML = view.all.map((it, i) => itemHtml(it, i, t)).join('');
-    // 접을 것이 없으면 화살표 버튼도 두지 않는다.
-    ui.toggle.hidden = !view.all.length;
-    ui.head.classList.toggle('can-open', view.all.length > 0);
-    setOpen(open);
     wantUp();
   }
 
@@ -1439,10 +1440,9 @@ export function createHomeCard(doc, deps = {}) {
     const target = e.target?.closest ? e.target : null;
     const act = target?.closest('[data-act]')?.dataset.act;
     const li = act ? null : target?.closest('li[data-i]');
-    // 머리 줄 어디를 눌러도 접고 편다(화살표 버튼도 같은 일). 접을 것이 없으면 아무 일도 없다. 이 화면의 일이라 확장과
-    // 끊겨 있어도 되고, 고른 것은 담아 둔다(끊겼으면 못 담을 뿐이다).
+    // 머리 줄 어디를 눌러도 접고 편다(화살표 버튼도 같은 일) — 접을 것이 없어도 R&D ERP 현황 카드처럼 접힌다. 이 화면의 일이라
+    // 확장과 끊겨 있어도 되고, 고른 것은 담아 둔다(끊겼으면 못 담을 뿐이다).
     if (act === 'toggle') {
-      if (!view.all.length) return;
       foldChosen = true;
       setOpen(!open);
       try { await storage.set({ [FOLD_KEY]: !open }); } catch { /* 다음에 열면 펴져 있을 뿐이다 */ }

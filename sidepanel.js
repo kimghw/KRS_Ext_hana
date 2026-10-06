@@ -48,7 +48,7 @@ const el = {
   scanBar: $('scanBar'), scanNote: $('scanNote'), scanFill: $('scanFill'),
   homeCard: $('homeCard'), teamsButton: $('teamsButton'), homeUncfm: $('homeUncfm'),
   docCirculate: $('docCirculate'), docCirculateState: $('docCirculateState'),
-  logBox: $('logBox'), logCount: $('logCount'), logOut: $('logOut'),
+  settingsBox: $('settingsBox'), logBox: $('logBox'), logCount: $('logCount'), logOut: $('logOut'),
   logCopy: $('logCopy'), logSave: $('logSave'), logClear: $('logClear'),
 };
 
@@ -277,7 +277,7 @@ function render(day) {
   }
   if (!grid.length) {
     const { noun } = currentRunner();
-    el.grid.innerHTML = `<p class="hint">${noun} 정보를 찾지 못했습니다. 아래 “페이지 구조 캡처”를 실행해 주세요.</p>`;
+    el.grid.innerHTML = `<p class="hint">${noun} 정보를 찾지 못했습니다. 아래 “설정 → 페이지 구조 캡처”를 실행해 주세요.</p>`;
     return;
   }
 
@@ -2316,12 +2316,12 @@ function flash(btn, text, ms = 1800) {
   flashTimers.set(btn, setTimeout(() => { btn.textContent = btn.dataset.label; }, ms));
 }
 
-/** 요약(건수)은 늘, 목록은 칸을 열었을 때만 그린다. 최신 것이 위로 온다. */
+/** 요약(건수)은 늘, 목록은 칸을 열었을 때만(바깥 `설정` 도 펼쳐져 있을 때) 그린다. 최신 것이 위로 온다. */
 async function paintLog() {
   const list = await logbook.list();
   const fails = list.filter((e) => !e.ok).length;
   el.logCount.textContent = list.length ? `${list.length}건${fails ? ` · 실패 ${fails}` : ''}` : '기록 없음';
-  if (!el.logBox.open) return;
+  if (!el.logBox.open || !el.settingsBox.open) return;
   el.logOut.textContent = formatEntries(list.slice(-LOG_PREVIEW).reverse(), { detail: false });
 }
 
@@ -2593,6 +2593,7 @@ async function init() {
   });
   el.capture.addEventListener('click', runCapture);
   el.logBox.addEventListener('toggle', paintLog);
+  el.settingsBox.addEventListener('toggle', paintLog);   // 바깥 `설정` 을 펼쳐야 활동 로그가 보인다
   el.logCopy.addEventListener('click', copyLog);
   el.logSave.addEventListener('click', saveLog);
   el.logClear.addEventListener('click', clearLog);

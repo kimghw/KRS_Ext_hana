@@ -1479,8 +1479,8 @@ export function createAttendPanel({
    */
   const lodgeCtx = (trip, { locked = false, lodging = false, readonly = false } = {}) => ({
     trip, trseq: trseqOf(trip), kept: st.after[trip.seq]?.kept || [], mine: st.lodgeMine?.[trip.seq], locked, lodging, readonly,
-    // 줄의 `증빙`·`손수 작성`을 누르면 그 줄 아래에 펴지는 내용(lodgeInfoHtml).
-    open: st.lodgeOpen[trip.seq] || '', detail: (row, source) => lodgeInfoHtml(trip.seq, row, source),
+    // 줄의 `증빙`·`손수 작성`을 누르면 그 줄 아래에 펴지는 내용(lodgeInfoHtml). `상한`으로 정산금액을 바꾸면 그 내용의 금액도 맞춘다(patchLodgeInfo).
+    open: st.lodgeOpen[trip.seq] || '', detail: (row, source) => lodgeInfoHtml(trip.seq, row, source), changed: (lodgeSeq, l) => patchLodgeInfo(trip.seq, lodgeSeq, l),
   });
 
   /** 열어 둔 출장 카드의 숙박 줄을 한 번 읽어 둔다 — 사후정산을 쓰는 단계이거나 완료한 뒤다(그 전에는 입력 화면이 없다). */
@@ -2465,7 +2465,24 @@ export function createAttendPanel({
     chrome.storage.local.set({ attendLodgeInfo: st.lodgeInfo });
   }
 
-  /** 이 패널이 올린 숙박 줄을 적어 둔다(줄 번호 → 증빙 파일 이름). 저장소에도 남겨 패널을 다시 열어도 손수 적은 줄과 가려진다. */
+  /**
+   * `상한` 버튼으로 그 줄의 정산금액을 바꿨다(lodgebox.js 의 toggleCap) — 올린 내용(펴 보는 것)의 정산금액·공급가액·부가세를 바꾼 값으로
+   * 맞춘다(lodgeCells 와 같은 말이 되게 같은 길로 짓는다). 적어 둔 줄의 정산금액도 맞춰 화면의 줄과 같은 줄로 알아본다(lodgeSame).
+   * @param {object} l 정한 줄(src/after.js lodgeSettle 의 결과 — actual·maxconv·sday·settle·total·samount·vat·capped·vatFrom)
+   */
+  function patchLodgeInfo(seq, lodgeSeq, l) {
+    const info = st.lodgeInfo[seq]?.[lodgeSeq];
+    if (!info?.row || !Array.isArray(info.cells)) return;
+    const fresh = Object.fromEntries(lodgeCells({ ...l, company: info.row.company, paydate: info.row.paydate, sources: [] }).filter(([k]) => ['정산금액', '공급가액', '부가세'].includes(k)));
+    const cells = info.cells.map(([k, v]) => [k, fresh[k] ?? v]);
+    st.lodgeInfo = { ...st.lodgeInfo, [seq]: { ...st.lodgeInfo[seq], [lodgeSeq]: { ...info, row: { ...info.row, total: l.total }, cells } } };
+    chrome.storage.local.set({ attendLodgeInfo: st.lodgeInfo });
+  }
+
+  /**
+   * 이 패널이 올린 숙박 줄을 적어 둔다(줄 번호 → 증빙 파일 이름). 저장소에도 남겨 패널을 다시 열어도 손수 적은 줄과 가려진다.
+   * 실제 금액(과 문서의 공급가액·부가세)도 적어 둔다 — 숙박비 내역의 `상한` 버튼이 상한액에서 실제 금액으로 되돌릴 때 쓴다(lodgebox.js).
+   */
   function rememberMine(seq, lodgeRows, plan) {
     if (!lodgeRows.length) return;
     const mine = { ...st.lodgeMine[seq] };
@@ -2479,6 +2496,8 @@ export function createAttendPanel({
           row: { paydate: l.paydate, company: l.company, sday: l.sday, total: l.total }, cells: lodgeCells(l, h),
           docs: (plan.docs || []).filter((d) => l.sources.includes(d.name)).map(docLine), notes: [...(l.notes || [])],
         };
+        const krw = l.doc?.currency === 'KRW';
+        if (l.actual != null) lodgeBox.noteActual(seq, h.seq, { actual: l.actual, supply: krw ? l.doc.supply ?? null : null, vat: krw ? l.doc.vat ?? null : null });
       }
     }
     st.lodgeMine = { ...st.lodgeMine, [seq]: mine };
@@ -2917,13 +2936,18 @@ export function createAttendPanel({
       el.list.querySelector(`button[data-act="lodge-info"][data-lodge="${btn.dataset.lodge}"]`)?.focus();
       return undefined;
     }
-    if (a === 'lodge-refresh' || a === 'lodge-del') {
+    if (a === 'lodge-refresh' || a === 'lodge-del' || a === 'lodge-cap') {
       // 출장 카드의 숙박비 내역 — 다시 읽기는 곧바로, 지우기는 실제 계산서의 줄이 없어지는 일이라 두 번 눌러야 나간다.
+      // `상한`은 그 줄의 정산금액을 상한액과 실제 금액 사이에서 바꾼다(2026-10-06 사용자 지정 — 버튼 하나, 되돌릴 수 있어 한 번에 나간다).
       const row = tripOf(it);
       if (!row) return undefined;
       if (a === 'lodge-refresh') {
         disarm();
         return lodgeBox.reload(lodgeCtx(row));
+      }
+      if (a === 'lodge-cap') {
+        disarm();
+        return lodgeBox.toggleCap(lodgeCtx(row), btn.dataset.lodge);
       }
       if (!armed(`lodge:${row.seq}:${btn.dataset.lodge}`, btn, '지우기')) {
         setStatus(`지울 숙박 줄 — ${lodgeBox.describe(row.seq, btn.dataset.lodge)} · 한 번 더 누르면 사후정산에서 지웁니다`);

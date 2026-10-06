@@ -110,6 +110,7 @@ await ta('숙박 영수증 — 그때 읽은 기록으로 숙박 줄을 올리�
   assert.deepEqual((await s.store.list('TR-1')).map((k) => [k.name, !!k.todo, !!k.record]), [['lunch.png', false, false], ['hotel.png', false, true]]);
   assert.deepEqual(s.marks.at(-1), { 'TR-1': [{ name: 'lunch.png', label: '출장지 영수증' }, { name: 'hotel.png', label: '숙박 증빙' }] }, '홈 카드와 패널이 보는 것에서도 표시가 걷힌다');
   assert.deepEqual(storage.data.attendLodgeMine, { 145580: { 81561: 'hotel.png' } }, '패널의 숙박비 내역이 그 줄을 증빙으로 올린 줄로 알아본다');
+  assert.deepEqual(storage.data.attendLodgeActual, { 145580: { 81561: { actual: 110000, supply: 100000, vat: 10000 } } }, '실제 금액과 문서의 공급가액·부가세 — 패널의 상한 버튼이 되돌릴 때 쓴다');
   assert.ok(stages.includes('숙박비 상한액을 확인하는 중...'));
 });
 await ta('올린 것은 활동 기록에 남는다 — 패널이 남기는 기록과 같은 머리라 숙박비 내역이 알아본다', async () => {

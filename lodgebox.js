@@ -5,8 +5,16 @@
 // 같은 화면의 교통 줄(사후정산에 따로 올린 편)도 읽어 둔다 — 사후정산이 완료된 출장의 카드가 그것으로 가는 편·오는 편을 그린다.
 //
 // 지우기는 실제 계산서의 줄이 없어지는 일이라 두 번 눌러야 나간다 — 두 번 누르기는 attendpanel.js 가 한다(다른 버튼과 같은 길).
+//
+// **`상한` 버튼**(2026-10-06 사용자 지정: "상한할지 안할지 버튼 하나") — 실제 금액이 숙박비 상한액을 넘는 원화 줄의 정산금액 옆에
+// 하나 선다. 켜져 있으면 상한액으로 정산 중이고, 누르면 실제 금액과 상한액 사이를 오간다(그 줄의 정산금액·공급가액·부가세만 바꿔
+// 폼을 그대로 저장 — src/trip.js 의 tripAfterLodgeAmount). 상한액은 화면의 숨은 칸(lodge_maxconv·maxtotal)에서, 없으면 사이트의
+// CalMaxLodge 에서 읽는다. 실제 금액은 상한액으로 낮출 때 적어 두고(attendLodgeActual — 올릴 때도 적는다), 몰라서 되돌릴 수 없으면
+// 버튼이 켜진 채 잠긴다. 실제 금액으로 되돌리면 승인 규칙(상한액의 1.5배까지 부서장 승인, src/after.js lodgeOver)을 풍선말과 상태 줄에 적는다.
+// 완료된 사후정산의 카드(보여 주기만 — × 가 없다)에도 선다(2026-10-06 사용자 지정).
 
-import { tripAfterRows, tripAfterLodgeDelete } from './src/trip.js';
+import { tripAfterRows, tripAfterLodgeDelete, tripAfterLodgeAmount, tripLodgeMax } from './src/trip.js';
+import { LODGE_CURRENCY, lodgeCap, lodgeOver, lodgeSettle, lodgeApproval } from './src/after.js';
 import { LOG_KEY } from './src/logbook.js';
 
 const REFRESH_TITLE = '숙박비 내역 다시 읽기 — 사후정산 화면에서 고친 것을 가져옵니다';
@@ -18,10 +26,65 @@ const LODGE_LABEL = '숙박 증빙';
 const HAND_TITLE = '이 패널에서 올린 증빙으로 작성한 줄이 아닙니다 — 사후정산 화면에서 손수 작성한 줄입니다';
 /** 표시(증빙·손수 작성)의 풍선말 꼬리 — 누르면 그 줄의 내용이 펴진다. */
 const INFO_HOW = ' · 누르면 내용이 보입니다';
+/**
+ * 숙박 줄의 실제 금액 — { [계산서 번호]: { [숙박 줄 번호]: { actual, supply, vat } } }(원). 상한액으로 낮출 때 그 전의 정산금액을,
+ * 올릴 때는 증빙의 실제 금액(문서의 공급가액·부가세가 있으면 그것도)을 적는다 — `상한`을 끌 때 이 값으로 되돌린다.
+ */
+export const ACTUAL_KEY = 'attendLodgeActual';
+const CAP_LABEL = '상한';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const day = (s) => (DATE_RE.test(s || '') ? `${+s.slice(5, 7)}/${+s.slice(8)}` : '');
 const num = (v) => { const n = Number(String(v ?? '').replace(/,/g, '')); return String(v ?? '').trim() !== '' && Number.isFinite(n) ? n : null; };
+const won = (n) => `${Number(n).toLocaleString('ko-KR')}원`;
+/** 사이트의 상한액 응답을 담아 두는 열쇠 — 나라·화폐마다 하나다. */
+const maxKey = (row) => `${row?.nation || ''}|${row?.currency || LODGE_CURRENCY}`;
+
+/**
+ * 그 줄의 1일 상한(줄의 화폐로). 화면의 숨은 칸이 먼저다 — lodge_maxconv(줄의 화폐로 바꾼 값), 없으면 lodge_maxtotal 이 줄의 화폐일 때
+ * 그 값, 그것도 없으면 사이트의 CalMaxLodge 응답(maxes — 나라·화폐마다 읽어 둔 것). 모르면 null.
+ * @param {Record<string,string>} row 화면의 숙박 줄(src/after.js lodgeRowsOf)
+ * @param {Record<string, {maxconv?:string}>} [maxes] maxKey → tripLodgeMax 의 결과
+ */
+export function lodgeCapDay(row, maxes = {}) {
+  let d = num(row?.maxconv);
+  if (!(d > 0) && (row?.maxcur || '') === (row?.currency || LODGE_CURRENCY)) d = num(row?.maxtotal);
+  if (!(d > 0)) d = num(maxes?.[maxKey(row)]?.maxconv);
+  return d > 0 ? d : null;
+}
+
+/**
+ * 그 줄의 `상한` 버튼이 설 자리 — 원화 줄이고 상한액을 알고 실제 금액이 상한액을 넘을 때만 선다. 아니면 null.
+ *   on   은 지금 상한액으로 정산 중인가(정산금액 = 상한액), can 은 눌러서 바꿀 수 있는가(실제 금액을 알아야 되돌린다),
+ *   actual 은 실제 금액(적어 둔 것이 먼저, 없으면 상한액을 넘는 지금의 정산금액), other 는 정산금액이 상한액도 실제 금액도 아닌가(손으로 고친 줄),
+ *   over 는 승인 규칙(src/after.js lodgeOver — 실제 금액이 상한액의 1.5배 안이면 부서장 승인)
+ * @param {Record<string,string>} row 화면의 숙박 줄
+ * @param {{actual?:number}|null} [kept] 적어 둔 실제 금액(ACTUAL_KEY 의 것)
+ * @param {Record<string, object>} [maxes] 사이트에서 읽어 둔 상한액
+ * @returns {{cap:number, day:number, sday:number, actual:number|null, on:boolean, can:boolean, other:boolean, over:object|null}|null}
+ */
+export function lodgeCapState(row, kept = null, maxes = {}) {
+  if ((row?.currency || LODGE_CURRENCY) !== LODGE_CURRENCY) return null;
+  const sday = num(row.sday);
+  const cap = lodgeCap({ maxconv: lodgeCapDay(row, maxes), sday });
+  const total = num(row.total);
+  if (!cap || total == null) return null;
+  const actual = kept?.actual != null && Number(kept.actual) > 0 ? Number(kept.actual) : total > cap.total ? total : null;
+  if (actual == null) return total === cap.total ? { cap: cap.total, day: cap.day, sday, actual: null, on: true, can: false, other: false, over: null } : null;
+  if (actual <= cap.total) return null;
+  const on = total === cap.total;
+  return { cap: cap.total, day: cap.day, sday, actual, on, can: true, other: !on && total !== actual, over: lodgeOver({ actual, maxconv: cap.day, sday }) };
+}
+
+/** `상한` 버튼의 풍선말 — 지금 어느 금액으로 정산 중이고 누르면 어떻게 되는지, 실제 금액이면 승인 규칙. */
+export function lodgeCapTitle(c) {
+  const capText = `상한액 ${won(c.cap)}(1일 ${won(c.day)} × ${c.sday}박)`;
+  if (!c.can) return `${capText}으로 정산 중 — 실제 금액을 몰라 되돌릴 수 없습니다(사후정산 화면에서 고쳐 주세요)`;
+  const approval = lodgeApproval({ settle: 'real', actual: c.actual, maxconv: c.day, sday: c.sday });
+  if (c.on) return `${capText}으로 정산 중 — 누르면 실제 금액 ${won(c.actual)}으로 되돌립니다${approval ? ` · ${approval}` : ''}`;
+  const now = c.other ? `정산금액이 실제 금액 ${won(c.actual)}과 다릅니다` : `실제 금액 ${won(c.actual)}으로 정산 중`;
+  return `${now}${approval ? `(${approval})` : ''} — 누르면 ${capText}으로 바꿉니다`;
+}
 
 /** 정산금액을 화폐와 함께 — 원화는 "125,052원", 외화는 "88.46 USD". */
 export function lodgeAmount(row) {
@@ -65,10 +128,20 @@ export function lodgeLogged(entries, seq) {
  */
 export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repaint }) {
   // by 는 계산서마다의 사정이다: rows 는 화면에서 읽은 숙박 줄(아직 못 읽었으면 null), trans 는 같이 읽은 교통 줄, mine 은 저장해 둔 표시,
-  // logged 는 활동 기록에 남은 이 계산서의 "사후정산 작성", busy 는 지우는 중인 줄 번호, error 는 읽거나 지우다 난 일이다.
+  // actual 은 적어 둔 실제 금액(줄 번호 → { actual, supply, vat }), maxes 는 사이트에서 읽어 둔 상한액(나라·화폐 → 응답),
+  // logged 는 활동 기록에 남은 이 계산서의 "사후정산 작성", busy 는 지우거나 금액을 바꾸는 중인 줄 번호, error 는 그러다 난 일이다.
   const box = { by: {} };
-  const of = (seq) => box.by[seq] || (box.by[seq] = { rows: null, trans: [], mine: {}, logged: [], loading: false, busy: '', error: '' });
+  const of = (seq) => box.by[seq] || (box.by[seq] = { rows: null, trans: [], mine: {}, actual: {}, maxes: {}, logged: [], loading: false, busy: '', error: '' });
   const what = (row) => `${row.company || '업체명 없음'} · ${day(row.paydate) || '결제일 ?'} · ${lodgeAmount(row)}`;
+
+  /** 원화 줄인데 화면의 숨은 칸에 상한이 없으면 사이트에서 읽어 둔다(나라·화폐마다 한 번). 못 읽어도 던지지 않는다 — 그 줄에 버튼이 안 설 뿐이다. */
+  async function loadMaxes(s, rows, trseq) {
+    const keys = new Set(rows.filter((r) => (r.currency || LODGE_CURRENCY) === LODGE_CURRENCY && !lodgeCapDay(r)).map(maxKey));
+    await Promise.all([...keys].filter((k) => !s.maxes[k]).map(async (k) => {
+      const [nation, currency] = k.split('|');
+      s.maxes[k] = (await tripLodgeMax(trseq, nation, currency)) || {};
+    }));
+  }
 
   async function load(ctx, { quiet = true } = {}) {
     const { trip, trseq } = ctx;
@@ -77,8 +150,9 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
     Object.assign(s, { loading: true, error: '' });
     if (!quiet) repaint();
     try {
-      const [{ lodges: rows, trans }, saved] = await Promise.all([tripAfterRows(trip.seq, trseq), chrome.storage.local.get([MINE_KEY, LOG_KEY])]);
-      Object.assign(s, { rows, trans, mine: saved?.[MINE_KEY]?.[trip.seq] || {}, logged: lodgeLogged(saved?.[LOG_KEY], trip.seq) });
+      const [{ lodges: rows, trans }, saved] = await Promise.all([tripAfterRows(trip.seq, trseq), chrome.storage.local.get([MINE_KEY, ACTUAL_KEY, LOG_KEY])]);
+      Object.assign(s, { rows, trans, mine: saved?.[MINE_KEY]?.[trip.seq] || {}, actual: saved?.[ACTUAL_KEY]?.[trip.seq] || {}, logged: lodgeLogged(saved?.[LOG_KEY], trip.seq) });
+      await loadMaxes(s, rows, trseq);
       if (!quiet) setStatus(`숙박비 내역을 다시 읽었습니다 — ${rows.length ? `${rows.length}줄` : '없음'} · 여비계산서 ${trip.seq}`);
     } catch (err) {
       s.error = `숙박비 내역을 읽지 못했습니다: ${err.message}`;
@@ -105,18 +179,100 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
     return row ? what(row) : '';
   }
 
-  /** 저장해 둔 표시에서 그 줄을 뺀다. 못 고쳐도 지운 것은 지운 것이라 던지지 않는다. */
-  async function forget(ctx, lodgeSeq) {
-    delete of(ctx.trip.seq).mine[lodgeSeq];
-    if (ctx.mine) delete ctx.mine[lodgeSeq];
+  // 저장소의 줄마다 적어 둔 것({ 계산서 번호: { 줄 번호: … } })은 읽고 고쳐 다시 쓴다 — 여러 줄을 잇달아 적어도 서로 덮지 않게 차례로 한다.
+  let marking = Promise.resolve();
+  const inTurn = (fn) => (marking = marking.then(fn, fn));
+
+  /** 저장소의 줄마다 적어 둔 것에서 그 줄을 뺀다. 못 고쳐도 던지지 않는다. */
+  const dropMark = (key, seq, lodgeSeq) => inTurn(async () => {
     try {
-      const all = (await chrome.storage.local.get(MINE_KEY))?.[MINE_KEY];
-      const marks = all?.[ctx.trip.seq];
+      const all = (await chrome.storage.local.get(key))?.[key];
+      const marks = all?.[seq];
       if (!marks) return;
       delete marks[lodgeSeq];
-      if (!Object.keys(marks).length) delete all[ctx.trip.seq];
-      await chrome.storage.local.set({ [MINE_KEY]: all });
+      if (!Object.keys(marks).length) delete all[seq];
+      await chrome.storage.local.set({ [key]: all });
     } catch { /* 표시는 다음에 읽을 때 화면의 줄과 맞지 않아도 해가 없다 */ }
+  });
+
+  /** 저장소의 줄마다 적어 둔 것에 그 줄의 것을 적는다(패널을 다시 열어도 남게). 못 적어도 던지지 않는다. */
+  const putMark = (key, seq, lodgeSeq, value) => inTurn(async () => {
+    try {
+      const all = { ...(await chrome.storage.local.get(key))?.[key] };
+      all[seq] = { ...all[seq], [lodgeSeq]: value };
+      await chrome.storage.local.set({ [key]: all });
+    } catch { /* 적어 둔 것은 곁다리다 */ }
+  });
+
+  /** 저장해 둔 표시·실제 금액에서 그 줄을 뺀다. 못 고쳐도 지운 것은 지운 것이라 던지지 않는다. */
+  async function forget(ctx, lodgeSeq) {
+    const s = of(ctx.trip.seq);
+    delete s.mine[lodgeSeq];
+    delete s.actual[lodgeSeq];
+    if (ctx.mine) delete ctx.mine[lodgeSeq];
+    await dropMark(MINE_KEY, ctx.trip.seq, lodgeSeq);
+    await dropMark(ACTUAL_KEY, ctx.trip.seq, lodgeSeq);
+  }
+
+  /**
+   * 그 줄의 실제 금액을 적어 둔다 — 올릴 때(attendpanel.js 의 rememberMine)와 상한액으로 낮출 때. `상한`을 끌 때 이 값으로 되돌린다.
+   * supply·vat 는 실제 금액일 때의 공급가액·부가세(문서의 것) — 모르면 null(되돌릴 때 정산금액에서 되셈한다).
+   * @param {{actual:number, supply?:number|null, vat?:number|null}} value
+   */
+  async function noteActual(seq, lodgeSeq, value) {
+    if (!(Number(value?.actual) > 0)) return;
+    const v = { actual: Math.round(Number(value.actual)), supply: value.supply ?? null, vat: value.vat ?? null };
+    of(seq).actual[lodgeSeq] = v;
+    await putMark(ACTUAL_KEY, seq, lodgeSeq, v);
+  }
+
+  /**
+   * 숙박 줄 하나의 정산금액을 상한액과 실제 금액 사이에서 바꾼다(`상한` 버튼) — 켜져 있으면 실제 금액으로 되돌리고, 꺼져 있으면 상한액으로
+   * 낮춘다. 공급가액·부가세는 src/after.js 의 lodgeSettle 이 정한다(실제 금액에 문서의 값을 적어 뒀으면 그것, 아니면 정산금액에서 되셈).
+   * 상한액으로 낮추기 전의 정산금액(과 공급가액·부가세가 그 금액에 맞으면 그것도)을 실제 금액으로 적어 둔다. 그 줄의 `증빙` 표시가 금액으로
+   * 알아본 것이었으면 금액이 바뀌어도 남게 줄 번호에 적어 둔다. 바꾼 뒤의 줄은 화면을 다시 읽은 것이다.
+   * 바뀐 것을 ctx.changed(줄 번호, 정한 줄)로 카드에 알린다 — 올린 내용(펴 보는 것)의 정산금액을 맞추도록.
+   */
+  async function toggleCap(ctx, lodgeSeq) {
+    const { trip, trseq } = ctx;
+    const s = of(trip.seq);
+    const row = s.rows?.find((r) => r.seq === String(lodgeSeq));
+    if (!row || s.busy || s.loading) return;
+    const c = lodgeCapState(row, s.actual[row.seq], s.maxes);
+    if (!c?.can) return;
+    const settle = c.on ? 'real' : 'cap';
+    const kept = s.actual[row.seq];
+    const l = lodgeSettle({ actual: c.actual, maxconv: c.day, sday: c.sday, settle, doc: { currency: LODGE_CURRENCY, total: c.actual, supply: kept?.supply ?? null, vat: kept?.vat ?? null } });
+    const text = what(row);
+    const source = lodgeSource(row, { ...s.mine, ...ctx.mine }, ctx.kept || [], s.logged);
+    Object.assign(s, { busy: row.seq, error: '' });
+    repaint();
+    try {
+      s.rows = await tripAfterLodgeAmount(trip.seq, trseq, row.seq, { total: l.total, samount: l.samount, vat: l.vat });
+      if (settle === 'cap') {
+        // 그 전의 정산금액이 실제 금액이다(적어 둔 것이 없을 때). 공급가액·부가세는 그 금액에 맞을 때만 같이 적는다.
+        const total = num(row.total);
+        const fits = total != null && num(row.samount) != null && num(row.vat) != null && num(row.samount) + num(row.vat) === total;
+        if (!kept) await noteActual(trip.seq, row.seq, { actual: total, supply: fits ? num(row.samount) : null, vat: fits ? num(row.vat) : null });
+      }
+      if (source && !s.mine[row.seq]) {
+        s.mine[row.seq] = source;
+        await putMark(MINE_KEY, trip.seq, row.seq, source);
+      }
+      const approval = settle === 'real' ? lodgeApproval(l) : '';
+      const how = settle === 'cap' ? `상한액 ${won(l.total)}으로 바꿨습니다` : `실제 금액 ${won(l.total)}으로 되돌렸습니다`;
+      setStatus(`정산금액을 ${how} — ${text} · 여비계산서 ${trip.seq}${approval ? ` · ${approval}` : ''}`);
+      logEvent('trip', true, `여비계산서(사후정산) 숙박 줄 정산금액 변경: ${trip.seq} · ${text} → ${won(l.total)}(${settle === 'cap' ? '상한액' : '실제 금액'})${approval ? ` · ${approval}` : ''}`,
+        { seq: trip.seq, lodgeSeq: row.seq, settle, total: l.total, samount: l.samount, vat: l.vat });
+      ctx.changed?.(row.seq, l);
+    } catch (err) {
+      s.error = `정산금액을 바꾸지 못했습니다: ${err.message}`;
+      setError(err, '숙박 줄 정산금액 변경 실패');
+      logEvent('trip', false, `여비계산서(사후정산) 숙박 줄 정산금액 변경 실패: ${trip.seq} · ${text} — ${err.message}`, { seq: trip.seq, lodgeSeq: row.seq, settle });
+    } finally {
+      s.busy = '';
+      repaint();
+    }
   }
 
   /** 숙박 줄 하나를 사후정산에서 지운다(두 번째 누름). 지운 뒤의 줄은 화면을 다시 읽은 것이다. */
@@ -149,8 +305,9 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
    *          open?:string, detail?:(row:object, source:string) => string}} ctx
    *   trip 은 여비계산서 목록의 한 줄, kept 는 보관함의 증빙, mine 은 이 패널이 올린 줄의 표시(패널이 들고 있는 것),
    *   locked 는 카드가 다른 일을 하는 중인가, lodging 은 숙박이 있는 출장인가(당일 출장은 줄이 있을 때만 보인다),
-   *   readonly 는 보여 주기만 하는가(사후정산이 완료된 출장 — 줄을 지우는 × 가 없다),
-   *   open 은 내용을 펴 둔 줄의 번호, detail 은 그 줄 아래에 펼 내용(HTML — 카드가 짓는다)
+   *   readonly 는 보여 주기만 하는가(사후정산이 완료된 출장 — 줄을 지우는 × 가 없다. `상한` 버튼은 선다),
+   *   open 은 내용을 펴 둔 줄의 번호, detail 은 그 줄 아래에 펼 내용(HTML — 카드가 짓는다),
+   *   changed 는 `상한` 버튼으로 정산금액을 바꾼 뒤 부르는 길(줄 번호, 정한 줄 — src/after.js lodgeSettle 의 결과)
    */
   function html(ctx) {
     const { trip, trseq, kept = [], locked = false, lodging = false, readonly = false } = ctx || {};
@@ -177,11 +334,18 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
         ? `<button type="button" class="at-lodge-src" ${info} title="${escapeHtml(`이 패널에서 증빙(${sources[i]})으로 올린 줄입니다${INFO_HOW}`)}">증빙</button>`
         : `<button type="button" class="at-lodge-src hand" ${info} title="${HAND_TITLE}${INFO_HOW}">손수 작성</button>`;
       const del = `이 숙박 줄을 사후정산에서 지우기 — ${what(r)}`;
+      // `상한` 버튼 — 실제 금액이 상한액을 넘는 원화 줄에만 선다(켜짐 = 상한액으로 정산 중). 자리는 늘 두어 줄마다 칸이 맞는다.
+      // 완료된 사후정산(readonly)에도 선다 — 2026-10-06 사용자가 완료된 카드에서 "아이콘이 안 보인다"고 했다. 완료된 계산서의 금액을
+      // 바꿔도 단계가 그대로인지는 실물 미확인이다(사전정산은 2026-10-05 사용자가 고쳐 저장해도 단계가 그대로였다).
+      const c = lodgeCapState(r, s.actual[r.seq], s.maxes);
+      const cap = !c ? '<span class="at-lodge-cap-none"></span>'
+        : `<button type="button" class="at-lodge-cap${c.on ? ' on' : ''}" data-act="lodge-cap" data-lodge="${escapeHtml(r.seq)}" aria-pressed="${c.on}" `
+          + `title="${escapeHtml(lodgeCapTitle(c))}" aria-label="${escapeHtml(`${CAP_LABEL} — ${lodgeCapTitle(c)}`)}"${off || !c.can ? ' disabled' : ''}>${CAP_LABEL}</button>`;
       // 업체명은 좁으면 줄임표로 잘린다(CSS) — 전체 이름은 풍선말에 있다. 박 수도 거기에 둔다.
       return `<div class="at-lodge${s.busy === r.seq ? ' busy' : ''}" data-lodge="${escapeHtml(r.seq)}">`
         + `<span class="at-leg-name">숙박 <span class="at-leg-day">${day(r.paydate)}</span></span>`
         + `<span class="at-lodge-company" title="${escapeHtml(`${name}${r.sday ? ` · ${r.sday}박` : ''}`)}">${escapeHtml(name)}</span>`
-        + `<span class="at-lodge-total">${escapeHtml(lodgeAmount(r))}</span>${src}`
+        + `<span class="at-lodge-total">${escapeHtml(lodgeAmount(r))}</span>${cap}${src}`
         + (readonly ? '' : `<button type="button" class="small ghost at-lodge-del" data-act="lodge-del" data-lodge="${escapeHtml(r.seq)}" title="${escapeHtml(del)}" aria-label="${escapeHtml(del)}"${off}>×</button>`) + '</div>'
         + (open ? `<div class="at-lodge-info">${ctx.detail(r, sources[i])}</div>` : '');
     };
@@ -189,5 +353,5 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
       + (s.error ? `<p class="at-lodge-note error">${escapeHtml(s.error)}</p>` : '') + '</div>';
   }
 
-  return { html, ensure, reload, remove, describe, state: box };
+  return { html, ensure, reload, remove, toggleCap, noteActual, describe, state: box };
 }

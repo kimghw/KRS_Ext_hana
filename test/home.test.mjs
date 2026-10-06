@@ -427,46 +427,56 @@ await ta('예약이 있으면 칩이 도드라지고 본문에 목록을 둔다'
   assert.equal(m.root.querySelectorAll('.krs-mine-body li.krs-mine-item').length, 1);
 });
 
-console.log('접고 펴기 — 목록이 있으면 머리 줄이나 화살표 버튼으로 접는다 (2026-10-04 사용자 지정)');
+console.log('접고 펴기 — 머리 줄이나 화살표 버튼으로 접는다. R&D ERP 현황 카드 기준 — 화살표는 늘 있고 접으면 본문이 통째로 숨는다 (2026-10-06 사용자 지정)');
 {
   const toggle = (m) => m.root.querySelector('button[data-act="toggle"]');
-  const list = (m) => m.root.querySelector('[data-role="list"]');
-  const canOpen = (m) => m.root.querySelector('.krs-mine-head').classList.contains('can-open');
-  await ta('목록이 있으면 화살표 버튼이 나오고 처음에는 펴져 있다 — 접을 것이 없으면 버튼도 없다', async () => {
+  const body = (m) => m.root.querySelector('.krs-mine-body');
+  const headTitle = (m) => m.root.querySelector('.krs-mine-head').title;
+  const tools = (m) => [...m.root.querySelectorAll('.krs-card-tools button')].filter((b) => !b.hidden).map((b) => b.dataset.act);
+  await ta('화살표 버튼은 늘 있고 처음에는 펴져 있다 — 접을 것이 없어도 있다. 버튼 차례는 R&D ERP 현황 카드처럼 새로고침 · 패널 열기 · 화살표다', async () => {
     const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached }) });
-    assert.deepEqual([toggle(m).hidden, toggle(m).getAttribute('aria-expanded'), toggle(m).title, list(m).hidden, canOpen(m)], [false, 'true', '접기', false, true]);
+    assert.deepEqual([toggle(m).hidden, toggle(m).getAttribute('aria-expanded'), toggle(m).title, body(m).hidden, headTitle(m)], [false, 'true', '접기', false, '클릭: 접기']);
+    assert.deepEqual(tools(m), ['refresh', 'panel', 'toggle']);
     const none = await mount();
-    assert.deepEqual([toggle(none).hidden, canOpen(none)], [true, false]);
+    assert.deepEqual([toggle(none).hidden, toggle(none).title, body(none).hidden, tools(none)], [false, '접기', false, ['refresh', 'panel', 'toggle']]);
   });
-  await ta('화살표 버튼을 누르면 목록이 접히고 건수 칩은 그대로다 — 접은 것은 기억한다. 머리 줄을 눌러도 같은 일이다', async () => {
+  await ta('화살표 버튼을 누르면 본문이 통째로 접히고 머리 줄의 건수 칩은 그대로다 — 접은 것은 기억한다. 머리 줄을 눌러도 같은 일이다', async () => {
     const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached }) });
     toggle(m).click();
     await tick();
-    assert.deepEqual([list(m).hidden, toggle(m).getAttribute('aria-expanded'), toggle(m).title, m.text('rooms'), m.storage.data[FOLD_KEY]],
-      [true, 'false', '펼치기', '1', true]);
+    assert.deepEqual([body(m).hidden, toggle(m).getAttribute('aria-expanded'), toggle(m).title, headTitle(m), m.text('rooms'), m.storage.data[FOLD_KEY]],
+      [true, 'false', '펼치기', '클릭: 펼치기', '1', true]);
     m.root.querySelector('.krs-mine-title').click();
     await tick();
-    assert.deepEqual([list(m).hidden, toggle(m).title, m.storage.data[FOLD_KEY]], [false, '접기', false]);
+    assert.deepEqual([body(m).hidden, toggle(m).title, headTitle(m), m.storage.data[FOLD_KEY]], [false, '접기', '클릭: 접기', false]);
     assert.equal(m.panelCalls.length, 0, '접고 펴는 것은 패널을 열지 않는다');
   });
   await ta('접어 두었으면 다음에 홈을 열어도 접힌 채로 시작한다 — 새로고침으로 다시 읽어도 접힌 채다', async () => {
     const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true })]) });
     const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached, [FOLD_KEY]: true }), rooms });
-    assert.deepEqual([list(m).hidden, toggle(m).hidden, toggle(m).title, m.items().length, m.text('rooms')], [true, false, '펼치기', 1, '1']);
+    assert.deepEqual([body(m).hidden, toggle(m).hidden, toggle(m).title, m.items().length, m.text('rooms')], [true, false, '펼치기', 1, '1']);
     m.root.querySelector('[data-act="refresh"]').click();
     await tick();
-    assert.deepEqual([rooms.calls.length, list(m).hidden], [1, true]);
+    assert.deepEqual([rooms.calls.length, body(m).hidden], [1, true]);
   });
   await ta('다른 창의 홈에서 접으면 이 카드도 접힌다', async () => {
     const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: cached }) });
     await m.storage.set({ [FOLD_KEY]: true });
-    assert.equal(list(m).hidden, true);
+    assert.equal(body(m).hidden, true);
   });
-  await ta('아무것도 없는 카드의 머리 줄은 눌러도 아무 일이 없다', async () => {
+  await ta('아무것도 없는 카드도 머리 줄을 누르면 접히고, 그것도 기억한다', async () => {
     const m = await mount();
     m.root.querySelector('.krs-mine-title').click();
     await tick();
-    assert.deepEqual([list(m).hidden, FOLD_KEY in m.storage.data], [false, false]);
+    assert.deepEqual([body(m).hidden, m.storage.data[FOLD_KEY]], [true, true]);
+  });
+  await ta('경고가 있어도 접으면 같이 숨는다 — R&D ERP 현황 카드와 같다', async () => {
+    const m = await mount({ storage: fakeStorage({ [CACHE_KEY]: { ...cached, failed: ['차량 훑기 실패: HTTP 500'] }, [FOLD_KEY]: true }) });
+    assert.match(m.text('warn'), /차량 훑기 실패: HTTP 500/);
+    assert.deepEqual([body(m).hidden, m.text('rooms')], [true, '1'], '경고 글은 그대로 있되 본문째 숨고 건수 칩은 보인다');
+    toggle(m).click();
+    await tick();
+    assert.equal(body(m).hidden, false);
   });
   await ta('처음의 접힘 읽기가 늦게 와도, 그 사이에 다른 창에서 편 것을 덮지 않는다', async () => {
     // 접힘 값을 읽는 첫 요청만 붙잡아 둔다 — 예전 값(접힘)을 들고 늦게 돌아온다.
@@ -479,11 +489,11 @@ console.log('접고 펴기 — 목록이 있으면 머리 줄이나 화살표 �
       return out;
     };
     const m = await mount({ storage });
-    assert.equal(list(m).hidden, false, '아직 못 읽었으니 펴져 있다');
+    assert.equal(body(m).hidden, false, '아직 못 읽었으니 펴져 있다');
     await storage.set({ [FOLD_KEY]: false });   // 다른 창에서 폈다
     release();
     await tick();
-    assert.deepEqual([list(m).hidden, storage.data[FOLD_KEY]], [false, false]);
+    assert.deepEqual([body(m).hidden, storage.data[FOLD_KEY]], [false, false]);
   });
 }
 

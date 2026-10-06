@@ -28,6 +28,8 @@ import { noteStages } from './settling.js';
 const PICKS_KEY = 'attendLegs';
 const WORKPLACE_KEY = 'attendWorkplace';
 const MINE_KEY = 'attendLodgeMine';
+/** 이 확장이 올린 숙박 줄의 실제 금액 — 패널 숙박비 내역의 `상한` 버튼이 상한액에서 실제 금액으로 되돌릴 때 쓴다(lodgebox.js 의 ACTUAL_KEY). */
+const ACTUAL_KEY = 'attendLodgeActual';
 
 /**
  * 홈 카드가 그 출장의 증빙을 받아 올리는 동안 적어 두는 storage 키 — { 신청서 번호: 시작한 때 }.
@@ -184,17 +186,25 @@ export async function afterUp({ docNo, row, me = '', settle = {} } = {}, deps = 
 
 /**
  * 올린 뒤에 패널이 볼 것을 적어 둔다 — 표를 앉힌 뒤의 가는 편·오는 편(홈 카드의 아이콘과 패널의 출장 카드가 본다)과,
- * 이 확장이 올린 숙박 줄의 표시(줄 번호 → 증빙 파일 이름, 패널의 숙박비 내역이 "증빙"이라고 적는다). 못 적어도 올린 것은 올린 것이다.
+ * 이 확장이 올린 숙박 줄의 표시(줄 번호 → 증빙 파일 이름, 패널의 숙박비 내역이 "증빙"이라고 적는다)와 실제 금액(문서의 공급가액·부가세도 —
+ * 패널의 `상한` 버튼이 상한액에서 실제 금액으로 되돌릴 때 쓴다). 못 적어도 올린 것은 올린 것이다.
  */
 async function remember(storage, { docNo, seq, plan, lodgeRows }) {
   try {
-    const saved = await storage.get([PICKS_KEY, MINE_KEY]);
+    const saved = await storage.get([PICKS_KEY, MINE_KEY, ACTUAL_KEY]);
     const next = {};
     if (plan.picks?.go || plan.picks?.back) next[PICKS_KEY] = { ...saved?.[PICKS_KEY], [docNo]: plan.picks };
     if (lodgeRows?.length) {
       const mine = { ...saved?.[MINE_KEY]?.[seq] };
-      for (const h of lodgeRows) mine[h.seq] = plan.lodge.find((l) => lodgeSame(l, h))?.sources.join(' · ') || '';
+      const actual = { ...saved?.[ACTUAL_KEY]?.[seq] };
+      for (const h of lodgeRows) {
+        const l = plan.lodge.find((x) => lodgeSame(x, h));
+        mine[h.seq] = l?.sources.join(' · ') || '';
+        const krw = l?.doc?.currency === 'KRW';
+        if (l?.actual != null) actual[h.seq] = { actual: l.actual, supply: krw ? l.doc.supply ?? null : null, vat: krw ? l.doc.vat ?? null : null };
+      }
       next[MINE_KEY] = { ...saved?.[MINE_KEY], [seq]: mine };
+      if (Object.keys(actual).length) next[ACTUAL_KEY] = { ...saved?.[ACTUAL_KEY], [seq]: actual };
     }
     if (Object.keys(next).length) await storage.set(next);
   } catch { /* 표시는 곁다리다 */ }

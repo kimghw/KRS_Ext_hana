@@ -99,6 +99,19 @@ console.log('회의실 모드로 시작');
     assert.match(subs[0].querySelector('summary').textContent, /로컬 Claude CLI/);
     assert.match(subs[1].querySelector('summary').textContent, /Anthropic API 키/);
   });
+  t('설정 및 연결·활동 로그·페이지 구조 캡처는 `설정` 한 줄로 접혀 있다', () => {
+    const box = doc.getElementById('settingsBox');
+    assert.ok(box, '#settingsBox 가 없다');
+    assert.equal(box.tagName, 'DETAILS');
+    assert.ok(!box.open, '처음부터 펼쳐져 있다');
+    assert.ok(box.closest('footer.settings'), '패널 맨 아래 footer 안이 아니다');
+    assert.match(box.firstElementChild.textContent, /^설정연결 · 활동 로그 · 진단$/);
+    const rows = [...box.querySelector('.settings-body').children].map((d) => d.matches('details.diag') && d.querySelector('summary').textContent);
+    assert.equal(rows.length, 3);
+    assert.match(rows[0] || '', /^설정 및 연결/);
+    assert.match(rows[1] || '', /^활동 로그/);
+    assert.match(rows[2] || '', /^페이지 구조 캡처/);
+  });
   t('접힌 요약 줄에 CLI 배지와 키 유무가 보인다', () => {
     assert.ok(doc.querySelector('details.sub > summary #cliState'));
     assert.equal(doc.getElementById('apiKeyState').textContent, 'CLI 가 없을 때만');
@@ -499,6 +512,7 @@ console.log('활동 로그 — 남기고, 보여주고, 복사한다');
 
   t('로그 버튼과 칸에 리스너', () => {
     assert.ok(wired.get('logBox')?.has('toggle'));
+    assert.ok(wired.get('settingsBox')?.has('toggle'), '바깥 설정을 펼칠 때도 그려야 한다');
     for (const id of ['logCopy', 'logSave', 'logClear']) assert.ok(wired.get(id)?.has('click'), id);
   });
 
@@ -522,6 +536,11 @@ console.log('활동 로그 — 남기고, 보여주고, 복사한다');
   t('닫혀 있을 때는 목록을 그리지 않는다', () => assert.equal(out.textContent, ''));
   box.open = true;
   box.dispatchEvent(new window.Event('toggle'));
+  await settle();
+  t('바깥 설정이 접혀 있으면 활동 로그를 열어도 그리지 않는다', () => assert.equal(out.textContent, ''));
+  const settings = doc.getElementById('settingsBox');
+  settings.open = true;
+  settings.dispatchEvent(new window.Event('toggle'));
   await settle();
   t('열면 최신 것이 위로 온다', () => {
     const lines = out.textContent.split('\n');

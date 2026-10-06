@@ -155,7 +155,7 @@
         <p id="mineEmpty" class="hint hidden">
           이 기간에 <strong>내 예약·근태로 확인된 건</strong>이 없습니다.<br>
           사이트는 본인 예약에만 수정·삭제 버튼을 붙이는데, 승인 상태에 따라 그 버튼이 없을 수 있습니다.
-          아래 <strong>설정 및 연결</strong>에 이름을 넣으면 예약자 이름으로도 찾습니다.
+          아래 <strong>설정 → 설정 및 연결</strong>에 이름을 넣으면 예약자 이름으로도 찾습니다.
         </p>
       </div>
       <div class="statusline">
@@ -189,74 +189,80 @@
       <p id="editNote" class="edit-note hidden"></p>
     </section>
     <footer class="settings card">
-      <details class="diag">
-        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--surface)"/><circle cx="15" cy="17" r="3" fill="var(--surface)"/></svg><span>설정 및 연결</span><span class="summary-detail">내 이름 · Teams · 공문 · API 키</span></summary>
-        <div class="details-content">
-          <label class="key-row" for="myName">내 이름 (내 예약 찾기용)</label>
-          <input type="text" id="myName" placeholder="예) 홍길동" autocomplete="off" spellcheck="false" />
-          <p class="hint">
-            사이트는 로그인한 사람이 누구인지 화면에 적어주지 않습니다. 이름을 넣어두면
-            예약자 이름으로도 <strong>내 예약</strong>을 찾습니다. 이 확장으로 예약하면 자동으로 채워집니다.
-          </p>
-          <label class="check-row" title="인명 검색 결과의 인명 카드(Ext · Mobile · Task 줄)에 Teams 버튼을 붙입니다. 누르면 그 사람과의 Teams 1:1 채팅이 새 탭으로 열립니다. 끄면 열려 있는 검색 화면에서도 곧바로 사라집니다.">
-            <input type="checkbox" id="teamsButton" checked />
-            <span>인명 검색 카드에 <strong>Teams</strong> 버튼</span>
-          </label>
-          <!-- 체크박스마다 설명 문단은 두지 않는다. 무엇을 하는지는 줄의 툴팁(title)에 있다. -->
-          <label class="check-row" title="e-Class 홈의 WORKSPACE 카드 위에 DOC-Cruiser 의 접수 미확인 문서(Uncfm. Rcv DOC)를 한 줄로 보여줍니다. 펼치면 제목이 나오고, 제목을 누르면 그 문서 창이 열립니다. 목록만 읽고 문서는 대신 열지 않습니다.">
-            <input type="checkbox" id="homeUncfm" checked />
-            <span>홈에 <strong>접수 미확인 공문</strong> 카드</span>
-          </label>
-          <label class="check-row" title="DOC-Cruiser 의 미회람 문서(Non-circular documents)를 e-Class 홈을 열 때 하루에 한 번, 화면을 띄우지 않고 전부 열어 회람 처리합니다. 문서 내용은 읽어 주지 않습니다. 읽은 것으로 바뀐 문서는 되돌릴 수 없습니다.">
-            <input type="checkbox" id="docCirculate" />
-            <span>DOC-Cruiser <strong>미회람 문서</strong> 자동 열람</span>
-          </label>
-          <p class="hint" id="docCirculateState" role="status" hidden></p>
-          <!-- 아래 둘은 접어 둔다. 한 번 붙여 두면 다시 볼 일이 드물고, 배지만 보이면 충분하다. -->
-          <details class="sub">
-            <summary><strong>로컬 Claude CLI</strong><span id="cliState" class="badge">확인 중</span></summary>
+      <!-- 설정 및 연결 · 활동 로그 · 페이지 구조 캡처는 평소 볼 일이 드물어 `설정` 한 줄로 접어 둔다. 펼쳐야 세 칸이 보인다. -->
+      <details id="settingsBox" class="diag">
+        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg><span>설정</span><span class="summary-detail">연결 · 활동 로그 · 진단</span></summary>
+        <div class="settings-body">
+          <details class="diag">
+            <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--surface)"/><circle cx="15" cy="17" r="3" fill="var(--surface)"/></svg><span>설정 및 연결</span><span class="summary-detail">내 이름 · Teams · 공문 · API 키</span></summary>
+            <div class="details-content">
+              <label class="key-row" for="myName">내 이름 (내 예약 찾기용)</label>
+              <input type="text" id="myName" placeholder="예) 홍길동" autocomplete="off" spellcheck="false" />
+              <p class="hint">
+                사이트는 로그인한 사람이 누구인지 화면에 적어주지 않습니다. 이름을 넣어두면
+                예약자 이름으로도 <strong>내 예약</strong>을 찾습니다. 이 확장으로 예약하면 자동으로 채워집니다.
+              </p>
+              <label class="check-row" title="인명 검색 결과의 인명 카드(Ext · Mobile · Task 줄)에 Teams 버튼을 붙입니다. 누르면 그 사람과의 Teams 1:1 채팅이 새 탭으로 열립니다. 끄면 열려 있는 검색 화면에서도 곧바로 사라집니다.">
+                <input type="checkbox" id="teamsButton" checked />
+                <span>인명 검색 카드에 <strong>Teams</strong> 버튼</span>
+              </label>
+              <!-- 체크박스마다 설명 문단은 두지 않는다. 무엇을 하는지는 줄의 툴팁(title)에 있다. -->
+              <label class="check-row" title="e-Class 홈의 WORKSPACE 카드 위에 DOC-Cruiser 의 접수 미확인 문서(Uncfm. Rcv DOC)를 한 줄로 보여줍니다. 펼치면 제목이 나오고, 제목을 누르면 그 문서 창이 열립니다. 목록만 읽고 문서는 대신 열지 않습니다.">
+                <input type="checkbox" id="homeUncfm" checked />
+                <span>홈에 <strong>접수 미확인 공문</strong> 카드</span>
+              </label>
+              <label class="check-row" title="DOC-Cruiser 의 미회람 문서(Non-circular documents)를 e-Class 홈을 열 때 하루에 한 번, 화면을 띄우지 않고 전부 열어 회람 처리합니다. 문서 내용은 읽어 주지 않습니다. 읽은 것으로 바뀐 문서는 되돌릴 수 없습니다.">
+                <input type="checkbox" id="docCirculate" />
+                <span>DOC-Cruiser <strong>미회람 문서</strong> 자동 열람</span>
+              </label>
+              <p class="hint" id="docCirculateState" role="status" hidden></p>
+              <!-- 아래 둘은 접어 둔다. 한 번 붙여 두면 다시 볼 일이 드물고, 배지만 보이면 충분하다. -->
+              <details class="sub">
+                <summary><strong>로컬 Claude CLI</strong><span id="cliState" class="badge">확인 중</span></summary>
+                <div class="details-content">
+                  <p class="hint">
+                    연결되면 API 키 없이 이미 로그인된 Claude Code 를 씁니다.
+                    연결되지 않았으면 <strong>연결 지침 복사</strong>를 눌러 Claude Code·Codex 에 붙여 넣으세요 —
+                    확장 폴더와 등록 방법이 적혀 있습니다.
+                  </p>
+                  <button id="cliCheck" class="ghost small">다시 확인</button>
+                  <button id="cliGuide" type="button" class="ghost small cli-guide-copy" hidden>연결 지침 복사</button>
+                </div>
+              </details>
+              <details class="sub">
+                <summary><strong>Anthropic API 키</strong><span id="apiKeyState" class="summary-detail">CLI 가 없을 때만</span></summary>
+                <div class="details-content">
+                  <input type="password" id="apiKey" aria-label="Anthropic API 키" placeholder="sk-ant-... (선택)" autocomplete="off" spellcheck="false" />
+                  <p class="hint">둘 다 없으면 <strong>말로 찾기</strong> 칸이 잠깁니다. 키는 이 브라우저에만 저장됩니다.</p>
+                </div>
+              </details>
+            </div>
+          </details>
+          <details id="logBox" class="diag">
+            <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg><span>활동 로그</span><span id="logCount" class="summary-detail">기록 없음</span></summary>
             <div class="details-content">
               <p class="hint">
-                연결되면 API 키 없이 이미 로그인된 Claude Code 를 씁니다.
-                연결되지 않았으면 <strong>연결 지침 복사</strong>를 눌러 Claude Code·Codex 에 붙여 넣으세요 —
-                확장 폴더와 등록 방법이 적혀 있습니다.
+                예약·취소·수정, 근태 신청, 말로 찾기, 조회 실패를 이 브라우저에 최근 500건까지 남깁니다.
+                문제가 생기면 <strong>로그 복사</strong>를 눌러 개발자에게 붙여 넣어 주세요.
+                로컬 Claude 다리의 기록(<code>native\logs</code>)도 함께 담깁니다.
+                회의 주제와 이름이 들어 있습니다.
               </p>
-              <button id="cliCheck" class="ghost small">다시 확인</button>
-              <button id="cliGuide" type="button" class="ghost small cli-guide-copy" hidden>연결 지침 복사</button>
+              <div class="log-actions">
+                <button id="logCopy" class="primary small">로그 복사</button>
+                <button id="logSave" class="ghost small">파일로 저장</button>
+                <button id="logClear" class="ghost small" title="이 브라우저의 기록만 지웁니다. native\logs 는 그대로 둡니다">비우기</button>
+              </div>
+              <pre id="logOut" class="diag-out log-out" aria-label="최근 활동 (최신 것부터)"></pre>
             </div>
           </details>
-          <details class="sub">
-            <summary><strong>Anthropic API 키</strong><span id="apiKeyState" class="summary-detail">CLI 가 없을 때만</span></summary>
+          <details class="diag">
+            <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/></svg><span>페이지 구조 캡처</span><span class="summary-detail">진단</span></summary>
             <div class="details-content">
-              <input type="password" id="apiKey" aria-label="Anthropic API 키" placeholder="sk-ant-... (선택)" autocomplete="off" spellcheck="false" />
-              <p class="hint">둘 다 없으면 <strong>말로 찾기</strong> 칸이 잠깁니다. 키는 이 브라우저에만 저장됩니다.</p>
+              <p class="hint">현황이 제대로 표시되지 않으면 로그인한 상태에서 페이지 구조를 저장해 개발자에게 전달해 주세요.</p>
+              <button id="capture" class="ghost wide">구조 캡처 저장</button>
+              <pre id="diagOut" class="diag-out" role="status"></pre>
             </div>
           </details>
-        </div>
-      </details>
-      <details id="logBox" class="diag">
-        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg><span>활동 로그</span><span id="logCount" class="summary-detail">기록 없음</span></summary>
-        <div class="details-content">
-          <p class="hint">
-            예약·취소·수정, 근태 신청, 말로 찾기, 조회 실패를 이 브라우저에 최근 500건까지 남깁니다.
-            문제가 생기면 <strong>로그 복사</strong>를 눌러 개발자에게 붙여 넣어 주세요.
-            로컬 Claude 다리의 기록(<code>native\logs</code>)도 함께 담깁니다.
-            회의 주제와 이름이 들어 있습니다.
-          </p>
-          <div class="log-actions">
-            <button id="logCopy" class="primary small">로그 복사</button>
-            <button id="logSave" class="ghost small">파일로 저장</button>
-            <button id="logClear" class="ghost small" title="이 브라우저의 기록만 지웁니다. native\logs 는 그대로 둡니다">비우기</button>
-          </div>
-          <pre id="logOut" class="diag-out log-out" aria-label="최근 활동 (최신 것부터)"></pre>
-        </div>
-      </details>
-      <details class="diag">
-        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/></svg><span>페이지 구조 캡처</span><span class="summary-detail">진단</span></summary>
-        <div class="details-content">
-          <p class="hint">현황이 제대로 표시되지 않으면 로그인한 상태에서 페이지 구조를 저장해 개발자에게 전달해 주세요.</p>
-          <button id="capture" class="ghost wide">구조 캡처 저장</button>
-          <pre id="diagOut" class="diag-out" role="status"></pre>
         </div>
       </details>
     </footer>
