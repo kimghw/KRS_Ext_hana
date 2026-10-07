@@ -497,6 +497,44 @@ export function hrGetDoc(item, opts) {
 }
 
 /**
+ * 취소신청서가 무르는 원 문서번호들. 취소신청서의 내용(문서 조회 응답)을 읽어, 원 문서번호 칸(취소신청 표의 befDocNo —
+ * cancelRow 가 쓰는 칸)을 모은다. 응답의 모양을 다 알지 못해서, 칸 이름이 befDocNo 가 아니어도 bef·org 로 시작해 DocNo 로 끝나는
+ * 칸이면 받고, 그런 칸이 하나도 없으면 문서번호 모양(202610-11115-0002)의 값 가운데 취소신청서 자신의 번호가 아닌 것을 받는다.
+ * 읽기만 한다.
+ * @param {object} item listItem 의 결과(취소신청서)
+ * @returns {Promise<string[]>}
+ */
+export function hrCancelRefs(item, opts) {
+  return serial(async () => {
+    const { text } = await request(`${item.api}?${query({ docNo: item.docNo, statusCode: item.status })}`, null, opts);
+    return cancelRefsOf(parseJson(text, '문서'), item.docNo);
+  });
+}
+
+const DOC_NO_RE = /^\d{6}-\d{3,}-\d{3,}$/;
+
+/** 문서 조회 응답에서 원 문서번호를 모은다(hrCancelRefs). 순수 함수 — 시험에서 바로 부른다. */
+export function cancelRefsOf(data, self) {
+  const named = new Set();
+  const loose = new Set();
+  const walk = (v, depth) => {
+    if (depth > 6 || v == null) return;
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    if (typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) {
+      if (typeof x === 'string' || typeof x === 'number') {
+        const val = String(x).trim();
+        if (!val || val === self) continue;
+        if (/^(bef|org|ori)\w*docno$/i.test(k)) named.add(val);
+        else if (DOC_NO_RE.test(val) && !/^docNo$/i.test(k)) loose.add(val);
+      } else walk(x, depth + 1);
+    }
+  };
+  walk(data, 0);
+  return [...(named.size ? named : loose)];
+}
+
+/**
  * 문서를 지운다(임시저장·회수한 문서). 문서함의 삭제 버튼과 같은 요청이다. 지워진 건수를 돌려준다.
  * 문서함 화면은 임시저장에만 그 버튼을 보여 준다 — 회수한 문서는 서버가 받지 않을 수 있고, 그때는 던진다.
  */

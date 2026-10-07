@@ -2,6 +2,7 @@
 //
 // 사이트는 **로그인한 사람이 누구인지 페이지 어디에도 적어주지 않는다.**
 // 숨은 입력칸에도, 머리글에도 없다(2026-09-16 캡처로 확인). 그래서 신호를 셋 합쳐서 본다.
+// (조회 화면 이야기다 — e-Class 홈 머리글의 사용자 ID 로 인명에서 이름을 찾는 길은 src/whoami.js 에 있다.)
 // 어느 신호로 잡혔는지 항목마다 남겨 두므로, 화면에서 "왜 내 것이라고 봤는지" 말할 수 있다.
 //
 //   button — 사이트가 본인 건에만 붙이는 수정/삭제 버튼. 가장 확실하지만 화면·승인 상태에 따라 없을 수 있다.
@@ -17,6 +18,19 @@ export function sameName(a, b) {
   const x = squeeze(a);
   const y = squeeze(b);
   return !!x && !!y && x === y;
+}
+
+/**
+ * 사이트가 내 것이라고 표시한(수정·삭제 버튼) 줄의 예약자 — 곧 로그인한 사람의 이름이다(목록의 표기 그대로).
+ * 확신할 수 있는 날의 회의실 줄만 본다(차량 줄은 신청자와 운전자가 다를 수 있다). 없으면 빈 글.
+ */
+export function ownerOfMine(days) {
+  for (const day of days || []) {
+    if (!day?.confident || day.kind !== 'room') continue;
+    const hit = (day.reservations || []).find((r) => r?.mine && String(r.owner || '').trim());
+    if (hit) return String(hit.owner).trim();
+  }
+  return '';
 }
 
 /**

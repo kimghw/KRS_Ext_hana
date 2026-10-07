@@ -33,6 +33,9 @@ const NOW = new Date('2026-09-17T09:00:00').getTime();
 const HOME = '<html><body><div class="page-content container">'
   + '<div class="row pt-3 mt-1" id="divPopupInfo"><div class="col-12">Popup Notice</div></div>'
   + '<div class="row" id="divkrinfo"></div></div></body></html>';
+// 머리글에 로그인한 사람의 사진(사용자 ID)이 있는 홈 — 2026-10-06 캡처의 모양.
+const HOME_ID = HOME.replace('<body>',
+  '<body><ul class="navbar"><li class="emp_img"><img id="id-navbar-user-image" src="/intra/intranet/member/pic/kimghw.gif" alt="kimghw"></li></ul>');
 
 function homeDoc(html = HOME) {
   const dom = new JSDOM(html, { url: 'https://eclass.krs.co.kr/eClassVer4/Home/Index' });
@@ -191,18 +194,25 @@ function fakeUp(answer = { ok: true, sent: true, hold: false, text: '사후정�
   return fn;
 }
 
+/** 인명 조회 흉내(src/whoami.js lookupName). name 을 주면 그 이름을, fail 을 주면 그 오류를 돌려준다. */
+function fakeLookup({ name = '', fail = null } = {}) {
+  const fn = async (id) => { fn.calls.push(id); if (fail) throw fail; return name; };
+  fn.calls = [];
+  return fn;
+}
+
 /** 카드를 붙인다. 바깥 것은 전부 가짜다. */
 async function mount({
   storage = fakeStorage(), rooms = fakeScan('room'), cars = fakeScan('car'), plans = fakePlans(), trips = fakeTrips(),
   now = () => NOW, visible = () => true, openPanel = null, doc = homeDoc(), debounceMs = 5, alive = () => true,
-  pre = fakePre(), keep = fakeKeep({}, { storage }), up = fakeUp(undefined, { storage }), marks = null,
+  pre = fakePre(), keep = fakeKeep({}, { storage }), up = fakeUp(undefined, { storage }), marks = null, lookup = fakeLookup(),
 } = {}) {
   const panelCalls = [];
   const syncCalls = [];
   const billCalls = [];
   const ctl = await mountHome(doc, {
     storage, onChanged: storage.onChanged, now, today: () => TODAY,
-    scanRooms: rooms, scanCars: cars, loadPlans: plans, listTrips: trips, visible, debounceMs, alive,
+    scanRooms: rooms, scanCars: cars, loadPlans: plans, listTrips: trips, visible, debounceMs, alive, lookupName: lookup,
     openPanel: openPanel || (async () => { panelCalls.push(1); return { ok: true }; }),
     preDetail: pre, keepEvidence: keep, afterUp: up, readFile: async (f) => f.dataUrl || `data:${f.type};base64,AAAA`,
     // 출장 줄의 `계산서 보기`가 여는 계산서(번호, 내 출장자 번호).
@@ -213,7 +223,7 @@ async function mount({
   const root = doc.getElementById(ROOT_ID);
   const text = (role) => (root?.querySelector(`[data-role="${role}"]`)?.textContent || '').trim();
   return {
-    ctl, doc, root, storage, rooms, cars, plans, trips, panelCalls, syncCalls, billCalls, pre, keep, up, text,
+    ctl, doc, root, storage, rooms, cars, plans, trips, panelCalls, syncCalls, billCalls, pre, keep, up, lookup, text,
     items: () => [...(root?.querySelectorAll('li.krs-mine-item') || [])],
   };
 }
@@ -1752,5 +1762,70 @@ console.log('확장 배선');
     assert.equal(manifest.background?.type, 'module', '배경이 모듈이 아니면 import 를 못 쓴다');
   });
 }
+
+console.log('이름 알아내기 — 홈 머리글의 사용자 ID 로 인명에서(src/whoami.js)');
+await ta('이름이 비어 있으면 훑기 전에 알아내 담고, 그 이름으로 훑는다(자기가 담은 것으로 다시 훑지 않는다)', async () => {
+  const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ owner: '김거화', room: '제2회의실' })]) });
+  const lookup = fakeLookup({ name: '김거화' });
+  const storage = fakeStorage();
+  const m = await mount({ doc: homeDoc(HOME_ID), storage, rooms, lookup });
+  await tick(30);
+  assert.deepEqual(lookup.calls, ['kimghw']);
+  assert.equal(storage.data.myName, '김거화');
+  assert.equal(rooms.calls.length, 1);
+  assert.equal(storage.data[CACHE_KEY].name, '김거화');
+  assert.equal(m.items().length, 1, '예약자 이름이 같은 줄을 내 것으로 본다');
+  assert.ok(!/이름을 넣으면/.test(m.text('warn')), m.text('warn'));
+  m.ctl.destroy();
+});
+await ta('이름을 이미 알면 묻지 않는다', async () => {
+  const lookup = fakeLookup({ name: '김거화' });
+  const m = await mount({ doc: homeDoc(HOME_ID), storage: fakeStorage({ myName: '홍길동' }), lookup });
+  assert.equal(lookup.calls.length, 0);
+  m.ctl.destroy();
+});
+await ta('못 알아내면 그 까닭을 경고 줄에 적고, 페이지를 연 동안 다시 묻지 않는다', async () => {
+  const lookup = fakeLookup({ fail: new Error('HTTP 500') });
+  const storage = fakeStorage();
+  const m = await mount({ doc: homeDoc(HOME_ID), storage, lookup });
+  assert.equal(storage.data.myName, undefined);
+  assert.match(m.text('warn'), /이름을 e-Class 에서 읽지 못했습니다\(인명 조회 실패: HTTP 500\)/);
+  assert.match(m.text('warn'), /이름을 넣으면/);
+  await m.ctl.refresh();
+  await tick(30);
+  assert.equal(lookup.calls.length, 1);
+  m.ctl.destroy();
+});
+await ta('인명에 그 ID 가 없어도 까닭을 적는다', async () => {
+  const m = await mount({ doc: homeDoc(HOME_ID), lookup: fakeLookup({ name: '' }) });
+  assert.match(m.text('warn'), /인명에서 kimghw 를 찾지 못했습니다/);
+  m.ctl.destroy();
+});
+await ta('머리글에 ID 가 없으면 묻지 않고, 사이트가 내 것이라고 표시한 회의실 줄의 예약자를 쓴다', async () => {
+  const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true, owner: '김거화' })]) });
+  const lookup = fakeLookup({ name: '김거화' });
+  const storage = fakeStorage();
+  const m = await mount({ storage, rooms, lookup });
+  await tick(30);
+  assert.equal(lookup.calls.length, 0);
+  assert.equal(storage.data.myName, '김거화');
+  assert.equal(storage.data[CACHE_KEY].name, '김거화');
+  assert.equal(rooms.calls.length, 1);
+  m.ctl.destroy();
+});
+await ta('묻는 사이에 패널에서 직접 넣었으면 그것을 둔다', async () => {
+  const storage = fakeStorage();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const lookup = async () => { await gate; return '김거화'; };
+  const p = mount({ doc: homeDoc(HOME_ID), storage, lookup });
+  await tick(5);
+  await storage.set({ myName: '홍길동' });
+  release();
+  const m = await p;
+  await tick(30);
+  assert.equal(storage.data.myName, '홍길동');
+  m.ctl.destroy();
+});
 
 console.log(`\n통과 ${pass}건`);

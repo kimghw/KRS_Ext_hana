@@ -100,7 +100,7 @@ site.days['2026-10-20'] = [res(CARS[0].name, '2026-10-20', 600, 720), res(CARS[1
 tick('at_car', true);
 t('켜면 근무지·행선지 칸이 한 줄로 나오고(근무지는 적어 둔 것이 깔려 있다), 곧바로 폼의 날짜·시간(10/20 07:00~20:00)으로 차량 현황을 읽는다', () => {
   assert.ok(doc.getElementById('at_car').checked, '폼을 다시 그려도 켠 것이 남는다');
-  assert.deepEqual(keys(), ['dateFrom', 'days', 'start', 'end', 'purpose', 'settle', 'car', 'workplace', 'carPlace']);
+  assert.deepEqual(keys(), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'purpose', 'settle', 'car', 'workplace', 'carPlace']);
   assert.deepEqual([...doc.querySelector('#atFields .at-group.at-carwhere').children].map((n) => n.dataset.key), ['workplace', 'carPlace']);
   assert.equal(doc.getElementById('at_workplace').value, '부산');
   assert.equal(when(), '10/20 07:00~20:00');
@@ -227,7 +227,7 @@ type('at_place', '세종');
 type('at_workplace', '부산');
 await loaded();
 t('사전정산을 켜면 출장지가 곧 행선지다 — 행선지 칸은 따로 없고, 차량 목록은 사전정산 칸들 아래에 선다', () => {
-  assert.deepEqual(keys(), ['dateFrom', 'days', 'start', 'end', 'purpose', 'settle', 'car', 'place', 'workplace', 'transport']);
+  assert.deepEqual(keys(), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'purpose', 'settle', 'car', 'place', 'workplace', 'transport']);
   assert.ok(notes().includes('빈 차량을 누르면 이 시간으로 바로 신청합니다 · 근무지 부산 · 행선지 세종'));
   assert.deepEqual([...doc.querySelectorAll('#atFields > *')].map((n) => n.id || n.className.split(' ').slice(0, 2).join('.')).slice(-3),
     ['at-group.at-opts', 'at-group.at-where', 'atCars']);

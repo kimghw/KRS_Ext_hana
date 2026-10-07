@@ -10,16 +10,16 @@ import {
   nameOf, timeOptions, spanDays, nextSpan, halfOf, halfPlan, halfFlexForm, workStartOn, itemsIn, isPast,
   buildJob, buildDocJob, buildCancelJob, listItems, formFromDoc, applyPatch, withSub, attendToday,
   FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek,
-  acceptsFile, itemsOfKind, EVIDENCE_ACCEPT, statusLabel,
+  acceptsFile, itemsOfKind, EVIDENCE_ACCEPT, statusLabel, CANCELLING_KEY, CANCELLING_LABEL, CANCELLED_LABEL, cancellingOf, pruneCancelling, isCancelDoc, linkCancel,
 } from './src/attend.js';
-import { hrListDocs, hrGetDoc, hrDeleteDoc, hrRunJob, hrWeekTimes, hrOpenDoc, hrCloseWorker, HR_SSO_URL } from './src/hr.js';
+import { hrListDocs, hrGetDoc, hrDeleteDoc, hrRunJob, hrWeekTimes, hrOpenDoc, hrCloseWorker, hrCancelRefs, HR_SSO_URL } from './src/hr.js';
 import { fillAttendSmart, receiptSmart } from './src/llm.js';
 import {
   settlePlan, describePlan, tripStage, tripDocFor, tripIconState, settleLabel,
   TRANSPORTS, TRAIN_GRADES, LEG_GRADED, transportsOf, trainGradeOf, nextTransport, legPlan, nextLegPick, describeTrans, prePlan, stayPlan, legDiffs, legWhen,
 } from './src/travel.js';
 import { tripList, tripCreate, tripDocUrl, TRIP_SHELL_URL, tripPreDetail, tripPreConfirm, tripPostConfirm, tripAfterSave, tripAfterUrl } from './src/trip.js';
-import { tripPreSave, tripPreUrl } from './src/trip.js';
+import { tripPreSave, tripPreUrl, tripDelete } from './src/trip.js';
 import { afterNeed, afterPlan, afterSummary, evidenceOf, needsAfter, TRANS_NAME } from './src/after.js';
 import { lodgeAsk, lodgeCap, lodgeSettle, lodgeSame, lodgeChoices, lodgeDecide, lodgeOver, lodgeKnown } from './src/after.js';
 import { tripLodgeMax, tripAfterLodges } from './src/trip.js';
@@ -147,6 +147,8 @@ export function createAttendPanel({
     armed: null, armTimer: null, filled: new Set(), loadedOnce: false, authFailed: false, moreOpen: false,
     // 신청 내역: 펴 둔 줄, 취소 사유를 받는 줄(then 이 'copy' 면 올린 뒤 폼에 불러온다), 따로 정한 조회 기간.
     openDoc: null, cancelFor: null, cancelThen: null, range: null,
+    // 취소신청을 올려 둔 원 문서의 기록(src/attend.js 의 CANCELLING_KEY) — 그 줄은 상태가 "취소 중"이고 여비계산서 칸이 없다.
+    cancelKept: {},
     // 기본 보기에서 다녀온 출장을 몇 주 뒤까지 보이는가(0 = 안 봄, 4, 8). 저장해 두고 홈의 WORKSPACE 카드도 같이 따른다.
     // stages 는 저장소에 담아 둔 여비계산서 목록(src/settling.js) — 목록을 새로 읽기 전에 정산이 끝난 출장을 가리는 데 쓴다.
     back: BACK_DEFAULT, stages: null,
@@ -364,9 +366,11 @@ export function createAttendPanel({
         : f.type === 'span' ? spanChips(f, v)
           : f.chips.map((c) => chip('data-days', c.days, c.label, v === c.days)).join('')
             // 끝나는 날. 칩에 없는 날 수는 여기서 고르고, 칩을 눌러도 여기에 끝나는 날이 따라 적힌다.
-            + `<input type="date" id="${id}" value="${escapeHtml(st.form.dateTo || '')}" min="${escapeHtml(st.form.dateFrom || '')}" `
-            + `aria-label="끝나는 날" title="${escapeHtml(f.hint || '')}" />`;
-      return `<div class="at-field wide at-${f.type}" data-key="${f.key}" role="group" aria-labelledby="${id}_label">`
+            // inline(출장)이면 달력을 두지 않는다 — 끝나는 날은 따로 선 도착일 칸(dateTo)이 받는다.
+            + (f.inline ? '' : `<input type="date" id="${id}" value="${escapeHtml(st.form.dateTo || '')}" min="${escapeHtml(st.form.dateFrom || '')}" `
+            + `aria-label="끝나는 날" title="${escapeHtml(f.hint || '')}" />`);
+      // 묶음 안의 칸은 한 줄을 다 쓰지 않는다. inline 은 이름이 칩 왼쪽에 붙는 한 줄이다(출장의 며칠간).
+      return `<div class="at-field${f.group ? '' : ' wide'}${f.inline ? ' inline' : ''} at-${f.type}" data-key="${f.key}" role="group" aria-labelledby="${id}_label">`
         + `<span class="at-label" id="${id}_label">${escapeHtml(f.label)}${req}</span>`
         + `<div class="at-chips">${chips}</div><span id="${id}_msg" class="at-msg"></span></div>`;
     }
@@ -483,8 +487,9 @@ export function createAttendPanel({
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', String(on));
     }
-    const endDay = $('at_days');
-    if (endDay) {
+    // 끝나는 날 달력(휴가의 며칠간 줄 · 출장의 도착일 칸)을 폼의 종료일에 맞춘다. 고르는 중이면 그 칸은 건드리지 않는다.
+    for (const endDay of [$('at_days'), $('at_dateTo')]) {
+      if (!endDay) continue;
       endDay.min = st.form.dateFrom || '';
       if (document.activeElement !== endDay) endDay.value = st.form.dateTo || '';
     }
@@ -957,8 +962,9 @@ export function createAttendPanel({
     const input = e.target;
     disarm();
     st.filled.delete(key);
-    if (key === 'days') {
-      // 달력에서 끝나는 날을 골랐다. 시작일부터 며칠인지로 바꿔 담는다. 고르는 중(빈 값)이면 그대로 둔다.
+    if (key === 'days' || key === 'dateTo') {
+      // 달력(휴가는 며칠간 줄의 달력, 출장은 도착일 칸)에서 끝나는 날을 골랐다. 시작일부터 며칠인지로 바꿔 담는다.
+      // 고르는 중(빈 값)이면 그대로 둔다.
       if (!input.value) return;
       const n = spanDays(st.form.dateFrom, input.value);
       if (!(n >= 1 && n <= MAX_TRIP_DAYS)) {
@@ -1027,6 +1033,24 @@ export function createAttendPanel({
   function paintChat() {
     el.chatLog.innerHTML = st.chat.slice(-4).map((c) =>
       `<li class="at-say ${c.who}${c.error ? ' error' : ''}">${escapeHtml(c.text)}</li>`).join('');
+  }
+
+  const CHAT_PLACEHOLDER = '예) 내일 오후 2~4시 부산시청 외근';
+  const CHAT_TITLE = '문장을 적으면 아래 입력칸에 반영합니다. 목적도 함께 적어 주세요.';
+  const CHAT_OFF_TEXT = 'claude 미연결 — 규칙으로만 읽습니다';
+  const CHAT_OFF_HINT = '종류·날짜·시각 같은 흔한 말만 규칙으로 읽고 목적은 채우지 못합니다. 아래 연결 지침을 복사해 Claude Code·Codex 에 붙여 넣거나 설정에 API 키를 넣으면 Claude 가 읽습니다.';
+
+  /**
+   * Claude 에 닿을 길(로컬 CLI·API 키)이 있는지에 따라 말로 채우기 칸의 낯을 바꾼다.
+   * 말로 찾기와 달리 칸을 잠그지는 않는다 — 날짜·시각 같은 흔한 말은 규칙으로도 읽히니 쓸모가 남는다.
+   * 다만 연결됐을 때와 같은 낯(파란 버튼·반짝이·예시 플레이스홀더)이면 연결된 줄 알기 쉽다(2026-10-06 사용자 지적).
+   * 그래서 회색으로 내리고 플레이스홀더에 규칙으로만 읽는다고 적는다. 부르는 쪽(sidepanel.js 의 paintAskReady)은
+   * CLI 확인이 끝난 뒤에만 끈다 — 패널을 열 때마다 회색이 잠깐 비치지 않게.
+   */
+  function paintReady(ready) {
+    el.root.querySelector('.at-chat')?.classList.toggle('off', !ready);
+    el.chatInput.placeholder = ready ? CHAT_PLACEHOLDER : CHAT_OFF_TEXT;
+    el.chatInput.title = ready ? CHAT_TITLE : CHAT_OFF_HINT;
   }
 
   async function runChat() {
@@ -1197,14 +1221,17 @@ export function createAttendPanel({
       const trip = tripOf(it);
       const stage = trip ? tripStage(trip, st.trips.me) : null;
       const chip = settleChip(it, trip, stage, today);
+      // 취소가 걸린 건: 'pending' 취소 중(취소신청서 결재 전) · 'done' 취소(취소신청서 결재완료 — 원 문서는 HR 목록에서 결재완료 그대로다).
+      const off = cancelState(it);
       const head = `<button type="button" class="at-head" aria-expanded="${open}" aria-controls="atMore_${i}">`
-        + `<span class="at-row"><span class="at-st" title="${escapeHtml(it.statusName)}">${escapeHtml(statusLabel(it))}</span>`
+        + `<span class="at-row"><span class="at-st" title="${escapeHtml(off === 'done' ? `${it.statusName} · 취소신청 결재완료` : off ? `${it.statusName} · 취소신청 결재 대기` : it.statusName)}">${escapeHtml(off === 'done' ? CANCELLED_LABEL : off ? CANCELLING_LABEL : statusLabel(it))}</span>`
         + `<span class="at-sum">${escapeHtml(it.summary)}</span>${chip}</span>`
         + `<span class="at-reason">${escapeHtml(it.reason || it.formName || '')}</span></button>`;
       // 지난 건은 상태 딱지를 회색으로 가라앉힌다(스타일이 결재완료에만 건다).
-      const cls = `st-${escapeHtml(it.status)}${isPast(it, today) ? ' past' : ''}${st.edit?.docNo === it.docNo ? ' editing' : ''}`;
+      const cls = `st-${escapeHtml(it.status)}${off === 'done' ? ' cancelled' : off ? ' cancelling' : ''}${isPast(it, today) ? ' past' : ''}${st.edit?.docNo === it.docNo ? ' editing' : ''}`;
       if (!open) return `<li data-i="${i}" class="${cls}">${head}</li>`;
-      const acts = it.actions.map((a) =>
+      // 취소신청을 이미 올린 건은 다시 무를 수 없다 — 변경·취소신청 버튼을 걷는다.
+      const acts = it.actions.filter((a) => !off || (a !== 'cancel' && a !== 'change')).map((a) =>
         `<button type="button" class="small ${a === 'delete' || a === 'cancel' || a === 'recall' ? 'at-warn' : a === 'request' || a === 'change' ? 'at-request' : 'ghost'}" data-act="${a}" `
         + `title="${escapeHtml(ACTION_TITLE[a])}"${st.busy ? ' disabled' : ''}>${ACTION_LABEL[a]}</button>`).join('')
         // 이 문서를 HR 웹 화면에서 본다(제목 줄의 "HR 열기"와 같은 아이콘). 보내는 것이 없어 한 번만 누르면 된다.
@@ -1226,11 +1253,11 @@ export function createAttendPanel({
       // 여비계산서에 저장된 값을 보이므로, 사이트에서 고친 것을 가져올 길이 있어야 한다. 읽기만 한다(refreshTrip).
       const tripBusy = st.busy || !!(trip && (st.after[trip.seq]?.busy || st.after[trip.seq]?.loading));
       const againBtn = `<button type="button" class="small ghost at-web at-trip-again" data-act="trip-refresh" title="${TRIP_AGAIN_TITLE}" aria-label="${TRIP_AGAIN_TITLE}"${tripBusy ? ' disabled' : ''}>${CAR_AGAIN_ICON}</button>`;
-      const tripLine = !isTrip(it) ? '' : `<div class="at-tripline"><span>${escapeHtml(
+      const tripLine = !isTrip(it) ? '' : off ? cancelLine(it, off) : `<div class="at-tripline"><span>${escapeHtml(
         trip ? `여비계산서 ${trip.seq} · ${stage.label}` : noTripNote(it))}</span>${againBtn}${preBtn}`
         + `<button type="button" class="small ghost at-web at-tripbtn ${icon.state}" data-act="trip" title="${TRIP_TITLE} — ${escapeHtml(icon.label)}" aria-label="${TRIP_TITLE} — ${escapeHtml(icon.label)}">${tripIcon(icon.digit)}</button></div>`;
       // 출장이면 사후정산 칸 아래에 여비증빙 송부 칸(sendbox.js)이 선다 — 정산이 끝난 뒤 증빙을 PDF 로 묶어 담당자에게 보낸다.
-      const afterBox = isTrip(it) ? afterHtml(it, trip, stage) + sendBox.html(sendCtx(it)) : '';
+      const afterBox = isTrip(it) && !off ? afterHtml(it, trip, stage) + sendBox.html(sendCtx(it)) : '';
       const note = it.rejectNote ? `<span class="at-reject" title="반려 의견">반려 의견 · ${escapeHtml(it.rejectNote)}</span>` : '';
       // 신청서에 하는 일(변경·취소신청·HR 에서 열기)은 여비계산서 칸보다 위에 선다(2026-10-03 사용자 지정) — 맨 아래에 있으면
       // 사후정산·여비증빙 송부에 딸린 버튼으로 읽혀 헷갈렸다. 그 아래가 여비계산서(계산서 줄·사후정산·여비증빙 송부)다.
@@ -1339,6 +1366,9 @@ export function createAttendPanel({
 
   /** 출장 신청서인가(여비계산서가 따르는 것). */
   const isTrip = (it) => it.formId === 'TR';
+  /** 취소신청을 올려 둔 건인가 — 상태가 "취소 중"이고, 출장이면 여비계산서 칸을 걷는다(2026-10-07 사용자 지정). */
+  const cancelState = (it) => cancellingOf(st.all, st.cancelKept).get(it.docNo) || '';
+  const isCancelling = (it) => !!cancelState(it);
   /** 올려 두었거나 결재가 끝난 신청서인가(신청·승인). 임시저장·반려·회수는 아니다. */
   const isLive = (it) => it.status === STATUS.WAIT || it.status === STATUS.REQUESTED || it.status === STATUS.APPROVED;
   /**
@@ -1351,7 +1381,7 @@ export function createAttendPanel({
    * 그 출장의 여비계산서(기간과 출장자가 같은 것). 출장이 아니거나 아직 못 읽었으면 null. 가려진 줄(shadowed)도 null 이다 —
    * 딱지·편 카드·버튼이 같은 판단을 쓴다(계산서와 사후정산·여비증빙 송부는 올려 둔 신청서의 줄에서 한다).
    */
-  const tripOf = (it) => (isTrip(it) && st.trips?.rows && !shadowed(it) ? tripDocFor(it, st.trips.rows, st.trips.me) : null);
+  const tripOf = (it) => (isTrip(it) && st.trips?.rows && !shadowed(it) && !isCancelling(it) ? tripDocFor(it, st.trips.rows, st.trips.me) : null);
   /**
    * 그 출장에 여비계산서가 없다고 말해도 되는가 — 계산서 목록을 그 출장기간까지 다 읽었을 때만이다. 읽어 둔 기간 밖이거나(기간을 바꿔
    * 다시 읽는 중) 목록이 여러 쪽이면(첫 쪽만 읽는다 — src/trip.js 의 tripList) 없는 것이 아니라 모르는 것이다.
@@ -1364,10 +1394,74 @@ export function createAttendPanel({
    * 반려·회수한 신청서에 계산서가 없을 때, 같은 기간의 올려 둔 신청서에 가려진 줄일 때(shadowed).
    */
   function settleChip(it, trip, stage, today) {
-    if (!isTrip(it) || shadowed(it)) return '';
+    if (!isTrip(it) || shadowed(it) || isCancelling(it)) return '';
     if (!stage && (!tripsCover(it) || it.status === STATUS.REJECTED || it.status === STATUS.RECALLED)) return '';
     return `<span class="at-trip" title="${trip ? `여비계산서 ${escapeHtml(trip.seq)}` : '여비계산서 없음'}">`
       + `${escapeHtml(settleLabel(stage, { past: isPast(it, today) }))}</span>`;
+  }
+
+  /** 취소가 걸린 출장의 여비계산서(남아 있으면). 취소된 줄에서는 tripOf 가 null 이라 따로 찾는다. */
+  const leftTrip = (it) => (st.trips?.rows ? tripDocFor(it, st.trips.rows, st.trips.me) : null);
+
+  /**
+   * 취소가 걸린 출장 줄을 폈을 때 여비계산서 자리에 서는 한 줄. 계산서는 패널이 취소신청을 올릴 때 지운다 — HR 에서 취소했거나
+   * 지우지 못해 남아 있으면 `여비계산서 지우기`가 선다(두 번 눌러야 나간다 — 2026-10-07 사용자 지정: "이미 취소가 되었는데 이 확장자는
+   * 취소 처리가 안됨 ... 처리해줘").
+   */
+  function cancelLine(it, off) {
+    const head = off === 'done' ? '취소신청 결재완료' : '취소신청 결재 대기';
+    const left = leftTrip(it);
+    const text = left ? `${head} — 여비계산서 ${left.seq}(${tripStage(left, st.trips.me).label})이 남아 있습니다`
+      : !st.trips ? `${head} — 여비계산서 확인 중...`
+        : st.trips.error ? `${head} — 여비계산서를 읽지 못했습니다: ${st.trips.error}`
+          : `${head} — 여비계산서 없음`;
+    const drop = left ? `<button type="button" class="small at-warn" data-act="trip-drop"${st.busy ? ' disabled' : ''}>여비계산서 지우기</button>` : '';
+    return `<div class="at-tripline at-cancelnote"><span>${escapeHtml(text)}</span>${drop}</div>`;
+  }
+
+  /** 취소가 걸린 출장의 남은 여비계산서를 지운다(cancelLine 의 버튼). */
+  async function dropTrip(it) {
+    const row = leftTrip(it);
+    if (!row) return;
+    setBusy(true);
+    try {
+      await tripDelete(row, { name: st.trips.me, onStage: setStatus });
+      logEvent('trip', true, `여비계산서 삭제(출장 취소): ${row.seq} · ${it.summary}`, { seq: row.seq, docNo: it.docNo });
+      await loadTrips();
+      setStatus(`여비계산서 ${row.seq} 을(를) 지웠습니다 — ${it.summary}`);
+    } catch (err) {
+      setError(err, '여비계산서를 지우지 못했습니다');
+      logEvent('trip', false, `여비계산서 삭제 실패(출장 취소): ${it.summary} — ${err.message}`, { docNo: it.docNo });
+    } finally {
+      setBusy(false);
+      paintList();
+    }
+  }
+
+  const cancelTried = new Set();   // 이번에 내용을 읽어 본 취소신청서 — 원 문서를 못 찾았어도 다시 읽지 않는다
+
+  /**
+   * HR 목록의 취소신청서가 어느 원 문서를 무르는지 읽어 기록에 잇는다(src/hr.js 의 hrCancelRefs). 이미 이은 것과 반려·회수한 것은
+   * 읽지 않는다. HR 에서 직접 올린 취소신청도 이것으로 잡힌다. 던지지 않는다 — 못 읽으면 그 줄은 전처럼 보인다.
+   */
+  async function linkCancels() {
+    const linked = new Set(Object.values(st.cancelKept).map((v) => v?.cancelDocNo).filter(Boolean));
+    const live = new Set([STATUS.WAIT, STATUS.REQUESTED, STATUS.APPROVED]);
+    const todo = st.all.filter((c) => isCancelDoc(c) && live.has(c.status) && !linked.has(c.docNo) && !cancelTried.has(c.docNo));
+    let changed = false;
+    for (const c of todo) {
+      cancelTried.add(c.docNo);
+      try {
+        const befs = (await hrCancelRefs(c)).filter((no) => st.all.some((x) => x.docNo === no));
+        if (!befs.length) continue;
+        st.cancelKept = linkCancel(st.cancelKept, c.docNo, befs);
+        changed = true;
+      } catch { /* 못 읽으면 그대로 둔다 */ }
+    }
+    if (!changed) return;
+    chrome.storage.local.set({ [CANCELLING_KEY]: st.cancelKept });
+    pruneSettled();
+    paintList();
   }
 
   /** 계산서가 걸리지 않은 출장 줄을 폈을 때 적는 말 — 없는 것, 모르는 것, 다른 줄에 있는 것을 가려 말한다. */
@@ -2675,6 +2769,14 @@ export function createAttendPanel({
     // 신청일로 읽는다: 보여줄 기간보다 여섯 달 앞에 신청한 것부터 오늘 신청한 것까지.
     const { rows, user } = await hrListDocs({ from: monthsAgo(from < today ? from : today, LIST_REQUEST_LOOKBACK_MONTHS), to: today }, { onStage: setStatus });
     st.all = listItems(rows);
+    // 취소가 결재된(원 문서가 결재완료가 아닌) 기록은 걷는다.
+    const kept = pruneCancelling(st.cancelKept, st.all);
+    if (Object.keys(kept).length !== Object.keys(st.cancelKept).length) {
+      st.cancelKept = kept;
+      chrome.storage.local.set({ [CANCELLING_KEY]: kept });
+    }
+    // 목록의 취소신청서를 원 문서에 잇는다 — 기다리지 않는다(이으면 다시 그린다).
+    linkCancels();
     // 4주·8주로 조회하는 중이면 종료일(근태를 올려 둔 가장 늦은 날)을 방금 읽은 것으로 다시 잡는다.
     if (st.range?.weeks) st.range = weekRange(st.range.weeks);
     pickItems();
@@ -2790,7 +2892,9 @@ export function createAttendPanel({
       st.cancelThen = null;
       if (st.edit?.docNo === it.docNo) resetForm();
       if (done && again) seatForm(again, null);
-      const tail = again ? '. 같은 내용을 폼에 불러왔습니다 — 시간을 고친 뒤 결재요청하세요.' : '';
+      // 취소신청을 올렸으면 그 건은 결재될 때까지 "취소 중"이다 — 적어 두고, 출장이면 여비계산서(사전정산까지)를 지운다.
+      const dropped = action === 'cancel' && done ? await afterCancel(it, detail.newDocNo, { keepTrip: !!again }) : '';
+      const tail = (again ? '. 같은 내용을 폼에 불러왔습니다 — 시간을 고친 뒤 결재요청하세요.' : '') + dropped;
       setStatus(done
         ? `${verb}했습니다 — ${it.summary} · ${it.docNo}${action === 'cancel' ? ' (취소신청서가 결재되면 무효가 됩니다)' : ''}${tail}`
         : `${verb}했다고 HR 이 답했지만 목록의 상태가 그대로입니다 — ${it.docNo}. HR 에서 확인해 주세요.`, done ? '' : 'error');
@@ -2799,10 +2903,49 @@ export function createAttendPanel({
       logEvent('attend', done, `${verb}${again ? '(변경)' : ''}: ${it.summary} · ${it.docNo}${done ? '' : ' (목록에서 미확인)'}`,
         { action, docNo: it.docNo, before: it.statusName, after: after?.statusName, reason, change: !!again, ...detail });
     } catch (err) {
+      // 취소할 수 있는 문서 목록에 없다 — 이 건에는 이미 취소신청이 올라가 있다(HR 에서 올렸다 — 2026-10-07 실제로 그랬다).
+      // 실패로 끝내지 않고 취소가 걸린 것으로 적어 두고, 목록을 다시 읽어 그 취소신청서를 잇는다. 출장이면 계산서를 지운다.
+      if (action === 'cancel' && /취소할 수 있는 결재완료 문서 목록에/.test(err.message)) {
+        st.cancelFor = null;
+        st.cancelThen = null;
+        await confirmInList(it.docNo);
+        const dropped = await afterCancel(it, '', { keepTrip: then === 'copy', already: true });
+        setStatus(`이미 취소신청이 올라가 있는 건입니다 — ${it.summary} · ${it.docNo}${dropped}`);
+        logEvent('attend', true, `취소신청 이미 있음: ${it.summary} · ${it.docNo}`, { action, docNo: it.docNo });
+        onChanged();
+        return;
+      }
       setError(err, `${verb} 실패`);
       logEvent('attend', false, `${verb} 실패: ${it.summary} · ${it.docNo} — ${err.message}`, { action, docNo: it.docNo });
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * 취소신청을 올린 뒤의 일. 그 건을 "취소 중"으로 적어 두고(CANCELLING_KEY — 홈 카드도 읽는다), 출장이면 여비계산서를 사전정산까지
+   * 지운다(2026-10-07 사용자 지정). 근태 변경(keepTrip)은 같은 출장을 새로 올리는 길이라 계산서를 남긴다. 던지지 않는다 —
+   * 상태 줄에 덧붙일 말을 돌려준다.
+   */
+  async function afterCancel(it, cancelDocNo, { keepTrip = false, already = false } = {}) {
+    // 이미 있던 취소신청(already)은 목록에서 이어 둔 기록이 있으면 그대로 둔다 — 그 취소신청서 번호를 지우지 않게.
+    if (!(already && st.cancelKept[it.docNo])) {
+      st.cancelKept = { ...st.cancelKept, [it.docNo]: { at: Date.now(), cancelDocNo: cancelDocNo || '' } };
+    }
+    chrome.storage.local.set({ [CANCELLING_KEY]: st.cancelKept });
+    paintList();
+    if (!isTrip(it) || keepTrip) return '';
+    try {
+      if (!st.trips?.rows || tripsBusy) await loadTrips();
+      const row = st.trips?.rows ? tripDocFor(it, st.trips.rows, st.trips.me) : null;
+      if (!row) return st.trips?.error ? ` · 여비계산서를 읽지 못해 지우지 못했습니다: ${st.trips.error}` : '';
+      await tripDelete(row, { name: st.trips.me, onStage: setStatus });
+      logEvent('trip', true, `여비계산서 삭제(출장 취소): ${row.seq} · ${it.summary}`, { seq: row.seq, docNo: it.docNo });
+      await loadTrips();
+      return ` · 여비계산서 ${row.seq}(사전정산)를 지웠습니다`;
+    } catch (err) {
+      logEvent('trip', false, `여비계산서 삭제 실패(출장 취소): ${it.summary} — ${err.message}`, { docNo: it.docNo });
+      return ` · 여비계산서를 지우지 못했습니다: ${err.message}`;
     }
   }
 
@@ -2855,6 +2998,11 @@ export function createAttendPanel({
       return undefined;
     }
     if (a === 'trip-refresh') return refreshTrip(it);
+    if (a === 'trip-drop') {
+      // 취소가 걸린 출장의 남은 여비계산서를 지운다 — 되돌릴 수 없어 두 번 눌러야 나간다.
+      if (!armed(`tripdrop:${it.docNo}`, btn, '한 번 더 → 지우기')) return undefined;
+      return dropTrip(it);
+    }
     if (a === 'trip-pre') {
       // 사전정산 입력 화면을 새 탭에서 연다(사후정산 단계의 출장 줄에 선 1 아이콘). 읽기만 하는 일이라 한 번에 열린다.
       disarm();
@@ -3223,7 +3371,8 @@ export function createAttendPanel({
       if (saved?.attendLodgeInfo && typeof saved.attendLodgeInfo === 'object') st.lodgeInfo = { ...saved.attendLodgeInfo, ...st.lodgeInfo };
     }, () => {});
     // 다녀온 출장을 몇 주 뒤까지 보일지 고른 값과, 담아 둔 여비계산서 목록(오늘 읽은 것만 쓴다).
-    const rule = await chrome.storage.local.get([BACK_KEY, STAGES_KEY, ROUTES_KEY]);
+    const rule = await chrome.storage.local.get([BACK_KEY, STAGES_KEY, ROUTES_KEY, CANCELLING_KEY]);
+    st.cancelKept = rule?.[CANCELLING_KEY] && typeof rule[CANCELLING_KEY] === 'object' ? { ...rule[CANCELLING_KEY], ...st.cancelKept } : st.cancelKept;
     // 출장지마다 기억해 둔 교통편(src/routes.js). 그 사이 이 패널이 새로 기억한 것이 있으면 그것이 먼저다.
     st.routes = { ...(rule?.[ROUTES_KEY] && typeof rule[ROUTES_KEY] === 'object' ? rule[ROUTES_KEY] : {}), ...st.routes };
     st.back = backWeeksOf(rule?.[BACK_KEY]);
@@ -3245,5 +3394,5 @@ export function createAttendPanel({
     el.root.classList.add('hidden');
   }
 
-  return { wire, show, hide, reload, seek, authFailed: () => st.authFailed, state: st };
+  return { wire, show, hide, reload, seek, paintReady, authFailed: () => st.authFailed, state: st };
 }

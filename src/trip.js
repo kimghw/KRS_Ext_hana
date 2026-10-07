@@ -210,6 +210,49 @@ export async function tripPostConfirm(row, { name = '', onStage = () => {} } = {
   return { row: fresh, stage, sent };
 }
 
+/* ------------------------------------------------------------ 계산서 삭제(출장 취소) */
+
+/**
+ * 여비계산서를 지운다 — 계산서 화면의 **삭제** 버튼을 누른 것과 같은 요청이다(CalPrint/Delete 에 seq·요청 확인 토큰).
+ * 출장을 취소하면 사전정산까지 계산서를 지운다(2026-10-07 사용자 지정: "출장 취소 하면 여비계산 내용은 사전정산까지 제거").
+ *
+ * 삭제 폼은 출장자를 가리지 않고 계산서 전체를 지운다 — 다른 출장자가 함께 있는 계산서면 보내지 않고 던진다. 사후정산까지 끝난
+ * 계산서도 지우지 않는다(정산이 끝난 것을 패널이 지우지 않는다 — eclass 에서 정리한다). 보낸 뒤에는 목록을 다시 읽어 그 계산서가
+ * 사라졌는지로 성공을 판정한다 — 아니면 던진다. **실제로 보내 본 적이 없다.**
+ *
+ * @param {object} row 여비계산서 목록의 한 줄
+ * @param {{name?:string, onStage?:Function}} who name 은 목록 화면이 아는 내 이름
+ * @returns {Promise<{seq: string}>}
+ */
+export async function tripDelete(row, { name = '', onStage = () => {} } = {}) {
+  const others = (row.travelers || []).filter((t) => t.name && t.name !== name);
+  if (name && others.length) {
+    throw new Error(`여비계산서 ${row.seq} 에 다른 출장자(${others.map((t) => t.name).join(', ')})가 있어 지우지 않았습니다. eclass 에서 정리해 주세요.`);
+  }
+  const stage = tripStage(row, name);
+  if (stage?.phase === 'post' && stage.done) {
+    throw new Error(`여비계산서 ${row.seq} 은(는) 사후정산까지 끝나 지우지 않았습니다. eclass 에서 정리해 주세요.`);
+  }
+  onStage('계산서 화면을 여는 중...');
+  const { page, cal } = await openCal(row, name);
+  const form = Object.fromEntries(cal.del || []);
+  if (form.seq !== String(row.seq) || !form.__RequestVerificationToken) {
+    throw new Error('계산서 화면의 삭제 폼이 이 계산서의 것이 아니어서 보내지 않았습니다. eclass 의 계산서 화면에서 지워 주세요.');
+  }
+  onStage(`여비계산서 ${row.seq} 을(를) 지우는 중...`);
+  // 삭제는 한 번만 나가야 한다. 읽기가 직접 요청으로 됐으면 삭제도 직접 요청으로만 보낸다(탭 경유로 되풀이하지 않는다).
+  const post = page.via === 'tab' ? siteFetch : directFetch;
+  await post(`${BASE}/CalPrint/Delete`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+    body: new URLSearchParams(cal.del).toString(),
+  });
+  const after = await tripList({ from: row.from, to: row.to });
+  if (after.rows.some((r) => r.seq === row.seq)) {
+    throw new Error(`삭제를 보냈지만 여비계산서 ${row.seq} 이(가) 목록에 그대로 있습니다. eclass 의 여비계산서 목록에서 확인해 주세요.`);
+  }
+  return { seq: String(row.seq) };
+}
+
 /* ------------------------------------------------------------ 계산서 출력(PDF) */
 
 /**

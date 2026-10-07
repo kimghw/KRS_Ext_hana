@@ -1690,6 +1690,8 @@ function paintAskReady() {
   // 확인이 끝나기 전에는 내지 않는다 — 패널을 열 때마다 잠깐 떴다 사라진다.
   const helpless = state.cliChecked && !ready;
   for (const p of document.querySelectorAll('.cli-help')) p.hidden = !helpless;
+  // 근태의 말로 채우기 칸은 규칙으로도 읽히니 잠그지 않되, 연결된 것으로 오인하지 않게 회색으로 내린다.
+  attend.paintReady(!helpless);
   // 설정의 버튼은 API 키로 쓰고 있어도 CLI 가 없으면 남긴다.
   el.cliGuide.hidden = !state.cliChecked || state.cli;
 }
@@ -2640,6 +2642,15 @@ async function init() {
     if (TEAMS_ENABLE_KEY in changes) el.teamsButton.checked = teamsEnabled(changes[TEAMS_ENABLE_KEY].newValue);
     if (UNCFM_ENABLE_KEY in changes) el.homeUncfm.checked = unconfirmedEnabled(changes[UNCFM_ENABLE_KEY].newValue);
     if (CIRC_ENABLE_KEY in changes) el.docCirculate.checked = circulateEnabled(changes[CIRC_ENABLE_KEY].newValue);
+    // 홈 카드가 e-Class 인명에서 이름을 알아내 담았거나(src/whoami.js) 다른 창의 패널에서 바꿨다 — 이 창의 칸도 따라간다.
+    if ('myName' in changes) {
+      const name = String(changes.myName.newValue || '').trim();
+      if (name !== state.myName) {
+        state.myName = name;
+        el.myName.value = name;
+        if (isMineMode()) load();
+      }
+    }
     // 홈에서 도는 열람이 진행·결과를 적을 때마다 따라 그린다. 홈의 기록이 활동 로그에도 들어왔으니 그것도 다시 그린다.
     if (CIRC_STATE_KEY in changes) {
       paintCirculate(changes[CIRC_STATE_KEY].newValue);

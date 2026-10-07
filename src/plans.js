@@ -8,7 +8,7 @@
 // HR 과 말하는 길(src/hr.js 의 hrListDocs)은 주입받는다. 콘텐츠 스크립트는 그 길을 쓸 수 없지만
 // 담아 둔 것이 오늘 것인지는 봐야 하므로, 이 파일은 HR 쪽을 끌어오지 않는다.
 
-import { listItems, plansIn } from './attend.js';
+import { listItems, plansIn, cancellingOf } from './attend.js';
 import { todayStr } from './parse.js';
 
 /** 읽어 둔 근태를 담는 storage 키. { day, since, items } */
@@ -36,10 +36,11 @@ export const TRIP_LOOKBACK_DAYS = 28;
  * 그 밖의 종류는 start 전에 끝난 것을 뺀다. 두 화면이 같은 규칙을 써야 서로 어긋나 보이지 않는다 — rule 은 src/settling.js 의
  * tripRule 이 저장소에서 읽어 준다.
  * @param {object[]} items listItems 의 결과
- * @param {{backDays?: number, settled?: (plan: object) => string}} [rule]
+ * 취소신청을 올려 둔 건은 상태가 "취소 중"이다 — cancelling 은 src/attend.js 의 CANCELLING_KEY 에 담아 둔 기록이다.
+ * @param {{backDays?: number, settled?: (plan: object) => string, cancelling?: object|null}} [rule]
  */
-export function plansToShow(items, start, end, { backDays = TRIP_LOOKBACK_DAYS, settled = () => '' } = {}) {
-  return plansIn(items, addDays(start, -backDays), end).filter((p) => p.to >= start || (p.group === 'trip' && !settled(p)));
+export function plansToShow(items, start, end, { backDays = TRIP_LOOKBACK_DAYS, settled = () => '', cancelling = null } = {}) {
+  return plansIn(items, addDays(start, -backDays), end, cancellingOf(items, cancelling)).filter((p) => p.to >= start || (p.group === 'trip' && !settled(p)));
 }
 
 /** start 부터 보여주려면 신청일을 어디까지 거슬러 읽어 두어야 하는지. */
@@ -63,8 +64,8 @@ export async function loadPlans(start, { force = false, listDocs } = {}) {
   const since = addDays(needSince(start, today), -PLANS_SLACK_DAYS);
   try {
     const { rows } = await listDocs({ from: since, to: today });
-    const items = listItems(rows).map(({ docNo, status, statusName, formId, kindName, from, to, start: s, end: e, gubun, reason }) =>
-      ({ docNo, status, statusName, formId, kindName, from, to, start: s, end: e, gubun, reason }));
+    const items = listItems(rows).map(({ docNo, status, statusName, formId, formName, api, kindName, from, to, start: s, end: e, gubun, reason, befDocNo }) =>
+      ({ docNo, status, statusName, formId, formName, api, kindName, from, to, start: s, end: e, gubun, reason, befDocNo }));
     await chrome.storage.local.set({ [PLANS_KEY]: { day: today, since, items } });
     return { items, error: '' };
   } catch (err) {

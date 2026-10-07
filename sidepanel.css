@@ -186,9 +186,10 @@ button.pk-del:hover { color: var(--danger); }
 .ask-bar input { flex: 1; font-size: 14px; }
 .ask-bar button { min-width: 64px; padding: 8px 11px; font-size: 14px; border-radius: 10px; }
 .ask-bar button svg { width: 13px; height: 13px; }
-.ask.off .ask-bar button { background: var(--surface-soft); color: var(--muted); opacity: 1; }
+/* 닿을 길이 없을 때. 말로 찾기(.ask)는 잠기고, 근태의 말로 채우기(.at-chat)는 규칙으로 읽히니 열어 두되 같은 회색 낯으로 내린다. */
+.ask.off .ask-bar button, .at-chat.off .ask-bar button { background: var(--surface-soft); color: var(--muted); opacity: 1; }
 .ask.off .ask-bar input:disabled { color: var(--faint); cursor: not-allowed; }
-.ask.off .sparkle-icon { color: var(--faint); opacity: .55; }
+.ask.off .sparkle-icon, .at-chat.off .sparkle-icon { color: var(--faint); opacity: .55; }
 /* Claude 에 닿을 길이 없을 때 말 칸(말로 찾기·말로 채우기) 아래에 내는 줄 — 한마디와 연결 지침 복사 버튼. */
 .cli-help { display: flex; align-items: center; gap: 8px; margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .cli-help span { flex: 1; min-width: 0; }
@@ -497,6 +498,13 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .st-5 .at-st { background: var(--free); color: var(--fg); }
 /* 이미 지난 결재완료 건은 회색으로 가라앉힌다 — 앞으로 올 일정이 눈에 먼저 들어오게. */
 .attend .past.st-5 .at-st { background: var(--busy); color: var(--muted); }
+/* 취소신청을 올려 둔 건(취소 중) — 결재완료 색을 덮는다. */
+.attend .cancelling .at-st, .attend .past.cancelling .at-st { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
+.attend .at-cancelnote span { color: var(--danger); }
+/* 취소가 결재된 건(취소) — 잡힌 일정이 아니라 회색으로 가라앉히고 요약에 줄을 긋는다. */
+.attend .cancelled .at-st, .attend .past.cancelled .at-st { background: var(--busy); color: var(--muted); }
+.attend .cancelled .at-sum { text-decoration: line-through; color: var(--muted); }
+.attend .cancelled .at-cancelnote span { color: var(--muted); }
 .attend .st-4 .at-st { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
 .attend .at-sum { min-width: 0; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .attend .at-reason, .attend .at-reject { display: block; margin-top: 1px; color: var(--muted); font-size: 13px; }
@@ -724,11 +732,18 @@ button.danger:hover { filter: brightness(1.08); }
 }
 .attend .at-chip:hover { background: var(--pick-soft); border-color: var(--pick); }
 .attend .at-chip.active { background: var(--pick); border-color: var(--pick); color: #fff; }
-/* 며칠간 — 좁은 칩 다섯(1D~5D)과 끝나는 날 달력이 한 줄이다. 달력이 칩 오른쪽 남은 폭을 다 쓴다.
+/* 며칠간 — 좁은 칩(휴가 1D~5D)과 끝나는 날 달력이 한 줄이다. 달력이 칩 오른쪽 남은 폭을 다 쓴다.
    패널이 아주 좁아 달력에 날짜가 다 안 들어갈 폭이면 달력만 다음 줄로 내려간다. */
 .attend .at-days .at-chips { gap: 4px; }
 .attend .at-days .at-chip { flex: none; padding: 8px 9px; }
 .attend .at-days .at-chips input[type="date"] { flex: 1 1 120px; width: auto; min-width: 0; }
+/* 출장의 며칠간(inline — 2026-10-06 사용자 지정): 이름이 칩 왼쪽에 붙고 칩 1D~7D 가 남은 폭을 고르게 나눠 한 줄에 다 들어간다.
+   달력은 없다 — 끝나는 날은 위의 도착일 칸이 받는다. 맞지 않는다는 글은 그 아래 한 줄이다. */
+.attend .at-days.inline { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 5px 10px; }
+.attend .at-days.inline .at-label { flex: none; }
+.attend .at-days.inline .at-chips { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.attend .at-days.inline .at-chip { padding: 8px 0; font-size: 13px; }
+.attend .at-days.inline .at-msg:not(:empty) { flex-basis: 100%; }
 .attend .at-field.need .at-chip:not(.active) { border-color: var(--pick); }
 /* 몇 시간 — 1H~8H 와 30분을 더하는 칩이 한 줄이다. 30분 칩은 맨 오른쪽에 다른 색(초록)을 칠해 둔다. */
 .attend .at-span .at-chips { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)) auto; gap: 4px; }
@@ -754,6 +769,10 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-group.at-opts { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 /* 차량 조회를 켰을 때의 근무지(좁게) · 행선지 한 줄 — 출장지·근무지 줄이 없는 폼(외근, 사전정산을 끈 출장)에서만 나온다. */
 .attend .at-group.at-carwhere { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+/* 출장의 날짜·시각 두 줄(2026-10-06 사용자 지정) — 출발일 오른쪽에 출발 시각(go), 도착일 오른쪽에 도착 시각(back).
+   시각 칸은 줄의 오른쪽 3할쯤이되 "도착 20:00" 이 들어갈 폭은 지킨다. 날짜 칸은 평소 한 줄을 다 쓰지만(at-date) 묶음 안에서는 제 칸만 쓴다. */
+.attend .at-group.at-go, .attend .at-group.at-back { grid-template-columns: minmax(0, 1fr) minmax(118px, 28%); align-items: end; }
+.attend .at-group.at-go .at-field, .attend .at-group.at-back .at-field { grid-column: auto; }
 /* 차량 조회 — 폼의 날짜·시간에 빈 차량. 머리 줄(기간 · 다시 조회) 아래에 차량마다 한 줄이고, 빈 차량의 줄만 눌린다(누르면 그 자리에서 신청한다). */
 .attend .at-cars { grid-column: 1 / -1; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; }
 .attend .at-cars-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }

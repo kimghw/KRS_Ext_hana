@@ -369,11 +369,13 @@ export function fieldsFor(form) {
   }
   const sub = { key: 'sub', label: '종류', type: 'choice', required: true, options: SUBS[k] };
   // 종료일을 따로 묻지 않는다. 며칠간인지만 받고(칩 또는 달력에서 끝나는 날) 종료일은 거기서 나온다(tripDates).
-  // 칩은 출장·휴가 모두 1D~5D 다 — 하루부터 닷새(2026-10-02 사용자 지정). 칩 오른쪽에 끝나는 날을 적는
-  // 달력이 한 줄로 붙고, 칩을 누르면 그 날짜가 따라 바뀐다. 닷새보다 길면 달력에서 고른다.
+  // 휴가의 칩은 1D~5D(하루부터 닷새 — 2026-10-02 사용자 지정)이고 칩 오른쪽에 끝나는 날을 적는 달력이 한 줄로 붙는다.
+  // 출장은 1D~7D 이고 달력 대신 위의 도착일 칸(dateTo)이 끝나는 날을 받는다(inline — 2026-10-06 사용자 지정).
+  // 어느 쪽을 바꿔도 다른 쪽이 따라온다. 칩보다 길면 달력(도착일)에서 고른다.
+  const dayChips = (n) => Array.from({ length: n }, (_, i) => ({ days: i + 1, label: `${i + 1}D` }));
   const days = {
     key: 'days', label: '며칠간', type: 'days', required: true, max: MAX_TRIP_DAYS, hint: '끝나는 날을 달력에서 고를 수도 있습니다',
-    chips: [1, 2, 3, 4, 5].map((n) => ({ days: n, label: `${n}D` })),
+    chips: dayChips(5),
   };
   // 출장·외근의 차량 조회(2026-10-03 사용자 지정). 켜면 폼의 날짜·시간에 빈 차량을 폼 아래에 보여 주고,
   // 누르면 그 차량을 그 시간으로 신청한다. 화면만의 값이라 HR 신청서에는 들어가지 않는다.
@@ -399,8 +401,12 @@ export function fieldsFor(form) {
   }
   if (k === 'trip') {
     // 출장경비는 묻지 않는다. 늘 선급 예산이라(2026-10-02 사용자 지정) blankForm 이 깔아 둔 'Y' 를 그대로 보낸다.
-    const fields = [{ ...date, label: '출발일' }, days,
-      { ...start, label: '출발', hint: '정시 단위' }, { ...end, label: '도착', hint: '정시 단위' },
+    // 날짜·시각은 두 줄이고 그 아래 며칠간이 한 줄이다(2026-10-06 사용자 지정, 전에는 세 줄) — 출발일 오른쪽에 출발 시각(묶음 go),
+    // 도착일 오른쪽에 도착 시각(묶음 back), 그 아래 "며칠간" 이름이 칩(1D~7D) 왼쪽에 붙은 한 줄(inline). 도착일은 며칠간에서
+    // 나오는 값이지만 달력으로 고르면 며칠간이 따라 바뀐다. 시각 칸은 줄의 오른쪽 3할쯤이다(sidepanel.css).
+    const fields = [{ ...date, label: '출발일', group: 'go' }, { ...start, label: '출발', hint: '정시 단위', group: 'go' },
+      { key: 'dateTo', label: '도착일', type: 'date', required: true, group: 'back' }, { ...end, label: '도착', hint: '정시 단위', group: 'back' },
+      { ...days, chips: dayChips(7), inline: true },
       { key: 'purpose', label: '목적', type: 'text', required: true, hint: '예) 착수회의 참석 (대전)' },
       // 켜면 결재요청이 올라간 뒤 eclass 에 여비계산서(사전정산)를 자동으로 만든다(2026-10-02 사용자 지정).
       // 그 옆에 차량 조회가 나란히 선다(같은 묶음 opts).
@@ -734,6 +740,82 @@ export const STATUS = { TEMP: '1', WAIT: '2', REQUESTED: '3', REJECTED: '4', APP
 const STATUS_LABEL = { [STATUS.WAIT]: '신청', [STATUS.REQUESTED]: '신청', [STATUS.APPROVED]: '승인' };
 export const statusLabel = (it) => STATUS_LABEL[it?.status] || it?.statusName || '';
 
+/**
+ * 취소신청이 걸린 원 문서의 기록(storage 키). { [원 문서번호]: { at, cancelDocNo } }
+ * 취소신청서가 결재돼도 원 문서는 HR 목록에서 "결재완료"로 그대로다(2026-10-07 실제 목록 — HR 에서 출장 취소신청이 승인된 뒤에도
+ * 패널은 원 출장을 "승인"으로 보였다). 그래서 패널이 올린 취소신청을 적어 두고, HR 목록의 취소신청서는 내용을 읽어(src/hr.js 의
+ * hrCancelRefs) 어느 원 문서를 무르는지 이곳에 잇는다. 취소신청서의 결재 상태로 원 문서가 "취소 중"인지 "취소됨"인지 가린다.
+ */
+export const CANCELLING_KEY = 'attendCancelling';
+const CANCELLING_DAYS = 365;
+export const CANCELLING_LABEL = '취소 중';
+export const CANCELLED_LABEL = '취소';
+
+/** HR 목록의 취소신청서인가 — 패널이 모르는 신청서 가운데 취소신청 화면(apprcncl…)의 것이거나 이름에 "취소"가 든 것. */
+export function isCancelDoc(it) {
+  return !!it && !FORM_BY_ID[it.formId] && (/\/apprcncl/i.test(it.api || '') || /취소/.test(it.formName || ''));
+}
+
+/**
+ * 원 문서마다 취소가 어디까지 왔는가. 'pending' = 취소 중(취소신청서 결재 전, 또는 패널이 올렸는데 아직 목록에서 그 취소신청서를
+ * 못 이었다), 'done' = 취소됨(취소신청서 결재완료). 취소신청서가 반려·회수됐으면 넣지 않는다. 원 문서가 결재완료일 때만 본다.
+ * @param {object[]} items listItems 의 결과(취소신청서까지 전부)
+ * @param {object} kept CANCELLING_KEY 에 담아 둔 것
+ * @returns {Map<string, 'pending'|'done'>}
+ */
+export function cancellingOf(items, kept) {
+  const out = new Map();
+  const byNo = new Map((items || []).map((it) => [it.docNo, it]));
+  const stateOf = (c) => (c.status === STATUS.APPROVED ? 'done' : c.status === STATUS.WAIT || c.status === STATUS.REQUESTED ? 'pending' : '');
+  const put = (docNo, state) => {
+    const it = byNo.get(docNo);
+    if (!state || !it || it.status !== STATUS.APPROVED || out.get(docNo) === 'done') return;
+    out.set(docNo, state);
+  };
+  // 목록의 취소신청서가 원 문서번호를 직접 들고 있으면(befDocNo) 그것으로 잇는다.
+  for (const c of items || []) if (c.befDocNo && isCancelDoc(c)) put(c.befDocNo, stateOf(c));
+  for (const [docNo, v] of Object.entries(kept || {})) {
+    const c = v?.cancelDocNo ? byNo.get(v.cancelDocNo) : null;
+    // 이은 취소신청서가 목록에 있으면 그 상태를, 없으면(아직 못 이었다·읽은 기간 밖) 취소 중으로 본다.
+    put(docNo, c ? stateOf(c) : 'pending');
+  }
+  return out;
+}
+
+/**
+ * 담아 둔 취소 기록에서 끝난 것을 걷는다 — 원 문서가 목록에 결재완료가 아닌 상태로 보이면, 이은 취소신청서가 반려·회수·삭제됐으면,
+ * 그리고 오래된 것. 목록에 아예 없는 것은 읽은 기간 밖일 수 있어 남긴다(오래되면 걷힌다).
+ */
+export function pruneCancelling(kept, items, now = Date.now()) {
+  const out = {};
+  const byNo = new Map((items || []).map((it) => [it.docNo, it]));
+  const dead = new Set([STATUS.REJECTED, STATUS.RECALLED, STATUS.DELETED, STATUS.TEMP]);
+  for (const [docNo, v] of Object.entries(kept || {})) {
+    const it = byNo.get(docNo);
+    if (it && it.status !== STATUS.APPROVED) continue;
+    const c = v?.cancelDocNo ? byNo.get(v.cancelDocNo) : null;
+    if (c && dead.has(c.status)) continue;
+    if (!(now - (+v?.at || 0) < CANCELLING_DAYS * 86400000)) continue;
+    out[docNo] = v;
+  }
+  return out;
+}
+
+/**
+ * 취소신청서를 읽어 알게 된 원 문서번호들을 기록에 잇는다. 이미 있는 기록은 그 취소신청서 번호만 채운다.
+ * @param {object} kept CANCELLING_KEY 에 담아 둔 것
+ * @param {string} cancelDocNo 취소신청서 번호
+ * @param {string[]} befs 그 취소신청서가 무르는 원 문서번호들
+ */
+export function linkCancel(kept, cancelDocNo, befs, now = Date.now()) {
+  const out = { ...(kept || {}) };
+  for (const bef of befs || []) {
+    if (!bef) continue;
+    out[bef] = { at: out[bef]?.at || now, cancelDocNo };
+  }
+  return out;
+}
+
 /** 패널 폼으로 되돌릴 수 있는 종류. 이름은 HR 목록의 근태종류 이름이고, 값은 그 종류가 올라가는 신청서다. */
 const FILLABLE = {
   외근: 'TRO', 교육: 'TRO', 국내출장: 'TR', 외출: 'ET', '정기 건강검진': 'LV', 연차: 'LV', 체력관리: 'LV', 유연근무: 'FW',
@@ -781,6 +863,8 @@ export function listItem(row) {
     kindName, from, to, start, end, gubun: row.wrkGubunName || '', reason: row.reqRsn || '', rejectNote: row.aprvCmnt || '',
     // 신청한 날. 근태 날짜가 없는 문서(취소신청서)를 기간에 놓을 때 쓴다.
     requested: DATE_RE.test(String(row.reqstDate || '').slice(0, 10)) ? String(row.reqstDate).slice(0, 10) : '',
+    // 취소신청서면 무르는 원 문서의 번호(취소신청 표의 칸 이름 — src/hr.js 의 cancelRow). 목록에 이 칸이 오는지는 아직 못 봤다.
+    befDocNo: row.befDocNo ? String(row.befDocNo) : '',
     api: String(row.pgmUrlAd || '').replace(/\/view$/, ''), actions,
     summary: [kindName, when, time].filter(Boolean).join(' '),
     // HR 화면에서 이 문서를 열 때 쓰는 값. 문서함에서 줄을 두 번 누르면 사이트가 이것들을 묶어 탭을 연다
@@ -858,15 +942,20 @@ const GROUP_OF = Object.fromEntries(PLAN_GROUPS.flatMap((g) => g.kinds.map((k) =
  * 그 기간에 걸친 것만, 날짜가 빠른 순으로 준다. 임시저장·반려·회수는 잡힌 일정이 아니므로 뺀다.
  * 취소신청서처럼 패널이 모르는 신청서도 뺀다 — 원래 건과 같은 날짜로 한 번 더 보이게 된다.
  * @param {object[]} items listItems 의 결과
+ * @param {Map<string,string>|null} [cancelling] 취소가 걸린 문서번호(cancellingOf)
  */
-export function plansIn(items, from, to) {
+export function plansIn(items, from, to, cancelling = null) {
   const live = new Set([STATUS.WAIT, STATUS.REQUESTED, STATUS.APPROVED]);
+  // 취소신청이 걸린 건은 상태를 "취소 중"으로 적고(홈 카드가 종류 딱지 아래에 적는다), 취소가 결재된 건은 잡힌 일정이 아니라 뺀다.
+  const off = cancelling instanceof Map ? cancelling : new Map();
   return (items || [])
     .filter((it) => FORM_BY_ID[it.formId] && it.from && live.has(it.status) && it.from <= to && (it.to || it.from) >= from)
+    .filter((it) => off.get(it.docNo) !== 'done')
     .map((it) => ({
       docNo: it.docNo, label: PLAN_LABEL[it.kindName] || it.kindName, group: GROUP_OF[it.kindName] || '', from: it.from, to: it.to || it.from,
       // state 는 결재 상태를 줄인 말(신청·승인 — statusLabel)이다. 홈 카드가 종류 딱지 아래에 적는다.
-      start: it.start, end: it.end, gubun: it.gubun, status: it.statusName, state: statusLabel(it), reason: it.reason,
+      start: it.start, end: it.end, gubun: it.gubun, status: it.statusName, state: off.has(it.docNo) ? CANCELLING_LABEL : statusLabel(it), reason: it.reason,
+      cancelling: off.has(it.docNo),
     }))
     .sort((a, b) => `${a.from} ${a.start}`.localeCompare(`${b.from} ${b.start}`));
 }

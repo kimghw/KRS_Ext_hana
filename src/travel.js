@@ -853,19 +853,23 @@ export const STEP_POST_WRITING = '사후정산 작성';
  * "사전정산 완료"가 된다. 출장자가 여럿이면 화면은 고른 출장자(#drtraveler)의 계산서다.
  *
  * @param {Document} doc
- * @returns {{step: string, travelers: {trseq:string, name:string, selected:boolean}[], confirm: [string,string][]|null}|null}
- *   confirm 은 확정 폼이 그대로 제출될 때 나갈 칸(없으면 null). 계산서 화면이 아니면 null 이다
+ * 화면에는 늘 **삭제** 폼(CalPrint/Delete 로 가는 seq·요청 확인 토큰)도 선다 — 계산서 전체를 지운다(출장 취소 때 쓴다).
+ *
+ * @returns {{step: string, travelers: {trseq:string, name:string, selected:boolean}[], confirm: [string,string][]|null, del: [string,string][]|null}|null}
+ *   confirm 은 확정 폼이 그대로 제출될 때 나갈 칸(없으면 null), del 은 삭제 폼의 칸이다. 계산서 화면이 아니면 null 이다
  */
 export function parseCalPage(doc) {
   const steps = doc.querySelector('.bt-steps');
   if (!steps) return null;
   const travelers = [...doc.querySelectorAll('#drtraveler option')].map((o) =>
     ({ trseq: o.getAttribute('value') || '', name: clean(o), selected: o.hasAttribute('selected') }));
-  const form = [...doc.querySelectorAll('form')].find((f) => /\/CalPrint\/Confirm$/i.test(f.getAttribute('action') || ''));
+  const formOf = (re) => [...doc.querySelectorAll('form')].find((f) => re.test(f.getAttribute('action') || ''));
+  const fields = (f) => (f ? [...f.querySelectorAll('input[name]')].map((i) => [i.getAttribute('name'), i.getAttribute('value') || '']) : null);
   return {
     step: clean(steps.querySelector('.bt-step.active .lbl')),
     travelers,
-    confirm: form ? [...form.querySelectorAll('input[name]')].map((i) => [i.getAttribute('name'), i.getAttribute('value') || '']) : null,
+    confirm: fields(formOf(/\/CalPrint\/Confirm$/i)),
+    del: fields(formOf(/\/CalPrint\/Delete$/i)),
   };
 }
 

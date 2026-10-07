@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { sameName, mineReason, collectMine, datesFrom } from '../src/mine.js';
+import { sameName, mineReason, collectMine, datesFrom, ownerOfMine } from '../src/mine.js';
 import { parseDayCounts } from '../src/parse.js';
 import { extractCars } from '../src/rentcar.js';
 
@@ -137,5 +137,20 @@ console.log('훑기가 기대는 전제 (실제 차량 페이지)');
   t('이웃 달 칸(10/1)은 0건이 아니라 모름 — 지름길을 타면 안 된다', () =>
     assert.equal(counts.has('2026-10-01'), false));
 }
+
+console.log('내 것이라고 표시된 줄의 예약자(로그인한 사람의 이름)');
+t('확신할 수 있는 날의 회의실 줄에서 첫 예약자', () => {
+  const days = [
+    { kind: 'car', date: '2026-09-17', confident: true, reservations: [{ mine: true, owner: '운전자' }] },
+    { kind: 'room', date: '2026-09-17', confident: false, reservations: [{ mine: true, owner: '못 믿을 날' }] },
+    { kind: 'room', date: '2026-09-18', confident: true, reservations: [{ mine: false, owner: '남' }, { mine: true, owner: ' 홍길동 ' }] },
+  ];
+  assert.equal(ownerOfMine(days), '홍길동');
+});
+t('없으면 빈 글', () => {
+  assert.equal(ownerOfMine([]), '');
+  assert.equal(ownerOfMine(null), '');
+  assert.equal(ownerOfMine([{ kind: 'room', confident: true, reservations: [{ mine: true, owner: '' }] }]), '');
+});
 
 console.log(`\n통과 ${pass}건`);

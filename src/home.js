@@ -35,13 +35,14 @@
 
 import { scanDays } from './site.js';
 import { scanCarDays } from './rentcar.js';
-import { collectMine, datesFrom } from './mine.js';
+import { collectMine, datesFrom, ownerOfMine } from './mine.js';
+import { portalUserId, lookupName } from './whoami.js';
 import { MONTH_DAYS } from './monthcache.js';
 import { fmtTime, todayStr } from './parse.js';
 import { AuthError } from './net.js';
 import { PORTAL_HOME_URL } from './config.js';
 import { CARD_STYLE, ICON, setChip } from './homecard.js';
-import { PLAN_GROUPS, EVIDENCE_ACCEPT, acceptsFile } from './attend.js';
+import { PLAN_GROUPS, EVIDENCE_ACCEPT, acceptsFile, CANCELLING_KEY } from './attend.js';
 import { PLANS_KEY, plansFresh, plansToShow, TRIP_LOOKBACK_DAYS } from './plans.js';
 import { BACK_KEY, SENT_KEY, STAGES_KEY, backWeeksOf, settledBy, stagesFresh, stageNote, loadStages as readStages } from './settling.js';
 import { TRANSPORTS, tripDocFor, tripStage, tripIconState, legsOfRows, pickOfRow, describeTrans } from './travel.js';
@@ -737,6 +738,7 @@ export function createHomeCard(doc, deps = {}) {
   const readFile = deps.readFile || defaultReadFile;
   const visible = deps.visible || (() => doc.visibilityState !== 'hidden');
   const alive = deps.alive || defaultAlive;
+  const findName = deps.lookupName || lookupName;
 
   // 확장을 다시 올렸거나 두 번 불렸으면 먼저 것은 치운다.
   doc.getElementById(ROOT_ID)?.remove();
@@ -752,12 +754,19 @@ export function createHomeCard(doc, deps = {}) {
   let back = TRIP_LOOKBACK_DAYS;
   let sent = {};
   let stages = null;
+  // 패널이 취소신청을 올려 둔 건의 기록(src/attend.js 의 CANCELLING_KEY) — 그 건의 상태가 "취소 중"이다.
+  let cancelling = null;
   let stageRun = null;     // 지금 도는 여비계산서 목록 읽기
   // 출장 줄의 아이콘이 보는 것: 보관함의 증빙(MARKS_KEY — 아직 모르면 null), 패널에서 고른 가는 편·오는 편(PICKS_KEY),
   // 사전정산의 가는 편·오는 편(LEGS_KEY — 오늘 읽은 것만).
   let kept = null;
   let picks = {};
   let legs = { day: '', by: {} };
+  // 내 이름을 아직 모르면 페이지를 연 동안 한 번 알아본다(learnName). nameNote 는 못 알아낸 까닭(경고 줄에 적는다),
+  // ownName 은 이 카드가 알아내 담은 이름 — 그 storage 변경으로는 다시 훑지 않는다(이미 그 이름으로 훑는다).
+  let nameTried = false;
+  let nameNote = '';
+  let ownName = '';
   let legRun = null;             // 지금 도는 사전정산 교통편 읽기
   const legTried = new Set();    // 이 화면에서 읽어 본 계산서 — 못 읽은 것을 그릴 때마다 다시 두드리지 않는다
   let marksAsked = false;        // 보관함을 줄여 적어 달라고 배경에 부탁했는가(적어 둔 것이 없을 때 한 번)
@@ -895,7 +904,7 @@ export function createHomeCard(doc, deps = {}) {
   function pick() {
     if (!view.raw) return;
     view.plans = planItems(view.raw.items, view.raw.start, view.raw.end,
-      { backDays: back, settled: settledBy({ sent, stages }), note: (p) => stageNote(p, stages) });
+      { backDays: back, settled: settledBy({ sent, stages }), note: (p) => stageNote(p, stages), cancelling });
     paint();
   }
 
@@ -1170,7 +1179,11 @@ export function createHomeCard(doc, deps = {}) {
     ui.note.title = new Date(cache.at).toLocaleString();
 
     const warn = [];
-    if (!name) warn.push('이름을 넣으면 예약자 이름으로도 찾습니다 — 예약 패널의 "설정 및 연결"');
+    if (!name) {
+      warn.push(nameNote
+        ? `이름을 e-Class 에서 읽지 못했습니다(${nameNote}). 예약 패널의 "설정 및 연결"에 이름을 넣으면 예약자 이름으로도 찾습니다`
+        : '이름을 넣으면 예약자 이름으로도 찾습니다 — 예약 패널의 "설정 및 연결"');
+    }
     if (cache.skippedDates?.length) warn.push(`⚠ ${cache.skippedDates.length}일은 확인 불가라 제외했습니다`);
     if (cache.unread?.length) warn.push(`⚠ ${cache.unread.length}일은 아예 읽지 못했습니다`);
     warn.push(...(cache.failed || []));
@@ -1195,6 +1208,42 @@ export function createHomeCard(doc, deps = {}) {
   }
 
   /**
+   * 내 이름을 아직 모르면 홈 머리글의 사용자 ID 로 인명을 찾아 채운다(src/whoami.js — 쪽지의 받는 사람 찾기와 같은 조회.
+   * 포털 언어와 상관없이 회의실 목록의 예약자 표기와 같은 한글 이름을 준다). 못 알아내면 그 까닭을 남긴다(경고 줄).
+   * @returns {Promise<string>} 알아낸(또는 그 사이에 패널에서 넣은) 이름. 못 알아냈으면 빈 글
+   */
+  async function learnName() {
+    const id = portalUserId(doc);
+    if (!id) {
+      nameNote = '홈 머리글에서 사용자 ID 를 찾지 못했습니다';
+      return '';
+    }
+    try {
+      const found = await findName(id);
+      if (!found) {
+        nameNote = `인명에서 ${id} 를 찾지 못했습니다`;
+        return '';
+      }
+      return keepName(found);
+    } catch (err) {
+      nameNote = `인명 조회 실패: ${err.message}`;
+      return '';
+    }
+  }
+
+  /**
+   * 알아낸 이름을 담는다. 그 사이에 패널에서 직접 넣었으면 그것을 둔다 — 사람이 넣은 것을 지우지 않는다.
+   * 자기가 담은 것으로는 다시 훑지 않도록 적어 둔다(onChanged).
+   */
+  async function keepName(found) {
+    const cur = String((await storage.get('myName'))?.myName || '').trim();
+    if (cur) return cur;
+    ownName = found;
+    await storage.set({ myName: found });
+    return found;
+  }
+
+  /**
    * 담긴 것을 보여주고, 필요하면 훑는다.
    *   오늘 읽어 둔 것이 없다       → 훑는다(진행 막대). 하루에 한 번이 여기다
    *   오늘 읽어 둔 것이 있다       → 그것만 보여준다. 몇 시간이 지났어도 다시 훑지 않는다
@@ -1209,7 +1258,13 @@ export function createHomeCard(doc, deps = {}) {
     running = (async () => {
       const saved = await storage.get(['myName', 'justBooked', 'spanDays', CACHE_KEY]);
       if (disposed) return;
-      const name = String(saved.myName || '').trim();
+      let name = String(saved.myName || '').trim();
+      // 이름을 아직 모르면 먼저 알아본다 — 그래야 이번 훑기부터 예약자 이름으로도 찾는다.
+      if (!name && !nameTried) {
+        nameTried = true;
+        name = await learnName();
+        if (disposed) return;
+      }
       const booked = Array.isArray(saved.justBooked) ? saved.justBooked : [];
       const days = spanOf(saved.spanDays);
       const start = today();
@@ -1234,6 +1289,13 @@ export function createHomeCard(doc, deps = {}) {
         });
         // 도중에 껐다. 반쯤 읽은 것을 담으면 다음에 켰을 때 "다 읽은 것"처럼 보인다.
         if (disposed) return;
+
+        // 이름을 아직 모르는데 사이트가 내 것이라고 표시한(수정·삭제 버튼) 회의실 줄이 있으면 그 예약자가 곧 내 이름이다.
+        if (!name) {
+          const own = ownerOfMine(res.days);
+          if (own) name = await keepName(own);
+          if (disposed) return;
+        }
 
         if (!res.days.length) {
           // 한 날도 못 읽었다. 목록이 아니라 그 사실을 보여주고, 담지도 않는다 — 다음에 열면 다시 시도한다.
@@ -1289,12 +1351,13 @@ export function createHomeCard(doc, deps = {}) {
       return planRun;
     }
     planRun = (async () => {
-      const saved = await storage.get(['spanDays', PLANS_KEY, HIDDEN_KEY, BACK_KEY, SENT_KEY, STAGES_KEY, MARKS_KEY, PICKS_KEY, LEGS_KEY]);
+      const saved = await storage.get(['spanDays', PLANS_KEY, HIDDEN_KEY, BACK_KEY, SENT_KEY, STAGES_KEY, MARKS_KEY, PICKS_KEY, LEGS_KEY, CANCELLING_KEY]);
       if (disposed) return;
       hidden = new Set(Array.isArray(saved[HIDDEN_KEY]) ? saved[HIDDEN_KEY] : []);
       const start = today();
       back = backWeeksOf(saved[BACK_KEY]) * 7;
       sent = saved[SENT_KEY] || {};
+      cancelling = objectOr(saved[CANCELLING_KEY], null);
       stages = stagesFresh(saved[STAGES_KEY], start) ? saved[STAGES_KEY] : null;
       kept = objectOr(saved[MARKS_KEY], null);
       picks = objectOr(saved[PICKS_KEY], {});
@@ -1359,7 +1422,13 @@ export function createHomeCard(doc, deps = {}) {
     // 패널이 예약·취소·수정 뒤 캐시를 지웠거나 넣은 기록(justBooked)을 고쳤다 — 이 확장으로 예약이 바뀐 것이다.
     const gone = CACHE_KEY in changes && changes[CACHE_KEY].newValue === undefined;
     // 이름·기간이 바뀌면 담긴 것은 다른 조건으로 읽은 것이라 더는 맞지 않는다.
-    const settings = ['myName', 'justBooked', 'spanDays'].some((k) => k in changes);
+    // 다만 이 카드가 알아내 담은 이름이면 넘긴다 — 이미 그 이름으로 훑고 있다.
+    const keys = ['myName', 'justBooked', 'spanDays'].filter((k) => k in changes);
+    if (ownName && 'myName' in changes && String(changes.myName.newValue || '').trim() === ownName) {
+      ownName = '';
+      keys.splice(keys.indexOf('myName'), 1);
+    }
+    const settings = keys.length > 0;
     if (gone || settings) wantRescan();
     // 근태: 패널이 근태를 올리거나 거둬들인 뒤 담아 둔 것을 지웠으면 다시 읽고, 누군가 새로 담았으면 그것을 그린다.
     // 기간이 바뀌면 담긴 것에서 다시 고른다(HR 을 다시 읽을 일은 아니다).
@@ -1375,6 +1444,11 @@ export function createHomeCard(doc, deps = {}) {
     }
     if (SENT_KEY in changes) {
       sent = changes[SENT_KEY].newValue || {};
+      pick();
+    }
+    // 패널에서 취소신청을 올렸다 — 그 건의 상태를 "취소 중"으로 적는다.
+    if (CANCELLING_KEY in changes) {
+      cancelling = objectOr(changes[CANCELLING_KEY].newValue, null);
       pick();
     }
     if (STAGES_KEY in changes) {

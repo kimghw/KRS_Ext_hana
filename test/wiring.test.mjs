@@ -362,9 +362,16 @@ console.log('Claude 가 안 붙어 있으면 말로 찾기 칸이 잠긴다');
     assert.equal(doc.getElementById('askInput').placeholder, 'claude가 연결되지 않았습니다'));
   const helps = [...doc.querySelectorAll('.cli-help')];
   t('두 말 칸(말로 찾기·말로 채우기) 아래와 설정에 연결 지침 복사 버튼이 나온다', () => {
-    assert.deepEqual(helps.map((p) => p.parentElement.className), ['at-chat card', 'ask card off']);
+    assert.deepEqual(helps.map((p) => p.parentElement.className), ['at-chat card off', 'ask card off']);
     assert.ok(helps.every((p) => !p.hidden && p.querySelector('button.cli-guide-copy')));
     assert.equal(doc.getElementById('cliGuide').hidden, false);
+  });
+  t('근태의 말로 채우기 칸은 규칙으로 읽히니 열려 있되, 연결된 것으로 오인하지 않게 회색(off)이고 플레이스홀더에 까닭이 적힌다', () => {
+    const input = doc.getElementById('atChatInput');
+    assert.ok(!input.disabled, '말로 채우기 칸이 잠겼다');
+    assert.ok(doc.querySelector('.at-chat').classList.contains('off'));
+    assert.equal(input.placeholder, 'claude 미연결 — 규칙으로만 읽습니다');
+    assert.match(input.title, /규칙으로 읽고 목적은 채우지 못합니다/);
   });
   doc.querySelector('section.ask .cli-guide-copy').click();
   await new Promise((r) => setTimeout(r, 30));
@@ -389,6 +396,10 @@ console.log('API 키가 있으면 말로 찾기 칸이 열린다');
   t('말 칸의 연결 지침 줄은 숨고, 설정의 버튼은 CLI 가 없으니 남는다', () => {
     assert.ok([...doc.querySelectorAll('.cli-help')].every((p) => p.hidden));
     assert.equal(doc.getElementById('cliGuide').hidden, false);
+  });
+  t('근태의 말로 채우기 칸도 제 낯으로 돌아온다 — 회색이 걷히고 예시 플레이스홀더', () => {
+    assert.ok(!doc.querySelector('.at-chat').classList.contains('off'));
+    assert.equal(doc.getElementById('atChatInput').placeholder, '예) 내일 오후 2~4시 부산시청 외근');
   });
 }
 
@@ -1051,9 +1062,9 @@ console.log('근태 탭');
   t('말로 채우면 종류가 옮겨 가고, 적어 둔 목적이 따라와 바로 올릴 수 있다 (여비계산서 사전정산은 꺼져 있다)', () => {
     assert.equal(doc.querySelector('#atKinds .at-kind.active').textContent, '출장');
     assert.equal(doc.getElementById('at_dateFrom').value, '2026-10-20');
-    assert.equal(doc.getElementById('at_dateTo'), null, '종료일 칸은 따로 없다 — 며칠간으로 받는다');
+    assert.equal(doc.getElementById('at_dateTo').value, '2026-10-20', '도착일 칸은 며칠간에서 나오는 끝나는 날이다(당일이면 출발일과 같다) — 달력으로 고르면 며칠간이 따라 바뀐다');
     assert.deepEqual([doc.getElementById('at_start').value, doc.getElementById('at_end').value], ['07:00', '20:00']);
-    assert.deepEqual([...doc.querySelectorAll('#atFields .at-field')].map((n) => n.dataset.key), ['dateFrom', 'days', 'start', 'end', 'purpose', 'settle', 'car']);
+    assert.deepEqual([...doc.querySelectorAll('#atFields .at-field')].map((n) => n.dataset.key), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'purpose', 'settle', 'car']);
     assert.deepEqual([doc.getElementById('at_settle').type, doc.getElementById('at_settle').checked], ['checkbox', false]);
     assert.deepEqual([...doc.querySelector('#atFields .at-group.at-opts').children].map((n) => n.dataset.key), ['settle', 'car'], '차량 조회는 사전정산 옆(같은 줄)에 선다');
     assert.deepEqual([doc.getElementById('at_car').type, doc.getElementById('at_car').checked, doc.getElementById('atCars')], ['checkbox', false, null]);
@@ -1169,43 +1180,57 @@ console.log('근태 탭');
   tick(false);
   type('at_dateFrom', '2026-10-20');
   type('at_purpose', '과제 협의');
-  t('출장의 며칠간은 1D~5D 칩과 그 오른쪽 달력이다 — 1D 가 골라져 있고 달력에는 끝나는 날이 적혀 있다', () => {
-    assert.deepEqual(dayChips().map((b) => b.textContent), ['1D', '2D', '3D', '4D', '5D']);
+  t('출장의 며칠간은 1D~7D 칩 한 줄이고, 끝나는 날은 도착일 칸이다 — 1D 가 골라져 있고 도착일에는 끝나는 날이 적혀 있다', () => {
+    assert.deepEqual(dayChips().map((b) => b.textContent), ['1D', '2D', '3D', '4D', '5D', '6D', '7D']);
     assert.deepEqual(activeDays(), ['1D']);
-    const end = doc.getElementById('at_days');
+    const end = doc.getElementById('at_dateTo');
     assert.deepEqual([end.type, end.value, end.min], ['date', '2026-10-20', '2026-10-20']);
-    assert.equal(end.parentElement, dayChips()[0].parentElement, '달력은 칩과 같은 줄에 있다');
+    assert.equal(doc.querySelector('.at-field[data-key="days"] input[type="date"]'), null, '며칠간 줄에는 달력이 없다');
+  });
+  t('출발일 오른쪽에 출발 시각, 도착일 오른쪽에 도착 시각이 서고, 그 아래 며칠간은 이름이 칩 왼쪽에 붙은 한 줄이다(2026-10-06 사용자 지정)', () => {
+    const go = doc.querySelector('#atFields .at-group.at-go');
+    const back = doc.querySelector('#atFields .at-group.at-back');
+    assert.deepEqual([...go.children].map((n) => n.dataset.key), ['dateFrom', 'start']);
+    assert.deepEqual([...back.children].map((n) => n.dataset.key), ['dateTo', 'end']);
+    const days = doc.querySelector('#atFields .at-field[data-key="days"]');
+    assert.deepEqual([days.classList.contains('inline'), days.classList.contains('wide'), days.parentElement.id], [true, true, 'atFields']);
+    assert.equal(back.nextElementSibling, days, '며칠간 줄은 도착일 줄 바로 아래다');
   });
   t('출장의 출발·도착은 정시 목록에서 고른다 (HR 이 출장의 분 칸을 잠가 둔다)', () => {
     assert.equal(doc.getElementById('at_end').tagName, 'SELECT');
     assert.deepEqual([timesOf('at_start').length, timesOf('at_end').includes('20:30')], [24, false]);
   });
   dayChips()[2].click();
-  t('3D 칩을 누르면 올릴 내용의 기간이 사흘로 바뀌고 달력의 끝나는 날이 따라간다', () => {
+  t('3D 칩을 누르면 올릴 내용의 기간이 사흘로 바뀌고 도착일이 따라간다', () => {
     assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/22 07:00~20:00/);
-    assert.equal(doc.getElementById('at_days').value, '2026-10-22');
+    assert.equal(doc.getElementById('at_dateTo').value, '2026-10-22');
     assert.deepEqual(activeDays(), ['3D']);
   });
   const pickEnd = (value) => {
-    const input = doc.getElementById('at_days');
+    const input = doc.getElementById('at_dateTo');
     input.value = value;
     input.dispatchEvent(new window.Event('change', { bubbles: true }));
   };
-  pickEnd('2026-10-24');
-  t('달력에서 끝나는 날을 고르면 닷새가 되고 5D 칩이 켜진다', () => {
-    assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/24 07:00~20:00/);
-    assert.deepEqual(activeDays(), ['5D']);
+  pickEnd('2026-10-23');
+  t('도착일 달력에서 끝나는 날을 고르면 나흘이 되고 4D 칩이 켜진다', () => {
+    assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/23 07:00~20:00/);
+    assert.deepEqual(activeDays(), ['4D']);
   });
   pickEnd('2026-10-26');
-  t('칩에 없는 날 수(이레)를 달력에서 고르면 칩은 모두 꺼진다', () => {
+  t('이레까지는 칩이 있다 — 7D 가 켜진다', () => {
     assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/26 07:00~20:00/);
+    assert.deepEqual(activeDays(), ['7D']);
+  });
+  pickEnd('2026-10-27');
+  t('칩에 없는 날 수(여드레)를 도착일에서 고르면 칩은 모두 꺼진다', () => {
+    assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/27 07:00~20:00/);
     assert.deepEqual(activeDays(), []);
   });
   pickEnd('2026-10-19');
   t('시작일보다 이른 날은 받지 않고 되돌린다', () => {
-    assert.equal(doc.getElementById('at_days').value, '2026-10-26');
+    assert.equal(doc.getElementById('at_dateTo').value, '2026-10-27');
     assert.match(doc.getElementById('atStatus').textContent, /끝나는 날은 시작일부터/);
-    assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/26/);
+    assert.match(doc.getElementById('atNeed').textContent, /출장 10\/20~10\/27/);
   });
 
   // 휴가: 연차·체력단련을 안에서 고르고, 구분은 하루짜리 연차에만 있다

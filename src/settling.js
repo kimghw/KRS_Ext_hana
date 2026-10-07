@@ -11,7 +11,7 @@
 // 읽을 때마다 거기에 덧대 준다(noteStages) — 패널에서 정산을 마치면 홈 카드도 곧 따라온다.
 // 목록을 읽는 길(src/trip.js 의 tripList)은 주입받는다 — 이 파일은 규칙과 저장소만 다룬다.
 
-import { itemsIn, isPast, STATUS } from './attend.js';
+import { itemsIn, isPast, STATUS, CANCELLING_KEY } from './attend.js';
 import { tripDocFor, tripStage } from './travel.js';
 import { todayStr } from './parse.js';
 
@@ -111,9 +111,13 @@ export function dropSettled(items, today, { settled = () => '', keep = '' } = {}
  * @returns {Promise<{backDays: number, settled: Function, stages: object|null}>}
  */
 export async function tripRule({ storage = chrome.storage.local, today = todayStr() } = {}) {
-  const saved = await storage.get([BACK_KEY, SENT_KEY, STAGES_KEY]);
+  const saved = await storage.get([BACK_KEY, SENT_KEY, STAGES_KEY, CANCELLING_KEY]);
   const stages = stagesFresh(saved?.[STAGES_KEY], today) ? saved[STAGES_KEY] : null;
-  return { backDays: backWeeksOf(saved?.[BACK_KEY]) * 7, settled: settledBy({ sent: saved?.[SENT_KEY], stages }), stages };
+  return {
+    backDays: backWeeksOf(saved?.[BACK_KEY]) * 7, settled: settledBy({ sent: saved?.[SENT_KEY], stages }), stages,
+    // 취소신청을 올려 둔 건의 기록 — 현황·홈 카드가 그 건의 상태를 "취소 중"으로 적는다.
+    cancelling: saved?.[CANCELLING_KEY] && typeof saved[CANCELLING_KEY] === 'object' ? saved[CANCELLING_KEY] : null,
+  };
 }
 
 /**
