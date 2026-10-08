@@ -132,12 +132,25 @@ console.log('증빙은 글자를 먼저 뽑는다 — PDF 는 글자만, 그림�
   });
   await ta('증빙이 아닌 작업과 첨부 없는 증빙은 글자를 뽑지 않는다', async () => {
     const text = async () => assert.fail('부르면 안 됨');
-    for (const msg of [{ task: 'parse', input: '내일', files: [png] }, { task: 'receipt', input: '출장 정보' }]) {
+    for (const msg of [{ task: 'parse', input: '내일', files: [png] }, { task: 'receipt', input: '출장 정보' }, { task: 'gongmun', input: '품의 종류: 교육' }]) {
       let opts;
       await handle(msg, { log, text, run: async (_t, _i, _f, o) => { opts = o; return { data: {} }; } });
       assert.deepEqual(opts, { lean: false });
       assert.equal('read' in logged.at(-1), false);
     }
+  });
+  await ta('공문 문서(견적서·웹페이지 캡처)도 증빙처럼 글자를 먼저 뽑는다(2026-10-08)', async () => {
+    let seen;
+    const tile = { name: '화면캡처_inflearn.com_2026-10-08_1.png', type: 'image/png', dataUrl: 'data:image/png;base64,AAAA' };
+    const res = await handle({ task: 'gongmun', input: '품의 종류: 교육', files: [tile] }, {
+      log,
+      text: async (input, files) => ({ input: `${input}\n\nOCR 글자`, files, read: [`${files[0].name}: OCR 300자(믿음 80) — OCR 글자와 그림을 같이 보냄`], lean: false }),
+      run: async (_t, input, files, opts) => { seen = { input, files, opts }; return { data: { docType: 'course', gist: 'x', summary: 's' } }; },
+    });
+    assert.equal(res.ok, true);
+    assert.deepEqual(seen, { input: '품의 종류: 교육\n\nOCR 글자', files: [tile], opts: { lean: false } });
+    assert.deepEqual(logged.at(-1).read, ['화면캡처_inflearn.com_2026-10-08_1.png: OCR 300자(믿음 80) — OCR 글자와 그림을 같이 보냄']);
+    assert.equal(typeof logged.at(-1).textMs, 'number');
   });
   await ta('글자만 보내는 빠른 길: 표준 입력 한 줄에 글만 실리고 도구는 없다', async () => {
     const call = cliCall({ system: '지시문' }, '출장 정보\n\n<문서 글자>\n총계\n</문서 글자>', [], { direct: true });

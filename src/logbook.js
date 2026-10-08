@@ -30,6 +30,8 @@ export const KIND_LABEL = {
   attend: '근태',
   'attend-ask': '근태채우기',
   'attend-list': '근태내역',
+  gongmun: '공문',
+  'gongmun-setup': '공문설정',
 };
 
 const pad = (n) => String(n).padStart(2, '0');

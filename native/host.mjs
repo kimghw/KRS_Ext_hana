@@ -2,7 +2,8 @@
 //
 // 확장은 임의의 명령을 보낼 수 없다. 입력 명세(input.yaml)에 적힌 작업(task)만 실행하고
 // 시스템 프롬프트도 그 명세에서 만든 것으로 고정돼 있다. 확장이 보내는 것은 작업 이름과 입력 텍스트뿐이다.
-// 출장 증빙(receipt 의 첨부)은 claude 에 넘기기 전에 글자를 먼저 뽑는다 — PDF 는 글자 층, 그림은 OCR(native/doctext.mjs).
+// 첨부가 붙는 문서 읽기(receipt 의 출장 증빙, gongmun 의 견적서·교육 안내문·웹페이지 캡처)는 claude 에 넘기기 전에 글자를 먼저 뽑는다 —
+// PDF 는 글자 층, 그림은 OCR(native/doctext.mjs).
 // 호출마다 native/logs/<날짜>.jsonl 에 한 줄씩 남기고, logs 작업으로 최근 것을 돌려준다.
 
 import { spawn } from 'node:child_process';
@@ -433,8 +434,11 @@ export function spawnClaude({ args, stdin, env, limitMs, cleanup }) {
 
 /* ------------------------------------------------------------ 요청 처리 */
 
+/** 첨부에서 글자를 먼저 뽑는 작업 — 출장 증빙(receipt)과 공문 문서(gongmun — 견적서·교육 안내문·웹페이지 캡처, 2026-10-08). */
+export const TEXT_FIRST = new Set(['receipt', 'gongmun']);
+
 /**
- * 증빙의 첨부에서 글자를 먼저 뽑는다(native/doctext.mjs 의 withText). 그 모듈과 꾸러미(pdfjs-dist·tesseract.js)는 증빙을 읽을 때만
+ * 첨부에서 글자를 먼저 뽑는다(native/doctext.mjs 의 withText). 그 모듈과 꾸러미(pdfjs-dist·tesseract.js)는 첨부를 읽을 때만
  * 불러온다. 못 불러오면(새 PC 에서 npm install 을 안 했다) 전처럼 파일째 읽히고, 그 까닭이 기록의 read 에 남는다.
  */
 async function extractText(input, files) {
@@ -471,19 +475,19 @@ export async function handle(msg, { run = runClaude, log = writeLog, tail = tail
     return { ok: false, error: '입력이 비어 있습니다.' };
   }
 
-  // 첨부(출장 증빙). 모양이 맞는 것만, 여섯 장까지. 기록에는 이름과 크기만 남긴다 — 영수증 그림을 기록 파일에 쌓지 않는다.
+  // 첨부(출장 증빙·공문 문서). 모양이 맞는 것만, 여섯 장까지. 기록에는 이름과 크기만 남긴다 — 영수증 그림을 기록 파일에 쌓지 않는다.
   const files = (Array.isArray(msg.files) ? msg.files : [])
     .filter((f) => f && typeof f.dataUrl === 'string' && /^data:[^;]+;base64,/.test(f.dataUrl)).slice(0, 6)
     .map((f) => ({ name: String(f.name || 'file'), type: String(f.type || ''), dataUrl: f.dataUrl }));
   const started = Date.now();
   const base = { task: msg.task, model: MODEL, input: clip(input, 1500),
     ...(files.length ? { files: files.map((f) => `${f.name} (${f.type}, ${Math.round((f.dataUrl.length * 3) / 4 / 1024)}KB)`) } : {}) };
-  // 증빙은 글자를 먼저 뽑는다 — PDF 는 뽑은 글자만 보내고, 그림은 OCR 글자를 그림과 같이 보낸다. 뽑은 글자는 기록에 남기지 않는다
-  // (어떻게 읽었는지 read 만 남긴다).
+  // 증빙과 공문 문서는 글자를 먼저 뽑는다(TEXT_FIRST) — PDF 는 뽑은 글자만 보내고, 그림은 OCR 글자를 그림과 같이 보낸다. 뽑은 글자는
+  // 기록에 남기지 않는다(어떻게 읽었는지 read 만 남긴다).
   let call = { input: input.slice(0, 20000), files, read: [], lean: false };
   // 어디서 시간이 갔는지도 남긴다 — textMs 는 글자 뽑기(PDF 글자 층·OCR), cli 는 claude 를 부른 차례마다의 시간(runClaude).
   let textMs = null;
-  if (msg.task === 'receipt' && files.length) {
+  if (TEXT_FIRST.has(msg.task) && files.length) {
     const t0 = Date.now();
     call = await text(call.input, files);
     textMs = Date.now() - t0;

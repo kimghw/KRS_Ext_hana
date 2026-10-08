@@ -7,7 +7,7 @@
 
 import {
   KINDS, KIND_MAIN, KIND_MORE, STATUS, MAX_TRIP_DAYS, blankForm, fieldsFor, missingFields, problems, describe, settle,
-  nameOf, timeOptions, spanDays, nextSpan, halfOf, halfPlan, halfFlexForm, workStartOn, itemsIn, isPast,
+  nameOf, timeOptions, spanDays, nextSpan, halfOf, halfPlan, halfFlexForm, workStartOn, itemsIn, isPast, rangeCovering,
   buildJob, buildDocJob, buildCancelJob, listItems, formFromDoc, applyPatch, withSub, attendToday,
   FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek,
   acceptsFile, itemsOfKind, EVIDENCE_ACCEPT, statusLabel, CANCELLING_KEY, CANCELLING_LABEL, CANCELLED_LABEL, cancellingOf, pruneCancelling, isCancelDoc, linkCancel,
@@ -407,7 +407,7 @@ export function createAttendPanel({
     } else {
       input = `<input type="${f.type}" id="${id}" value="${escapeHtml(v || '')}"${hint} autocomplete="off" />`;
     }
-    // 글 칸은 한 줄을 다 쓴다. 나란히 두라고 한 글 칸(출장지·근무지)만 반 줄이다.
+    // 글 칸은 한 줄을 다 쓴다. 나란히 두라고 한 글 칸(출장지·장소, 근무지)만 줄을 나눠 쓴다.
     const wide = f.type === 'file' || (f.type === 'text' && !f.beside && !f.group) ? ' wide' : f.beside ? ' beside' : '';
     // --lab 은 이름의 글자 수다. 칸이 그만큼 왼쪽을 비워 이름과 값이 겹치지 않는다.
     const inl = inside ? ` inl" style="--lab:${f.label.length}` : '';
@@ -426,7 +426,7 @@ export function createAttendPanel({
     seedFlexWeek();
     el.formTitle.textContent = st.edit ? `${nameOf(st.form)} 수정 · ${st.edit.docNo}` : `${nameOf(st.form)} 신청`;
     paintFold();
-    // 같은 묶음(group)의 칸은 한 줄에 나란히 세운다(출장지·근무지·교통편).
+    // 같은 묶음(group)의 칸은 한 줄에 나란히 세운다(출장지·장소 / 근무지·교통편).
     let html = '';
     let group = '';
     for (const f of fieldsFor(st.form)) {
@@ -616,7 +616,7 @@ export function createAttendPanel({
     return head + done + (rows ? `<ul class="at-cars-list">${rows}</ul>` : '') + notes.join('');
   }
 
-  /** 차량의 행선지를 받는 칸의 이름 — 사전정산을 켠 출장이면 출장지, 아니면 행선지. */
+  /** 차량의 행선지를 받는 칸의 이름 — 출장이면 출장지, 아니면 행선지. */
   const carPlaceName = () => (carPlaceKey(st.form) === 'place' ? '출장지' : '행선지');
 
   /**
@@ -981,7 +981,7 @@ export function createAttendPanel({
     }
     if (input.type === 'checkbox') {
       st.form[key] = input.checked;
-      if (key === 'allDay' || key === 'settle' || key === 'car') {   // 칸이 생기거나 없어진다(시각 / 출장지·근무지·교통편 / 차량 목록)
+      if (key === 'allDay' || key === 'settle' || key === 'car') {   // 칸이 생기거나 없어진다(시각 / 근무지·교통편 / 차량 목록)
         st.form = settle(st.form);
         return paintForm();
       }
@@ -1303,8 +1303,9 @@ export function createAttendPanel({
   const SEEK_TTL_MS = 30_000;
 
   /**
-   * 홈의 WORKSPACE 카드에서 출장 줄의 `보내기`를 눌러 왔다(2026-10-04 사용자 지정) — 신청 내역에서 그 출장 카드를 펴고 여비증빙 송부 칸을
-   * 보이게 하며, 보낼 수 있으면 보낼 내용 팝업을 띄운다(카드의 `보내기`를 누른 것과 같다 — 팝업의 보내기를 눌러야 나간다).
+   * 홈의 WORKSPACE 카드에서 근태 줄을 눌러 왔다(2026-10-07 사용자 지정: "검진 카드를 누르면 검진 내역의 근태가 나와야지") — 신청 내역에서
+   * 그 건의 카드를 펴고 보이게 한다. 출장 줄의 `보내기`에서 왔으면(send — 2026-10-04 사용자 지정) 여비증빙 송부 칸까지 가서, 보낼 수
+   * 있으면 보낼 내용 팝업을 띄운다(카드의 `보내기`를 누른 것과 같다 — 팝업의 보내기를 눌러야 나간다).
    * 신청 내역 → 여비계산서 → 사전정산의 교통편·보관함이 읽히는 대로 여러 번 그려지므로, 그릴 때마다 이어 간다(followSeek).
    */
   function seek({ docNo, send = false } = {}) {
@@ -1318,7 +1319,7 @@ export function createAttendPanel({
     if (!want || !st.loadedOnce) return undefined;
     const drop = (why = '') => { st.seek = null; if (why) setStatus(why, 'error'); };
     if (Date.now() - want.at > SEEK_TTL_MS) return drop();
-    const wanted = (x) => x.docNo === want.docNo && isTrip(x);
+    const wanted = (x) => x.docNo === want.docNo;
     let it = st.items.find(wanted);
     // 그 카드를 펴 둔 것으로 치는 줄 번호 — 지금 화면에 그려진 것과 다르면 아래에서 펴서 다시 그린다.
     const was = st.openDoc;
@@ -1329,9 +1330,9 @@ export function createAttendPanel({
       it = st.items.find(wanted);
       if (!it) st.openDoc = was;
     }
-    if (!it) return drop('홈 카드에서 고른 출장이 지금 보는 신청 내역에 없습니다 — 조회 기간을 넓혀 찾아 주세요.');
+    if (!it) return drop(`홈 카드에서 고른 ${want.send ? '출장이' : '근태가'} 지금 보는 신청 내역에 없습니다 — 조회 기간을 넓혀 찾아 주세요.`);
     const shown = shownItems().includes(it);
-    if (!shown && st.edit) return drop('신청서를 고치는 중이라 그 출장 카드를 열지 못했습니다 — 고치기를 마친 뒤 종류 줄 끝의 "내역"에서 찾아 주세요.');
+    if (!shown && st.edit) return drop('신청서를 고치는 중이라 그 카드를 열지 못했습니다 — 고치기를 마친 뒤 종류 줄 끝의 "내역"에서 찾아 주세요.');
     if (!shown || was !== it.docNo) {
       // 그 카드를 편다. 다른 종류만 보는 중이라 가려져 있으면 모든 종류를 보는 "내역"으로 바꾼다(기억해 두지는 않는다).
       if (!shown) {
@@ -1342,6 +1343,14 @@ export function createAttendPanel({
       disarm();
       Object.assign(st, { openDoc: it.docNo, cancelFor: null, cancelThen: null });
       return paintList();
+    }
+    if (!want.send || !isTrip(it)) {
+      // 줄을 누르고 왔다 — 그 카드를 펴서 보이게 하면 끝이다. 머리에 초점을 줘 어느 카드인지 드러낸다.
+      st.seek = null;
+      const li = el.list.querySelector(`li[data-i="${shownItems().indexOf(it)}"]`);
+      li?.scrollIntoView?.({ block: 'nearest' });
+      li?.querySelector('.at-head')?.focus({ preventScroll: true });
+      return undefined;
     }
     const trip = tripOf(it);
     // 여비계산서 목록을 아직 읽는 중이면 다음에 그릴 때 이어 간다. 다 읽었는데 계산서가 없으면 보낼 것이 없다 — 카드가 그렇게 말한다.
@@ -2676,13 +2685,16 @@ export function createAttendPanel({
 
   /**
    * 여비계산서 목록을 읽을 기간(출장기간 기준). 기간을 정했으면 그 기간이고, 기본 보기면 다녀온 출장을 볼 수 있는 가장 먼 날
-   * (8주 전)부터 올려 둔 출장 가운데 가장 늦게 끝나는 날까지다.
+   * (8주 전)부터 올려 둔 출장 가운데 가장 늦게 끝나는 날까지다. 어느 쪽이든 **보이는 출장 줄의 출장기간은 다 덮게** 넓힌다
+   * (rangeCovering) — 4W 로 9/10 부터 보면 9/9~9/10 출장도 목록에 서는데, 계산서는 출장기간으로 찾으므로 9/9 부터 읽어야 그 계산서가
+   * 잡힌다(2026-10-08 사용자 보고: 그 줄이 "조회 기간이 이 출장기간을 다 덮지 않습니다"라고만 했다). 머리 줄의 기간 글·날짜 칸은 그대로다.
    */
   function tripRange() {
-    if (st.range) return st.range;
     const today = attendToday();
     const ends = st.all.filter(isTrip).map((it) => it.to || it.from).filter(Boolean);
-    return { from: daysAgo(today, BACK_MAX_DAYS), to: ends.reduce((a, b) => (a > b ? a : b), today) };
+    const base = st.range ? { from: st.range.from, to: st.range.to }
+      : { from: daysAgo(today, BACK_MAX_DAYS), to: ends.reduce((a, b) => (a > b ? a : b), today) };
+    return rangeCovering(base, st.items);
   }
 
   /**

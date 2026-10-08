@@ -21,8 +21,11 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const KNOWN = TRANSPORTS.map((t) => t.value);
 const TRAIN = 'train';
 
-/** 출장지에 적은 글을 열쇠로 — 앞뒤와 겹친 빈칸만 고른다("경기도  고양시 킨텍스 " = "경기도 고양시 킨텍스"). */
-export const routeKey = (place) => String(place || '').replace(/\s+/g, ' ').trim();
+/**
+ * 출장지에 적은 글을 열쇠로 — 앞뒤와 겹친 빈칸만 고른다("경기도  고양시 킨텍스 " = "경기도 고양시 킨텍스").
+ * 여비계산서에서 읽은 출장지는 "출장지(장소)"라(src/travel.js 의 tripLocation) 끝의 괄호(장소)는 뗀다 — "대전(한국기계연구원)" = "대전".
+ */
+export const routeKey = (place) => String(place || '').replace(/(\S)\s*\([^()]*\)\s*$/, '$1').replace(/\s+/g, ' ').trim();
 
 /** 교통편 목록을 선택지 차례로, 아는 것만. */
 const transportsIn = (list) => KNOWN.filter((v) => (Array.isArray(list) ? list : []).includes(v));

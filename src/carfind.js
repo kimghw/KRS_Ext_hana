@@ -7,6 +7,8 @@
 // 회의실·차량 현황과 같은 규칙이다: **확신할 수 없으면 비어 있다고 하지 않는다.** 걸친 날 가운데 하루라도
 // 읽지 못했으면, 겹치는 신청이 안 보인 차량도 '확인 불가'다.
 
+import { tripLocation } from './travel.js';
+
 const DAY = 24 * 60;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -174,13 +176,12 @@ export function carsInWindow(win, days, { region = '' } = {}) {
 
 /**
  * 차량 신청의 행선지를 어느 칸에서 받는가. 사이트는 행선지가 있어야 신청을 받는다(fnSaveCheck).
- * 폼에 출장지 칸이 보이면(여비계산서 사전정산을 켠 출장) 그 칸이고, 아니면 차량 조회를 켰을 때 나오는 행선지 칸(carPlace)이다
- * — 외근과 사전정산을 끈 출장에는 장소 칸이 따로 없다.
+ * 출장은 늘 보이는 출장지 칸이고, 외근은 차량 조회를 켰을 때 나오는 행선지 칸(carPlace)이다 — 외근에는 장소 칸이 따로 없다.
  */
-export const carPlaceKey = (form) => (form?.kind === 'trip' && form.settle ? 'place' : 'carPlace');
+export const carPlaceKey = (form) => (form?.kind === 'trip' ? 'place' : 'carPlace');
 
-/** 차량 신청의 행선지. 아직 안 적었으면 빈 글. */
-export const carPlaceOf = (form) => String(form?.[carPlaceKey(form)] || '').trim();
+/** 차량 신청의 행선지 — 출장은 여비계산서와 같은 "출장지(장소)"다. 아직 안 적었으면 빈 글. */
+export const carPlaceOf = (form) => (carPlaceKey(form) === 'place' ? tripLocation(form) : String(form?.carPlace || '').trim());
 
 /**
  * 빈 차량을 눌렀을 때 신청할 한 건. 사용목적은 폼의 목적이고 행선지는 carPlaceOf 다.

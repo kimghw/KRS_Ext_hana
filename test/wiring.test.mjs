@@ -13,6 +13,7 @@ const js = fs.readFileSync(new URL('sidepanel.js', root), 'utf8');
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
+const ta = async (name, fn) => { await fn(); pass++; console.log('  ok  ' + name); };
 
 /**
  * 저장된 설정을 주고 init 을 돌린 뒤, 어떤 요소에 리스너가 붙었는지 본다.
@@ -361,8 +362,8 @@ console.log('Claude 가 안 붙어 있으면 말로 찾기 칸이 잠긴다');
   t('왜 잠겼는지 플레이스홀더에 적혀 있다', () =>
     assert.equal(doc.getElementById('askInput').placeholder, 'claude가 연결되지 않았습니다'));
   const helps = [...doc.querySelectorAll('.cli-help')];
-  t('두 말 칸(말로 찾기·말로 채우기) 아래와 설정에 연결 지침 복사 버튼이 나온다', () => {
-    assert.deepEqual(helps.map((p) => p.parentElement.className), ['at-chat card off', 'ask card off']);
+  t('두 말 칸(말로 찾기·말로 채우기)과 공문의 문서 넣는 곳 아래, 설정에 연결 지침 복사 버튼이 나온다', () => {
+    assert.deepEqual(helps.map((p) => p.parentElement.className), ['at-chat card off', 'gm-intake card off', 'ask card off']);
     assert.ok(helps.every((p) => !p.hidden && p.querySelector('button.cli-guide-copy')));
     assert.equal(doc.getElementById('cliGuide').hidden, false);
   });
@@ -845,13 +846,408 @@ console.log('로그인이 풀렸을 때 — 만료라고 말하고, 홈 링크�
     assert.ok((store.activityLog || []).some((e) => e.kind === 'auth' && /다시 조회/.test(e.text))));
 }
 
+console.log('공문 탭');
+{
+  const { wired, window } = await boot({ mode: 'room' });
+  const doc = window.document;
+  t('공문 탭 클릭과 공문 화면의 리스너', () => {
+    assert.ok(wired.get('tabGongmun')?.has('click'));
+    const want = [['gmKinds', 'click'], ['gmChatGo', 'click'], ['gmChatInput', 'keydown'], ['gmFile', 'change'], ['gmCapture', 'click'], ['gmManual', 'click'],
+      ['gmReset', 'click'], ['gmProjects', 'click'], ['gmFields', 'input'], ['gmTitle', 'input'], ['gmBody', 'input'], ['gmRegen', 'click'],
+      ['gmCopyTitle', 'click'], ['gmCopyBody', 'click'], ['gmOpen', 'click'], ['gmSavePdf', 'click'], ['gmTplForm', 'change'], ['gmTplTitle', 'input'],
+      ['gmTplBody', 'input'], ['gmTplReset', 'click'], ['gmDept', 'input'], ['gmHead', 'input'], ['gmRefs', 'input'], ['gmProjAdd', 'click'],
+      ['gmProjList', 'input'], ['gongmun', 'dragover'], ['gongmun', 'drop']];
+    for (const [id, type] of want) assert.ok(wired.get(id)?.has(type), `${id} 에 ${type}`);
+  });
+  t('회의실 탭에서는 공문 화면이 숨어 있다', () => assert.ok(doc.getElementById('gongmun').classList.contains('hidden')));
+}
+{
+  const { window, calls, store } = await boot({ mode: 'gongmun', myName: '김거화' });
+  const doc = window.document;
+  const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+  const type = (node, value) => { node.value = value; node.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
+  await settle();
+  t('저장된 모드가 공문이면 공문 탭으로 열리고 날짜 격자·예약 현황·말로 찾기·근태는 숨는다', () => {
+    assert.ok(doc.getElementById('tabGongmun').classList.contains('active'));
+    assert.match(doc.getElementById('appTitle').textContent, /공문 작성/);
+    assert.ok(!doc.getElementById('gongmun').classList.contains('hidden'));
+    assert.ok(doc.getElementById('attend').classList.contains('hidden'));
+    for (const sel of ['.controls', '.schedule', '.ask']) assert.ok(doc.querySelector(sel).hasAttribute('hidden'), sel);
+  });
+  t('갈래는 구매·교육·출장이고(출장은 준비 중) 처음에는 구매다', () => {
+    const kinds = [...doc.querySelectorAll('#gmKinds .gm-kind')].map((b) => b.dataset.kind);
+    assert.deepEqual(kinds, ['purchase', 'edu', 'trip']);
+    assert.match(doc.querySelector('#gmKinds [data-kind="trip"]').textContent, /준비 중/);
+    assert.equal(doc.querySelector('#gmKinds .gm-kind.active').dataset.kind, 'purchase');
+  });
+  t('Claude 가 없으면 채팅 칸은 회색이되 열려 있다(규칙으로 읽는다)', () => {
+    assert.ok(doc.getElementById('gmChat').classList.contains('off'));
+    assert.ok(!doc.getElementById('gmChatInput').disabled);
+  });
+
+  // 과제 목록 표를 복사해 채팅 칸에 붙여 넣는다 — Claude 가 없으니 규칙으로 읽는다(2026-10-07 사용자 지정).
+  type(doc.getElementById('gmChatInput'), '과제명\t과제번호\t책임자\nMW급 10kV 고전압 직류 시스템용 반도체 차단기 개발\tRND-20-2026\t박기도 책임\n부서장 노길태\n참조 홍길동, 이몽룡');
+  doc.getElementById('gmChatGo').click();
+  await settle(480);
+  const PROJECT = 'MW급 10kV 고전압 직류 시스템용 반도체 차단기 개발';
+  t('붙여 넣은 과제·과제책임자(합의자)·부서장·참조자가 사전 설정에 들어가 저장된다', () => {
+    assert.deepEqual(store.gongmunProjects, [{ name: PROJECT, alias: '', code: 'RND-20-2026', lead: '박기도', period: '', about: '', content: '', account: '' }]);
+    assert.deepEqual(store.gongmunPreset, { dept: '', head: '노길태', refs: ['홍길동', '이몽룡'] });
+    assert.equal(doc.getElementById('gmHead').value, '노길태');
+    assert.equal(doc.querySelector('#gmProjList [data-k="lead"]').value, '박기도');
+    assert.match(doc.getElementById('gmChatLog').textContent, /합의자 박기도/);
+    assert.match(doc.getElementById('gmChatLog').textContent, /규칙 해석/);
+  });
+
+  doc.getElementById('gmManual').click();
+  await settle();
+  t('문서 없이 쓰면 초안이 열리고, 과제가 하나뿐이면 바로 골라진다', () => {
+    assert.ok(!doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.equal(doc.querySelector('#gmProjects .gm-proj.active .gm-proj-name').textContent, PROJECT);
+  });
+  t('결재선 — 기안자 → 합의자(과제책임자) → 결재자(부서장) · 참조자', () => {
+    const line = doc.getElementById('gmLine').textContent;
+    assert.match(line, /기안자김거화→합의자박기도과제책임자→결재자노길태부서장/);
+    assert.match(line, /참조자홍길동, 이몽룡/);
+  });
+
+  type(field('gist'), '34인치 모니터');
+  type(field('total'), '1,239,000');
+  t('합계가 100만원을 넘으면 공문을 만들지 않는다', () => {
+    assert.ok(!doc.getElementById('gmLimit').classList.contains('hidden'));
+    assert.match(doc.getElementById('gmLimit').textContent, /1,239,000원.*100만원 이하/);
+    assert.ok(doc.getElementById('gmDoc').classList.contains('hidden'));
+  });
+  type(field('total'), '989000');
+  type(field('use'), '연구 회의 자료 검토용');
+  type(field('reason'), '과제 회의에서 회로도·시험 데이터를 함께 검토할 대화면이 필요함');
+  t('100만원 이하면 양식대로 제목·본문이 만들어진다 — 요약은 품목 요지를 따라간다', () => {
+    assert.ok(!doc.getElementById('gmDoc').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmTitle').value, '34인치 모니터 구매 품의');
+    const body = doc.getElementById('gmBody').value;
+    assert.match(body, new RegExp(`「${PROJECT}」 과제를 수행하고 있습니다`));
+    assert.match(body, /34인치 모니터를 구매하고자 아래와 같이 품의하오니/);
+    assert.match(body, /나\. 구매금액 : 989,000원 \(VAT 포함\)/);
+    assert.match(body, /라\. 구매계정 : 연구활동비\(연구실운용비\)/);
+    assert.match(doc.getElementById('gmNeed').textContent, /부서\(사전 설정\)/, '부서는 아직 비어 있다');
+  });
+  doc.getElementById('gmCopyBody').click();
+  await settle();
+  t('본문 복사 — 서식 복사가 안 되는 곳에서는 글로라도 담는다', () => assert.match(calls.clipboard.at(-1) || '', /구매금액 : 989,000원/));
+  doc.getElementById('gmOpen').click();
+  t('새 공문 열기는 loginbyname 을 거쳐 연구업무추진품의 새 문서를 연다', () => {
+    const url = calls.tabs.at(-1)?.url || '';
+    assert.match(url, /^https:\/\/eclass\.krs\.co\.kr\/RealEANET\/loginbyname\.aspx\?ReturnUrl=/);
+    assert.match(decodeURIComponent(url), /DocumentView\.aspx\?FORMID=KR_EA_Research_Task&DOCID=&/);
+  });
+
+  type(doc.getElementById('gmTplTitle'), '[부서구매] {품목요지} 구매 품의');
+  t('양식(제목 틀)을 고치면 공문이 곧바로 따라 바뀌고, 고친 양식이라고 적힌다', () => {
+    assert.equal(doc.getElementById('gmTitle').value, '[부서구매] 34인치 모니터 구매 품의');
+    assert.match(doc.getElementById('gmTplState').textContent, /고친 양식/);
+  });
+  type(doc.getElementById('gmBody'), '직접 고친 본문');
+  type(field('use'), '다른 용도');
+  t('본문을 직접 고치면 위 칸을 바꿔도 그대로 두고, 양식으로 다시 만들기로 되돌린다', () => {
+    assert.equal(doc.getElementById('gmBody').value, '직접 고친 본문');
+    assert.ok(!doc.getElementById('gmEdited').classList.contains('hidden'));
+    doc.getElementById('gmRegen').click();
+    assert.match(doc.getElementById('gmBody').value, /마\. 용도 : 다른 용도/);
+  });
+
+  t('사전 설정의 과제 줄에 과제 내용 칸이 있다 — 사유를 쓰는 근거', () => {
+    assert.equal(doc.querySelector('#gmProjList textarea[data-k="content"]')?.getAttribute('aria-label'), '과제 내용');
+  });
+  doc.querySelector('#gmFields [data-act="reason"]').click();
+  await settle();
+  t('Claude 가 없으면 "과제 내용으로 쓰기" 는 까닭을 말하고 사유 칸은 그대로다', () => {
+    assert.match(doc.getElementById('gmStatus').textContent, /사유를 쓰지 못했습니다/);
+    assert.match(field('reason').value, /대화면이 필요함/);
+  });
+
+  doc.querySelector('#gmKinds [data-kind="trip"]').click();
+  t('출장은 빈 껍데기 — 문서 넣는 곳·초안 없이 준비 중 안내와 출장 양식만 보인다', () => {
+    assert.ok(doc.getElementById('gmIntake').classList.contains('hidden'));
+    assert.ok(!doc.getElementById('gmSoon').classList.contains('hidden'));
+    assert.ok(doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.ok(doc.getElementById('gmDoc').classList.contains('hidden'));
+    assert.match(doc.getElementById('gmTplTitle').value, /출장 품의/);
+  });
+}
+
+console.log('공문 탭 — 교육: 견적서에 교육 내용 캡처를 더 넣으면 함께 읽고 둘 다 첨부, 과제 내용으로 교육사유');
+{
+  // 1×1 PNG — PDF 로 묶을 수 있는 진짜 그림이어야 한다.
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const QUOTE = { docType: 'quote', vendor: '한국전력기술교육원', courseName: '전력변환 설계 실무', courseFrom: '2026-10-12', courseTo: '2026-10-14', total: 450000, gist: '전력변환 설계 실무', summary: '교육 견적서 450,000원', use: '설계 역량 강화' };
+  const asked = [];
+  const fetchImpl = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) throw new Error('offline');
+    const body = JSON.parse(init.body);
+    const props = Object.keys(body.output_config.format.schema.properties);
+    const input = JSON.stringify(body.messages[0].content);
+    asked.push({ props, input });
+    let record;
+    if (props.includes('parts')) {
+      const two = input.includes('첨부한 문서 2장');
+      record = two
+        ? { ...QUOTE, topics: 'DC-DC 컨버터 · 제어 루프 설계', parts: [{ file: '교육견적.png', kind: 'quote' }, { file: '커리큘럼.png', kind: 'content' }] }
+        : { ...QUOTE, parts: [{ file: '교육견적.png', kind: 'quote' }] };
+    } else if (props.includes('reason')) {
+      record = { reason: '과제의 MVDC 전력변환 설계 역량 확보에 필요함', use: '전력변환 회로 설계 역량 강화' };
+    } else {
+      throw new Error(`모르는 작업: ${props}`);
+    }
+    return { ok: true, status: 200, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(record) }] }) };
+  };
+  const saved = {
+    mode: 'gongmun', gongmunKind: 'edu', apiKey: 'sk-ant-test', myName: '김거화',
+    gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
+    gongmunProjects: [{ name: 'MVDC 차단기 개발', code: 'RND-20-2026', lead: '박기도', about: '', content: 'MVDC 선내 전력망용 전력변환기 설계·시험', account: '' }],
+  };
+  const { window, calls, store } = await boot(saved, { fetchImpl });
+  const doc = window.document;
+  globalThis.URL.createObjectURL = () => 'blob:gongmun-test';
+  globalThis.URL.revokeObjectURL = () => {};
+  const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  const drop = (names) => {
+    const ev = new window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: names.map((n) => new window.File([PNG], n, { type: 'image/png' })) } });
+    doc.getElementById('gmIntake').dispatchEvent(ev);
+  };
+  const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
+  const type = (node, value) => { node.value = value; node.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  await settle();
+  t('교육은 견적서와 교육 내용을 함께 넣으라고 안내한다', () => assert.equal(doc.getElementById('gmDropLead').textContent, '교육 견적서·교육 내용을 넣으세요'));
+
+  drop(['교육견적.png']);
+  await settle(200);
+  t('견적서를 읽고, 과제가 골라져 있으니 과제 내용으로 교육사유를 저절로 쓴다', () => {
+    assert.equal(field('course').value, '전력변환 설계 실무');
+    assert.equal(field('reason').value, '과제의 MVDC 전력변환 설계 역량 확보에 필요함');
+    assert.equal(field('purpose').value, '전력변환 회로 설계 역량 강화');
+    const reasonAsk = asked.find((a) => a.props.includes('reason'));
+    assert.match(reasonAsk.input, /MVDC 선내 전력망용 전력변환기 설계·시험/, '과제 내용이 근거로 간다');
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 견적서/);
+    assert.equal(doc.getElementById('gmDropLead').textContent, '교육 내용(커리큘럼) 캡처 더 넣기');
+  });
+
+  // 사용자가 참석자를 고친 뒤 교육 내용 캡처를 더 넣는다.
+  field('attendees').value = '김거화, 홍길동';
+  field('attendees').dispatchEvent(new window.Event('input', { bubbles: true }));
+  drop(['커리큘럼.png']);
+  await settle(200);
+  t('더 넣으면 앞서 넣은 것과 함께(2장) 다시 읽고, 고친 칸은 그대로 둔다', () => {
+    const reads = asked.filter((a) => a.props.includes('parts'));
+    assert.equal(reads.length, 2);
+    assert.match(reads[1].input, /첨부한 문서 2장\(파일 이름: 교육견적\.png, 커리큘럼\.png\)/);
+    assert.equal(field('attendees').value, '김거화, 홍길동');
+    assert.equal(field('topics').value, 'DC-DC 컨버터 · 제어 루프 설계');
+    assert.equal(asked.filter((a) => a.props.includes('reason')).length, 1, '사유가 이미 있으면 다시 쓰지 않는다');
+  });
+  t('본문 — 교육내용 줄과, 교육 견적서·교육 내용 두 줄의 첨부', () => {
+    const body = doc.getElementById('gmBody').value;
+    assert.match(body, /교육내용 : DC-DC 컨버터 · 제어 루프 설계/);
+    assert.match(body, /교육사유 : 과제의 MVDC 전력변환 설계 역량 확보에 필요함/);
+    assert.match(body, /※ 첨 부\n {4}1\. 교육 견적서 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 견적서 · 교육 내용/);
+  });
+  t('제목은 "[과제 별명] 수행을 위한 교육 품의" — 별명이 없으면 과제명, 본문에 가. 과제 개요', () => {
+    assert.equal(doc.getElementById('gmTitle').value, 'MVDC 차단기 개발 수행을 위한 교육 품의');
+    assert.equal(field('mode').value, '교육', '교육장소가 온라인이 아니면 교육');
+    const body = doc.getElementById('gmBody').value;
+    assert.match(body, /가\. 과제 개요\n {4}\(1\) 과 제 명 : MVDC 차단기 개발\n {4}\(2\) 과제번호 : RND-20-2026\n {4}\(3\) 과제책임자 : 박기도\n나\. 교육 내용/);
+    const info = doc.getElementById('gmProjInfo');
+    assert.ok(!info.classList.contains('hidden'));
+    assert.match(info.textContent, /과제 기본 내용.*별명 없음.*번호 RND-20-2026.*연구기간 없음.*내용 \d+자/);
+    assert.match(doc.getElementById('gmNeed').textContent, /과제 별명\(사전 설정 — 제목\)/);
+    assert.match(doc.getElementById('gmSteps').textContent, /첨부 교육 견적서 · 교육 내용 — 아래 PDF/, '창에서 할 일의 첨부도 본문 ※ 첨부와 같은 문서들');
+  });
+  // 과제 기본 내용의 "고치기" — 사전 설정의 그 과제 줄이 펴지고 빈 별명 칸에 커서가 간다.
+  doc.querySelector('#gmProjInfo [data-act="preset"]').click();
+  t('고치기는 사전 설정을 펴고 그 과제의 빈 별명 칸으로 간다', () => {
+    assert.ok(doc.getElementById('gmPresetBox').open);
+    assert.equal(doc.activeElement?.dataset.k, 'alias');
+    assert.equal(doc.activeElement.getAttribute('aria-label'), '과제 별명');
+  });
+  type(doc.activeElement, '차단기 과제');
+  type(doc.querySelector('#gmProjList [data-k="period"]'), '2026.04.01 ~ 2029.12.31');
+  await settle(500);
+  t('별명·연구기간을 넣으면 제목·과제 개요가 곧바로 바뀌고 저장된다', () => {
+    assert.equal(doc.getElementById('gmTitle').value, '차단기 과제 수행을 위한 교육 품의');
+    assert.match(doc.getElementById('gmBody').value, /\(3\) 연구기간 : 2026\.04\.01 ~ 2029\.12\.31\n {4}\(4\) 과제책임자 : 박기도/);
+    assert.match(doc.getElementById('gmProjInfo').textContent, /별명 차단기 과제/);
+    assert.match(doc.querySelector('#gmProjects .gm-proj .gm-proj-lead').textContent, /별명 차단기 과제 · 책임 박기도/);
+    assert.ok(!/과제 별명/.test(doc.getElementById('gmNeed').textContent));
+    assert.equal(store.gongmunProjects[0].alias, '차단기 과제');
+    assert.equal(store.gongmunProjects[0].period, '2026.04.01 ~ 2029.12.31');
+  });
+  type(field('place'), '온라인(실시간)');
+  t('교육장소가 온라인이면 교육 구분이 따라가 "… 온라인교육 품의" 가 된다', () => {
+    assert.equal(field('mode').value, '온라인교육');
+    assert.equal(doc.getElementById('gmTitle').value, '차단기 과제 수행을 위한 온라인교육 품의');
+    assert.match(doc.getElementById('gmBody').value, /아래와 같이 온라인교육에 참가하고자/);
+  });
+  field('mode').value = '교육';
+  field('mode').dispatchEvent(new window.Event('change', { bubbles: true }));
+  type(field('place'), '온라인 Zoom');
+  t('교육 구분을 직접 고르면 그것이 이기고, 교육장소를 고쳐도 따라가지 않는다', () => {
+    assert.equal(field('mode').value, '교육');
+    assert.equal(doc.getElementById('gmTitle').value, '차단기 과제 수행을 위한 교육 품의');
+  });
+  doc.getElementById('gmSavePdf').click();
+  await settle(400);
+  t('첨부 PDF 는 문서마다 하나씩 — 교육 견적서·교육 내용', () => {
+    assert.match(doc.getElementById('gmSavePdf').textContent, /2개/);
+    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['교육견적서_한국전력기술교육원.pdf', '교육내용_한국전력기술교육원.pdf']);
+  });
+}
+
+console.log('공문 탭 — 보고 있는 웹페이지 통째로 캡처해 읽기(2026-10-08): 권한 → 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 교육 내용 PDF');
+{
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const asked = [];
+  const fetchImpl = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) throw new Error('offline');
+    const body = JSON.parse(init.body);
+    const props = Object.keys(body.output_config.format.schema.properties);
+    // 첨부가 있으면 content 는 목록(글·그림), 없으면(사유 쓰기) 글 하나다.
+    const content = body.messages[0].content;
+    const input = JSON.stringify(content);
+    asked.push({ props, input, images: Array.isArray(content) ? content.filter((c) => c.type === 'image').length : 0 });
+    let record;
+    if (props.includes('parts')) {
+      // 읽기는 보낸 다섯 장 가운데 첫 장을 교육 안내문, 둘째 장을 교육 내용으로 가리고 나머지는 적지 않았다 — 뒷장이 이어 받는지 본다.
+      const names = [...new Set([...input.matchAll(/화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_\d+\.png/g)].map((m) => m[0]))];
+      record = {
+        docType: 'course', vendor: '인프런', courseName: '[단테랩스] Hermes Bot × OpenAI Dots', total: 84700, gist: 'Hermes Bot 강의', summary: '인프런 온라인 강의 안내 84,700원',
+        place: '온라인', courseHours: '7분(수업 19개)', topics: '두 봇 지도와 하이라이트 릴 · 봇 하나로 놀기', use: 'AI 봇 활용 역량 강화',
+        parts: [{ file: names[0], kind: 'course' }, { file: names[1], kind: 'content' }],
+      };
+    } else if (props.includes('reason')) {
+      record = { reason: '과제의 AI 봇 플랫폼 활용 역량 확보에 필요함', use: null };
+    } else {
+      throw new Error(`모르는 작업: ${props}`);
+    }
+    return { ok: true, status: 200, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(record) }] }) };
+  };
+  const saved = {
+    mode: 'gongmun', gongmunKind: 'edu', apiKey: 'sk-ant-test', myName: '김거화',
+    gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
+    gongmunProjects: [{ name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', about: '', content: 'AI 도구를 설계 검토에 활용', account: '' }],
+  };
+  const { window, calls } = await boot(saved, { fetchImpl });
+  const doc = window.document;
+  // 가짜 크롬 — 이 창(7)의 활성 탭(11)은 인프런 강의 화면: 높이 6000, 뷰포트 600×1000(폭이 좁아 A4 장이 일곱 장 나온다 — 읽기 다섯 장 + 첨부만 두 장).
+  const page = { scrollY: 0, steps: [], done: null };
+  const perms = { asked: 0, has: false };
+  Object.assign(window.chrome, {
+    windows: { getCurrent: async () => ({ id: 7 }) },
+    permissions: { contains: async () => perms.has, request: async (p) => { perms.asked++; calls.permissions = p; perms.has = true; return true; } },
+  });
+  window.chrome.tabs.query = async (q) => (q.active && q.windowId === 7 ? [{ id: 11, url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의' }] : []);
+  window.chrome.tabs.captureVisibleTab = async (windowId, opts) => {
+    calls.shots = (calls.shots || 0) + 1;
+    calls.shotOpts = [windowId, opts];
+    return `data:image/png;base64,${PNG.toString('base64')}`;
+  };
+  window.chrome.scripting.executeScript = async ({ target, func, args }) => {
+    assert.equal(target.tabId, 11);
+    if (func.name === 'pageInfo') {
+      return [{ result: { url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의 - 인프런', scrollHeight: 6000, viewportHeight: 1000, viewportWidth: 600, dpr: 1, scrollY: 0,
+        text: '강의 소개\n\n\n교육비  84,700원\n커리큘럼\n섹션 1. 두 봇 지도' } }];
+    }
+    if (func.name === 'pageStep') { page.steps.push(args); page.scrollY = Math.min(args[0], 5000); return [{ result: page.scrollY }]; }
+    if (func.name === 'pageDone') { page.done = args[0]; return [{ result: null }]; }
+    throw new Error(`모르는 함수 ${func.name}`);
+  };
+  // 가짜 캔버스 — 장마다 1×1 PNG 를 낸다(PDF 로 묶을 수 있는 진짜 그림). 그림은 뷰포트와 같은 폭(배율 1).
+  const canvases = [];
+  const kept = { canvas: globalThis.OffscreenCanvas, bitmap: globalThis.createImageBitmap, file: globalThis.File };
+  globalThis.OffscreenCanvas = class {
+    constructor(w, h) { this.width = w; this.height = h; canvases.push([w, h]); }
+    getContext() { return { fillRect() {}, drawImage() {} }; }
+    async convertToBlob({ type }) { return new window.Blob([PNG], { type }); }
+  };
+  globalThis.createImageBitmap = async () => ({ width: 600, height: 1000, close() {} });
+  globalThis.File = window.File;   // 캡처가 만드는 File 을 이 창의 FileReader 가 읽을 수 있어야 한다
+  const blobs = [];
+  globalThis.URL.createObjectURL = (b) => { blobs.push(b); return 'blob:gongmun-cap'; };
+  globalThis.URL.revokeObjectURL = () => {};
+  const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
+  await settle();
+  t('문서 넣는 곳 아래에 "보고 있는 웹페이지 통째로 캡처해 읽기" 단추가 있다', () => {
+    const btn = doc.getElementById('gmCapture');
+    assert.match(btn.textContent, /보고 있는 웹페이지 통째로 캡처해 읽기/);
+    assert.ok(btn.closest('#gmIntake'), '문서 넣는 곳 안에 있어야 한다');
+    assert.ok(!btn.disabled);
+  });
+  doc.getElementById('gmCapture').click();
+  await settle(40);
+  t('누르면 먼저 사이트 접근 권한(<all_urls>)을 묻고, 찍는 동안 단추와 파일 고르기가 잠긴다', () => {
+    assert.equal(perms.asked, 1);
+    assert.deepEqual(calls.permissions, { origins: ['<all_urls>'] });
+    assert.ok(doc.getElementById('gmCapture').disabled);
+    assert.ok(doc.getElementById('gmFile').disabled);
+    assert.equal(doc.getElementById('gmDropLead').textContent, '캡처하는 중…');
+    assert.match(doc.getElementById('gmStatus').textContent, /캡처하는 중/);
+  });
+  // 여섯 화면 × 0.6초 틈 — 실제 시간으로 기다린다.
+  await settle(6 * 650 + 900);
+  t('한 화면씩 여섯 번 찍고(둘째부터 고정 띠 숨김) 자리를 되돌린 뒤, A4 비율의 일곱 장으로 잘랐다', () => {
+    assert.equal(calls.shots, 6);
+    assert.deepEqual(calls.shotOpts, [7, { format: 'png' }]);
+    assert.deepEqual(page.steps, [[0, false], [1000, true], [2000, true], [3000, true], [4000, true], [5000, true]]);
+    assert.equal(page.done, 0);
+    assert.equal(canvases.length, 7);
+    assert.deepEqual(canvases[0], [600, 849]);
+    assert.ok(!doc.getElementById('gmCapture').disabled);
+  });
+  t('읽기에는 앞 다섯 장과 화면 글자(머리말 달림)가 가고, 두 장은 첨부에만 들어간다', () => {
+    const read = asked.find((a) => a.props.includes('parts'));
+    assert.ok(read, `읽기를 부르지 않았다 — ${doc.getElementById('gmStatus').textContent}`);
+    assert.equal(read.images, 5);
+    assert.match(read.input, /첨부한 문서 5장\(파일 이름: 화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_1\.png, [^)]*_5\.png\)/);
+    assert.match(read.input, /\[웹페이지 글자 — Hermes Bot 강의 - 인프런\] https:\/\/www\.inflearn\.com\/course\/hermes-bot\\n강의 소개\\n\\n교육비 84,700원/);
+    const src = doc.getElementById('gmSource').textContent;
+    assert.match(src, /화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2} 7장/, '파일 줄은 묶어 적는다');
+    assert.match(src, /캡처 7장 가운데 앞 5장만 읽었습니다 — 나머지 2장은 첨부 PDF 에만 들어갑니다/);
+  });
+  t('읽은 칸 — 교육명·교육비·교육기관, 온라인이라 제목은 "… 온라인교육 품의", 과제 내용으로 교육사유', () => {
+    assert.equal(field('course').value, '[단테랩스] Hermes Bot × OpenAI Dots');
+    assert.equal(field('provider').value, '인프런');
+    assert.equal(field('fee').value, '84,700');
+    assert.equal(field('mode').value, '온라인교육');
+    assert.equal(field('reason').value, '과제의 AI 봇 플랫폼 활용 역량 확보에 필요함',
+      `사유가 비었다 — 부른 작업: ${asked.map((a) => a.props.slice(0, 2).join('|')).join(', ')} · 상태: ${doc.getElementById('gmStatus').textContent}`);
+    assert.equal(doc.getElementById('gmTitle').value, '차단기 과제 수행을 위한 온라인교육 품의');
+  });
+  t('첨부 — 읽기가 가린 종류를 뒷장이 이어 받아 교육 안내문 1장·교육 내용 6장이고, 본문 ※ 첨부는 두 줄', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 안내문 · 교육 내용 6장/);
+    assert.match(doc.getElementById('gmBody').value, /※ 첨 부\n {4}1\. 교육 안내문 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSavePdf').textContent, /첨부 PDF 2개 저장 \(교육 안내문 · 교육 내용\)/);
+  });
+  doc.getElementById('gmSavePdf').click();
+  await settle(800);
+  await ta('첨부 PDF 저장 — 교육 안내문 PDF(한 쪽)와 교육 내용 PDF(여섯 쪽)가 내려받아진다', async () => {
+    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['교육안내문_인프런.pdf', '교육내용_인프런.pdf']);
+    const { PDFDocument } = await import('../vendor/pdf-lib.esm.min.js');
+    const pages = [];
+    for (const b of blobs) pages.push((await PDFDocument.load(new Uint8Array(await b.arrayBuffer()))).getPageCount());
+    assert.deepEqual(pages, [1, 6]);
+  });
+  Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
+}
+
 console.log('근태 탭');
 {
   const { wired, window } = await boot({ mode: 'room' });
   const doc = window.document;
-  t('근태가 탭 가운데 맨 앞에 있다', () => {
+  t('근태가 탭 가운데 맨 앞에 있고 공문이 그 옆이다', () => {
     const tabs = [...doc.querySelectorAll('nav.tabs .tab')].map((b) => b.textContent);
-    assert.deepEqual(tabs, ['근태', '회의실', '차량', '현황']);
+    assert.deepEqual(tabs, ['근태', '공문', '회의실', '차량', '현황']);
   });
   t('근태 탭 클릭', () => assert.ok(wired.get('tabAttend')?.has('click')));
   t('회의실 탭에서는 근태 화면이 숨어 있다', () => {
@@ -1059,17 +1455,19 @@ console.log('근태 탭');
   await new Promise((r) => setTimeout(r, 60));
   const dayChips = () => [...doc.querySelectorAll('.at-field[data-key="days"] .at-chip')];
   const activeDays = () => dayChips().filter((b) => b.classList.contains('active')).map((b) => b.textContent);
-  t('말로 채우면 종류가 옮겨 가고, 적어 둔 목적이 따라와 바로 올릴 수 있다 (여비계산서 사전정산은 꺼져 있다)', () => {
+  t('말로 채우면 종류가 옮겨 가고, 적어 둔 목적이 따라온다 — 출장지·장소 칸이 한 줄로 서고, 출장지가 비어 아직 올릴 수 없다 (여비계산서 사전정산은 꺼져 있다)', () => {
     assert.equal(doc.querySelector('#atKinds .at-kind.active').textContent, '출장');
     assert.equal(doc.getElementById('at_dateFrom').value, '2026-10-20');
     assert.equal(doc.getElementById('at_dateTo').value, '2026-10-20', '도착일 칸은 며칠간에서 나오는 끝나는 날이다(당일이면 출발일과 같다) — 달력으로 고르면 며칠간이 따라 바뀐다');
     assert.deepEqual([doc.getElementById('at_start').value, doc.getElementById('at_end').value], ['07:00', '20:00']);
-    assert.deepEqual([...doc.querySelectorAll('#atFields .at-field')].map((n) => n.dataset.key), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'purpose', 'settle', 'car']);
+    assert.deepEqual([...doc.querySelectorAll('#atFields .at-field')].map((n) => n.dataset.key), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'place', 'venue', 'purpose', 'settle', 'car']);
+    assert.deepEqual([...doc.querySelector('#atFields .at-group.at-spot').children].map((n) => [n.dataset.key, n.querySelector('.at-label').textContent]),
+      [['place', '출장지필수'], ['venue', '장소']]);
     assert.deepEqual([doc.getElementById('at_settle').type, doc.getElementById('at_settle').checked], ['checkbox', false]);
     assert.deepEqual([...doc.querySelector('#atFields .at-group.at-opts').children].map((n) => n.dataset.key), ['settle', 'car'], '차량 조회는 사전정산 옆(같은 줄)에 선다');
     assert.deepEqual([doc.getElementById('at_car').type, doc.getElementById('at_car').checked, doc.getElementById('atCars')], ['checkbox', false, null]);
-    assert.deepEqual([...doc.querySelectorAll('#atFields .at-field.need')].map((n) => n.dataset.key), []);
-    assert.equal(doc.getElementById('atSubmit').disabled, false);
+    assert.deepEqual([...doc.querySelectorAll('#atFields .at-field.need')].map((n) => n.dataset.key), ['place']);
+    assert.equal(doc.getElementById('atSubmit').disabled, true);
     assert.ok(doc.querySelector('.at-field[data-key="dateFrom"]').classList.contains('filled'));
     assert.match(doc.querySelector('#atChatLog .at-say.ai').textContent, /규칙 해석/);
     assert.equal(doc.getElementById('at_purpose').value, '과제 협의', '적어 둔 목적은 가져간다');
@@ -1083,7 +1481,7 @@ console.log('근태 탭');
     assert.deepEqual([field('days').classList.contains('inl'), field('days').querySelector('.at-label').textContent], [false, '며칠간']);
     assert.deepEqual([field('purpose').classList.contains('inl'), field('purpose').querySelector('.at-label').textContent], [false, '목적필수']);
   });
-  // 여비계산서 사전정산: 체크박스를 켜면 출장지·근무지·교통편이 한 줄로 나온다
+  // 여비계산서 사전정산: 체크박스를 켜면 근무지·교통편이 한 줄로 나온다
   const tick = (on) => {
     const box = doc.getElementById('at_settle');
     box.checked = on;
@@ -1091,11 +1489,12 @@ console.log('근태 탭');
   };
   const icons = () => [...doc.querySelectorAll('.at-field[data-key="transport"] .at-chip')];
   tick(true);
-  t('여비계산서 사전정산을 켜면 출장지·근무지·교통편이 한 줄(같은 묶음)에 선다 — 교통편은 아이콘 셋이고 기차가 골라져 있다', () => {
+  t('여비계산서 사전정산을 켜면 근무지·교통편이 한 줄(같은 묶음)에 선다 — 교통편은 아이콘 셋이고 기차가 골라져 있다', () => {
     const group = doc.querySelector('#atFields .at-group.at-where');
-    assert.deepEqual([...group.children].map((n) => n.dataset.key), ['place', 'workplace', 'transport']);
+    assert.deepEqual([...group.children].map((n) => n.dataset.key), ['workplace', 'transport']);
+    assert.deepEqual([...doc.querySelector('#atFields .at-group.at-spot').children].map((n) => n.dataset.key), ['place', 'venue'], '출장지·장소 줄은 그대로다');
     assert.equal(doc.querySelector('#atFields .at-field.at-file'), null, '출장 증빙은 신청할 때 묻지 않는다 — 신청 내역의 출장 카드에서 넣는다');
-    for (const key of ['place', 'workplace']) {
+    for (const key of ['place', 'venue', 'workplace']) {
       assert.equal(doc.querySelector(`.at-field[data-key="${key}"]`).classList.contains('wide'), false, '한 줄을 다 쓰지 않는다');
       assert.equal(doc.getElementById(`at_${key}`).type, 'text');
     }
@@ -1113,6 +1512,13 @@ console.log('근태 탭');
     assert.equal(store.attendWorkplace, '부산');
     assert.equal(doc.getElementById('atSubmit').disabled, false);
   });
+  type('at_venue', '한국기계연구원');
+  t('장소를 적으면 신청서 내용에 장소가 붙고, 여비계산서의 출장지는 "출장지(장소)"가 된다 — KTX 역은 출장지에서 찾는다', () => {
+    const need = doc.getElementById('atNeed').textContent;
+    assert.match(need, /출장 10\/20 07:00~20:00 · 과제 협의 \(출장지: 대전, 장소: 한국기계연구원, 근무지: 부산\)/);
+    assert.match(need, /→ 결재요청 뒤 여비계산서\(사전정산\): 당일출장\(주재국\) · 대전\(한국기계연구원\) · KTX 부산↔대전 일반석 33,100원 × 2/);
+  });
+  type('at_venue', '');
   const paste = (files) => Object.assign(new window.Event('paste', { bubbles: true, cancelable: true }), { clipboardData: { files } });
   const shot = paste([new window.File(['png'], 'image.png', { type: 'image/png' })]);
   doc.dispatchEvent(shot);
@@ -1179,6 +1585,7 @@ console.log('근태 탭');
     assert.equal(doc.getElementById('at_workplace').value, '부산'));
   tick(false);
   type('at_dateFrom', '2026-10-20');
+  type('at_place', '대전');
   type('at_purpose', '과제 협의');
   t('출장의 며칠간은 1D~7D 칩 한 줄이고, 끝나는 날은 도착일 칸이다 — 1D 가 골라져 있고 도착일에는 끝나는 날이 적혀 있다', () => {
     assert.deepEqual(dayChips().map((b) => b.textContent), ['1D', '2D', '3D', '4D', '5D', '6D', '7D']);

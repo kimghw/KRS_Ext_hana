@@ -199,6 +199,24 @@ t('정산이 끝난 출장도, 지난 외근도 보인다 — 기간 조회는 �
   assert.match(calls.bt.at(-1), new RegExp(`SDate=${plus(-10)}&EDate=${plus(-1)}`));
 });
 
+console.log('조회 기간에 한쪽만 걸친 출장 — 여비계산서 목록은 그 출장의 첫날부터 읽는다(2026-10-08 사용자 보고: 4W 로 9/10 부터 보는데 9/9~9/10 출장의 계산서를 못 찾았다)');
+hrRows.push(trip('T-HALF', plus(-11), plus(-10)));   // 조회 시작일(열흘 전) 전날 떠나 시작일에 돌아온 출장 — 기간에 한쪽만 걸친다
+bt[604] = { from: plus(-11), to: plus(-10), post: '대기' };
+doc.getElementById('atRangeGo').click();
+await settle('한쪽만 걸친 출장');
+t('그 출장은 목록에 보이고, 여비계산서 목록은 조회 시작일이 아니라 그 출장의 첫날부터 읽는다 — 머리 줄의 기간 글과 날짜 칸은 그대로다', () => {
+  assert.deepEqual(shown(), ['O-PAST', 'T-A', 'T-S', 'T-D', 'T-HALF']);
+  assert.match(calls.bt.at(-1), new RegExp(`SDate=${plus(-11)}&EDate=${plus(-1)}`));
+  assert.equal(doc.getElementById('atRange').textContent, spanOf(plus(-10), plus(-1)));
+  assert.equal(doc.getElementById('atRangeFrom').value, plus(-10));
+});
+t('그래서 그 출장의 계산서가 걸린다 — 정산 상태 딱지가 붙고 계산서 번호를 단다("찾지 못했습니다"가 아니다)', () => {
+  const li = [...doc.querySelectorAll('#atList > li')].find((n) => n.querySelector('.at-reason').textContent === 'T-HALF');
+  assert.deepEqual([li.querySelector('.at-trip').textContent, li.querySelector('.at-trip').title], ['사후정산전', '여비계산서 604']);
+});
+hrRows.pop();
+delete bt[604];
+
 console.log('펴 둔 카드는 방금 정산을 마쳤어도 남는다');
 /** 기본 보기로(정산 중인 출장은 4주까지) — 4주를 눌러 조회하고, 켜진 것을 다시 눌러 돌아온다. */
 const toDefault = async () => {
@@ -267,8 +285,9 @@ doc.getElementById('atRangeFrom').value = plus(15);
 doc.getElementById('atRangeTo').value = plus(20);
 doc.getElementById('atRangeGo').click();
 await settle('기간 조회');
-t('조회 기간에 한쪽만 걸친 출장은 계산서 목록을 그 출장기간까지 읽은 것이 아니다 — 계산서를 못 찾아도 "정산전"이라고 하지 않는다', () => {
-  assert.deepEqual(chips(), { 'T-EDGE': ['승인', null] });
+t('조회 기간에 한쪽만 걸친 출장도 계산서 목록을 그 출장의 첫날부터 읽는다(2026-10-08) — 그래서 계산서가 없으면 "정산전"이다(전에는 못 읽은 기간이라 붙이지 않았다)', () => {
+  assert.match(calls.bt.at(-1), new RegExp(`SDate=${plus(14)}&EDate=${plus(20)}`));
+  assert.deepEqual(chips(), { 'T-EDGE': ['승인', '정산전'] });
 });
 pager = '<div class="bt-pager"><div>전체 45건 · 1/2 페이지</div></div>';
 bt[603].post = '작성';   // 첫 쪽에서 달라진 것 — 덜 읽은 목록이 담기면 홈이 이 값을 본다
@@ -300,6 +319,23 @@ pager = '';
   await wait(60);
 }
 t('먼저 시작한 읽기의 답이 나중에 와도 새 답을 덮지 않는다', () => assert.deepEqual(chips()['T-NEW'], ['신청', '사후정산 중']));
+
+console.log('홈 WORKSPACE 카드의 근태 줄을 누르고 오면 그 건의 카드를 펴서 보인다 (2026-10-07 사용자 지정)');
+Object.assign(st, { view: '', form: { ...st.form, kind: 'leave' } });
+await panel.reload();
+await wait(60);
+t('(준비) 휴가만 보는 중이라 외근 줄이 목록에 없다', () => assert.ok(!shown().includes('O-NEXT')));
+panel.seek({ docNo: 'O-NEXT' });
+t('출장이 아닌 건도 그 카드를 편다 — 가려져 있으면 "내역"으로 바꾸고, 그 카드 머리에 초점을 주고 끝낸다', () => {
+  const li = doc.querySelector('#atList > li.open');
+  assert.deepEqual([st.view, st.openDoc, st.seek, li.querySelector('.at-reason').textContent], ['all', 'O-NEXT', null, 'O-NEXT']);
+  assert.equal(doc.activeElement, li.querySelector('.at-head'));
+});
+panel.seek({ docNo: 'T-NOPE' });
+t('지금 보는 신청 내역에 없는 건이면 그렇다고 말하고 그만둔다 — 펴 둔 카드는 그대로다', () => {
+  assert.deepEqual([st.seek, st.openDoc], [null, 'O-NEXT']);
+  assert.match(doc.getElementById('atStatus').textContent, /^홈 카드에서 고른 근태가 지금 보는 신청 내역에 없습니다/);
+});
 
 console.log(`\n통과 ${pass}건`);
 process.exit(0);

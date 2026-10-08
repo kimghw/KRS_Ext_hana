@@ -248,6 +248,17 @@ export function mealsOf({ days, startHour, endHour }) {
 export const dailyOf = (days) => days * RULES.daily.per_day;
 
 /**
+ * 여비계산서의 출장지 칸에 넣을 글 — "출장지(장소)"(2026-10-08 사용자 지정: "대전(한국기계연구원)"). 장소를 적지 않았으면 출장지만이다.
+ * 차량 신청의 행선지도 이것이다(src/carfind.js). KTX 역은 여기가 아니라 출장지(place)에서 찾는다.
+ * @param {{place?: string, venue?: string}} form 근태 패널의 출장 폼
+ */
+export function tripLocation(form) {
+  const place = String(form?.place || '').trim();
+  const venue = String(form?.venue || '').trim();
+  return place && venue ? `${place}(${venue})` : place || venue;
+}
+
+/**
  * 출장 폼에서 여비계산서(사전정산) 초안을 짓는다.
  *
  * 당일이면 당일출장(주재국), 1박 이상이면 일반출장이다. 당일출장은 사이트가 일비·식비 내역을 받지 않으므로
@@ -259,7 +270,7 @@ export const dailyOf = (days) => days * RULES.daily.per_day;
  * 없으면 갈아타는 길이다(pathOf) — 부산→목포는 부산→오송·오송→목포 두 줄씩 네 줄이 들어간다. **지난번에 그 출장지로 간 길을 기억해
  * 두었으면(memo.path — src/routes.js) 그 길이 먼저다** — 같은 역에서 떠나고 운임표로 이어지는 길일 때만 쓴다(kept 가 참이다).
  *
- * @param {object} form 근태 패널의 출장 폼(dateFrom·dateTo·days·start·end·place·workplace·transport·trainGrade·purpose)
+ * @param {object} form 근태 패널의 출장 폼(dateFrom·dateTo·days·start·end·place·venue·workplace·transport·trainGrade·purpose)
  * @param {{path?: string[]}|null} [memo] 그 출장지에 기억해 둔 교통편(src/routes.js 의 recallRoute)
  * @returns {object} { period, sDate, sHour, eDate, eHour, location, area, purpose, nation, stay, method, transports, grade, trans, notes, why, kept }
  */
@@ -316,7 +327,7 @@ export function settlePlan(form, memo = null) {
     period: dayTrip ? RULES.period.day_trip.code : RULES.period.general.code,
     periodLabel: dayTrip ? RULES.period.day_trip.label : RULES.period.general.label,
     sDate: form.dateFrom, sHour, eDate: dayTrip ? form.dateFrom : form.dateTo, eHour,
-    location: String(form.place || '').trim(),
+    location: tripLocation(form),
     area: dayTrip ? RULES.period.day_trip.area : '',
     purpose: String(form.purpose || '').trim(),
     nation: RULES.nation.code,

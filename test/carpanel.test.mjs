@@ -98,10 +98,11 @@ t('차량 조회 체크박스는 사전정산 옆에 서고 꺼져 있다 — �
 
 site.days['2026-10-20'] = [res(CARS[0].name, '2026-10-20', 600, 720), res(CARS[1].name, '2026-10-20', 1200, 1320)];
 tick('at_car', true);
-t('켜면 근무지·행선지 칸이 한 줄로 나오고(근무지는 적어 둔 것이 깔려 있다), 곧바로 폼의 날짜·시간(10/20 07:00~20:00)으로 차량 현황을 읽는다', () => {
+t('켜면 근무지 칸이 나오고(근무지는 적어 둔 것이 깔려 있다 — 행선지는 출장지다), 곧바로 폼의 날짜·시간(10/20 07:00~20:00)으로 차량 현황을 읽는다', () => {
   assert.ok(doc.getElementById('at_car').checked, '폼을 다시 그려도 켠 것이 남는다');
-  assert.deepEqual(keys(), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'purpose', 'settle', 'car', 'workplace', 'carPlace']);
-  assert.deepEqual([...doc.querySelector('#atFields .at-group.at-carwhere').children].map((n) => n.dataset.key), ['workplace', 'carPlace']);
+  assert.deepEqual(keys(), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'place', 'venue', 'purpose', 'settle', 'car', 'workplace']);
+  assert.deepEqual([...doc.querySelector('#atFields .at-group.at-carwhere').children].map((n) => n.dataset.key), ['workplace']);
+  assert.equal(doc.getElementById('at_carPlace'), null, '출장에는 행선지 칸이 따로 없다');
   assert.equal(doc.getElementById('at_workplace').value, '부산');
   assert.equal(when(), '10/20 07:00~20:00');
   assert.deepEqual(notes(), ['차량 현황을 읽는 중...']);
@@ -119,26 +120,31 @@ t('차량은 네 줄쯤만 보이고 나머지는 스크롤한다 (목록의 높
   assert.match(rule, /max-height: 156px/);
   assert.match(rule, /overflow-y: auto/);
 });
-t('차량 조회는 화면만의 값이다 — 올릴 내용과 필수 칸에는 끼지 않는다', () => {
+t('차량 조회는 화면만의 값이다 — 필수 칸이 늘지 않는다(근무지는 필수가 아니다)', () => {
   type('at_purpose', '착수회의 참석');
-  assert.equal(doc.getElementById('atNeed').textContent, '올릴 내용 — 출장 10/20 07:00~20:00 · 착수회의 참석');
-  assert.equal(doc.getElementById('atSubmit').disabled, false, '행선지가 비어 있어도 근태는 올릴 수 있다');
-  assert.equal(doc.querySelector('.at-field[data-key="carPlace"]').classList.contains('need'), false);
+  assert.equal(doc.querySelector('.at-field[data-key="workplace"]').classList.contains('need'), false);
+  assert.equal(doc.querySelector('.at-field[data-key="place"]').classList.contains('need'), true, '출장지는 근태의 필수 칸이다');
   assert.deepEqual(site.scans.length, 1, '목적을 적는 것으로는 다시 읽지 않는다');
 });
 
 console.log('빈 차량을 누르면 그 자리에서 신청한다');
 car('스타리아').click();
 await wait(30);
-t('행선지가 비어 있으면 보내지 않는다 — 적으라고 말하고 그 칸에 손을 놓는다', () => {
+t('행선지(출장지)가 비어 있으면 보내지 않는다 — 적으라고 말하고 그 칸에 손을 놓는다', () => {
   assert.deepEqual(site.picked, []);
-  assert.match(notes().join(' '), /먼저 행선지를 적어 주세요\(차량 신청에 필요합니다\)/);
-  assert.equal(status(), '차량을 신청하려면 행선지가 필요합니다 — 적은 뒤 다시 눌러 주세요.');
-  assert.equal(doc.activeElement, doc.getElementById('at_carPlace'));
+  assert.match(notes().join(' '), /먼저 출장지를 적어 주세요\(차량 신청에 필요합니다\)/);
+  assert.equal(status(), '차량을 신청하려면 출장지가 필요합니다 — 적은 뒤 다시 눌러 주세요.');
+  assert.equal(doc.activeElement, doc.getElementById('at_place'));
 });
-type('at_carPlace', '대전');
-t('행선지를 적으면 무엇이 나가는지 상자에 적힌다', () =>
-  assert.ok(notes().includes('빈 차량을 누르면 이 시간으로 바로 신청합니다 · 근무지 부산 · 행선지 대전')));
+type('at_place', '대전');
+t('출장지를 적으면 무엇이 나가는지 상자에 적히고, 근태도 올릴 수 있다 — 차량 조회는 올릴 내용에 끼지 않는다', () => {
+  assert.ok(notes().includes('빈 차량을 누르면 이 시간으로 바로 신청합니다 · 근무지 부산 · 행선지 대전'));
+  assert.equal(doc.getElementById('atNeed').textContent, '올릴 내용 — 출장 10/20 07:00~20:00 · 착수회의 참석 (출장지: 대전)');
+  assert.equal(doc.getElementById('atSubmit').disabled, false);
+});
+type('at_venue', '한국기계연구원');
+t('장소를 적으면 행선지가 출장지(장소)가 된다 — 여비계산서의 출장지와 같은 글', () =>
+  assert.ok(notes().includes('빈 차량을 누르면 이 시간으로 바로 신청합니다 · 근무지 부산 · 행선지 대전(한국기계연구원)')));
 {
   let release;
   site.hold = new Promise((r) => { release = r; });
@@ -146,10 +152,10 @@ t('행선지를 적으면 무엇이 나가는지 상자에 적힌다', () =>
   await wait(30);
   t('한 번 누르면 그 차량·기간·사용목적·행선지로 신청이 나간다 — 보내는 동안에는 다른 차량을 누를 수 없다', () => {
     assert.deepEqual(site.picked, [{ date: '2026-10-20', endDate: '2026-10-20', start: 420, end: 1200,
-      car: { name: '스타리아 (308소4997)', value: '75' }, title: '착수회의 참석', place: '대전' }]);
+      car: { name: '스타리아 (308소4997)', value: '75' }, title: '착수회의 참석', place: '대전(한국기계연구원)' }]);
     assert.deepEqual(rows().slice(0, 2), [['BUTTON', '쏘나타 (203도7306)', '비어 있음'], ['BUTTON', '스타리아 (308소4997)', '신청하는 중...']]);
     assert.ok([...box().querySelectorAll('button.at-car')].every((b) => b.disabled));
-    assert.equal(status(), '차량을 신청하는 중 — 스타리아 (308소4997) 10/20 07:00~20:00 · 행선지 대전');
+    assert.equal(status(), '차량을 신청하는 중 — 스타리아 (308소4997) 10/20 07:00~20:00 · 행선지 대전(한국기계연구원)');
     car('쏘나타').click();
     assert.equal(site.picked.length, 1, '잠긴 줄은 눌러도 나가지 않는다');
   });
@@ -160,14 +166,15 @@ t('행선지를 적으면 무엇이 나가는지 상자에 적힌다', () =>
 }
 t('신청이 되면 근태 탭에 그대로 있고(차량 탭으로 넘어가지 않는다), 현황을 다시 읽어 그 차량이 "내 신청"으로 바뀐다', () => {
   assert.equal(doc.getElementById('attend').classList.contains('hidden'), false);
-  assert.equal(status(), '차량을 신청했습니다 — 스타리아 (308소4997) 10/20 07:00~20:00 · 행선지 대전');
-  assert.equal(box().querySelector('.at-cars-note.ok').textContent, '신청했습니다 — 스타리아 (308소4997) 10/20 07:00~20:00 · 행선지 대전');
+  assert.equal(status(), '차량을 신청했습니다 — 스타리아 (308소4997) 10/20 07:00~20:00 · 행선지 대전(한국기계연구원)');
+  assert.equal(box().querySelector('.at-cars-note.ok').textContent, '신청했습니다 — 스타리아 (308소4997) 10/20 07:00~20:00 · 행선지 대전(한국기계연구원)');
   assert.deepEqual(site.scans.at(-1), ['2026-10-20']);
   assert.deepEqual(rows(), [
     ['DIV', '스타리아 (308소4997)', '07:00~20:00 내 신청'], ['BUTTON', '쏘나타 (203도7306)', '비어 있음'], ['DIV', '아반테 (181허4360)', '10:00~12:00 홍길동'],
   ], '내 신청이 맨 앞에 선다');
   assert.ok(box().querySelector('.at-car.busy.mine'));
-  assert.deepEqual([doc.getElementById('at_purpose').value, doc.getElementById('at_carPlace').value], ['착수회의 참석', '대전'], '폼은 그대로다');
+  assert.deepEqual([doc.getElementById('at_purpose').value, doc.getElementById('at_place').value, doc.getElementById('at_venue').value],
+    ['착수회의 참석', '대전', '한국기계연구원'], '폼은 그대로다');
 });
 
 console.log('신청이 안 됐을 때');
@@ -224,10 +231,12 @@ t('다시 조회를 누르면 기다리지 않고 다시 읽는다', () => {
 });
 tick('at_settle', true);
 type('at_place', '세종');
+type('at_venue', '');
 type('at_workplace', '부산');
 await loaded();
-t('사전정산을 켜면 출장지가 곧 행선지다 — 행선지 칸은 따로 없고, 차량 목록은 사전정산 칸들 아래에 선다', () => {
-  assert.deepEqual(keys(), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'purpose', 'settle', 'car', 'place', 'workplace', 'transport']);
+t('사전정산을 켜도 출장지가 행선지다 — 근무지는 사전정산 줄의 것을 쓰고, 차량 목록은 사전정산 칸들 아래에 선다', () => {
+  assert.deepEqual(keys(), ['dateFrom', 'start', 'dateTo', 'end', 'days', 'place', 'venue', 'purpose', 'settle', 'car', 'workplace', 'transport']);
+  assert.equal(doc.querySelector('#atFields .at-group.at-carwhere'), null);
   assert.ok(notes().includes('빈 차량을 누르면 이 시간으로 바로 신청합니다 · 근무지 부산 · 행선지 세종'));
   assert.deepEqual([...doc.querySelectorAll('#atFields > *')].map((n) => n.id || n.className.split(' ').slice(0, 2).join('.')).slice(-3),
     ['at-group.at-opts', 'at-group.at-where', 'atCars']);

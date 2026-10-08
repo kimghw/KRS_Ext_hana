@@ -14,6 +14,7 @@ import { callClaude } from './ai.js';
 import { structure, InputError } from './input.js';
 import { parseLocal } from './nlq.js';
 import { parseAttendLocal, fixRelativeDates } from './attend.js';
+import { parseSetupLocal, reasonInput } from './gongmun.js';
 
 export const NATIVE_HOST = 'com.krs.meetingroom';
 
@@ -134,6 +135,70 @@ export async function receiptSmart(file, ctx, opts) {
 export function receiptInput(file, { trip = {}, me = '' } = {}) {
   return `출장 정보: ${trip.from || '?'} ~ ${trip.to || trip.from || '?'}${trip.location ? ` · 출장지 ${trip.location}` : ''}${me ? ` · 출장자 ${me}` : ''}\n`
     + `첨부한 문서(파일 이름: ${file.name})를 읽어 출력 키를 채웁니다. 이 문서 한 장만 봅니다.`;
+}
+
+/**
+ * 공문(구매·교육 품의)에 넣을 문서를 읽는다(input.yaml 의 gongmun). 파일(이미지·PDF) 여러 장은 한 문서의 여러 쪽으로 보고 한 번에
+ * 보내며, 글을 붙여 넣었으면 글만 보낸다. 규칙 해석(local)은 없다 — 로컬 CLI 도 API 키도 안 되면 던진다.
+ * 초안으로 바꾸는 것은 src/gongmun.js 의 fromRecord 다.
+ * @param {{files?: {name:string,type:string,dataUrl:string}[], text?: string}} source
+ * @param {{kind: 'purchase'|'edu', today?: string}} ctx 화면이 고른 갈래
+ * @returns {Promise<{record: object, via: 'cli'|'api', costUsd?: number, note?: string}>}
+ */
+export async function gongmunSmart(source, ctx, opts) {
+  const files = source?.files || [];
+  const got = await askClaude('gongmun', gongmunInput(source, ctx), { ...opts, kind: ctx.kind, files });
+  if (!got.data) throw new Error(`문서를 읽지 못했습니다 — ${joined(got.fails) || 'Claude 연결(로컬 CLI 또는 API 키)이 필요합니다'}`);
+  return { record: got.data, via: got.via, costUsd: got.costUsd, note: joined(got.notes) };
+}
+
+/**
+ * 공문 탭의 채팅 칸 — 붙여 넣은 글(과제 목록 표·메모)에서 사전 설정 조각(과제·과제책임자(합의자)·부서장·참조자)을 뽑는다
+ * (input.yaml 의 gongmunSetup). Claude 가 닿지 않으면 규칙 해석(src/gongmun.js 의 parseSetupLocal)으로 내려간다.
+ * 얹는 것은 src/gongmun.js 의 mergeSetup 이다.
+ * @param {{preset?: object, projects?: object[], current?: string}} now 지금 등록된 사전 설정과 초안에서 고른 과제
+ * @returns {Promise<{patch: object, reply: string, via: 'cli'|'api'|'local', costUsd?: number, note?: string}>}
+ */
+export async function gongmunSetupSmart(text, now = {}, opts = {}) {
+  const input = `지금 등록된 사전 설정: ${JSON.stringify({ ...(now.preset || {}), projects: now.projects || [] })}\n`
+    + `지금 고른 과제: ${now.current || '없음'}\n\n새 글:\n<<<\n${String(text).slice(0, 8000)}\n>>>`;
+  const got = await askClaude('gongmunSetup', input, { ...opts, kind: 'gongmun' });
+  if (got.data) {
+    const { reply = '', ...patch } = got.data;
+    return { patch, reply, via: got.via, costUsd: got.costUsd, note: joined(got.fails, got.notes) };
+  }
+  const local = parseSetupLocal(text);
+  const out = structure('gongmunSetup', local.patch, { kind: 'gongmun' });
+  return { patch: out.data, reply: local.reply, via: 'local', note: joined(got.fails, out.notes) };
+}
+
+const GONGMUN_DOC = { purchase: '구매(견적서·거래명세서·쇼핑몰 주문 화면)', edu: '교육(교육 안내문·교육 신청 확인서·교육비 견적서)' };
+
+/**
+ * 문서 읽기에 줄 글. 파일 여러 장은 같은 건의 문서들이다(교육이면 교육 견적서와 교육 내용 캡처 — 2026-10-07 사용자 지정).
+ * 파일과 붙여 넣은 글이 같이 있으면 둘 다 본다.
+ */
+export function gongmunInput({ files = [], text = '' } = {}, { kind = 'purchase', today = '' } = {}) {
+  const head = `품의 종류: ${GONGMUN_DOC[kind] || GONGMUN_DOC.purchase}\n${today ? `오늘은 ${today} 입니다.\n` : ''}`;
+  // 웹페이지를 통째로 캡처하면 화면 글자가 같이 온다(src/pagecap.js 의 TEXT_MAX) — 다리가 입력을 자르는 2만 자 안에 머리말과 함께 든다.
+  const pasted = String(text || '').trim() ? `\n<<<\n${String(text).slice(0, 18000)}\n>>>` : '';
+  if (files.length) {
+    return `${head}첨부한 문서 ${files.length}장(파일 이름: ${files.map((f) => f.name).join(', ')})을 읽어 출력 키를 채웁니다.`
+      + (files.length > 1 ? ' 여러 장은 같은 건의 문서들(여러 쪽, 또는 견적서와 교육 내용 등)이니 함께 보고, parts 에 파일마다 무슨 문서인지 적습니다.' : '')
+      + (pasted ? `\n사용자가 붙여 넣은 글도 함께 봅니다.${pasted}` : '');
+  }
+  return `${head}아래는 사용자가 붙여 넣은 글입니다. 이 글을 읽어 출력 키를 채웁니다.${pasted}`;
+}
+
+/**
+ * 과제 내용으로 품의 사유(구매사유·교육사유)와 용도(교육목적)를 쓴다(input.yaml 의 gongmunReason — 2026-10-07 사용자 지정).
+ * 쓰는 일이라 규칙 해석은 없다 — 로컬 CLI 도 API 키도 안 되면 던진다. 초안에 넣는 것은 src/gongmun.js 의 applyReason 이다.
+ * @returns {Promise<{data: {reason: string, use: string|null}, via: 'cli'|'api', costUsd?: number, note?: string}>}
+ */
+export async function gongmunReasonSmart(kind, draft, project, opts) {
+  const got = await askClaude('gongmunReason', reasonInput(kind, draft, project), { ...opts, kind });
+  if (!got.data) throw new Error(`사유를 쓰지 못했습니다 — ${joined(got.fails) || 'Claude 연결(로컬 CLI 또는 API 키)이 필요합니다'}`);
+  return { data: got.data, via: got.via, costUsd: got.costUsd, note: joined(got.notes) };
 }
 
 /**

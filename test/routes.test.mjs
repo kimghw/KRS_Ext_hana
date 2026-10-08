@@ -38,6 +38,8 @@ t('사전정산 화면의 교통편 줄을 읽으면 그것을 기억한다 — 
 console.log('담기와 꺼내기');
 t('출장지에 적은 글이 열쇠다 — 더 나중의 출장이 앞의 것을 덮어쓰고, 예전 출장을 읽어도 요즘 것을 덮어쓰지 않는다', () => {
   assert.deepEqual([routeKey('  경기도   고양시 킨텍스 '), ROUTES_KEY], ['경기도 고양시 킨텍스', 'tripRoutes']);
+  // 여비계산서에서 읽은 출장지는 "출장지(장소)"다 — 폼의 출장지와 같은 열쇠가 되도록 끝의 괄호(장소)를 뗀다.
+  assert.deepEqual([routeKey('대전(한국기계연구원)'), routeKey('대전 (KAIST) '), routeKey('(대전)')], ['대전', '대전', '(대전)']);
   const a = { transport: ['train'], trainGrade: 'standard', path: ['부산', '서울'], date: '2026-09-09' };
   const one = keepRoute({}, ' 경기도 고양시  킨텍스', a);
   assert.deepEqual(one, { '경기도 고양시 킨텍스': a });

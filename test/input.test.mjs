@@ -78,14 +78,15 @@ t('지시문에는 명세의 칸과 규칙이 모두 들어간다', () => {
   }
 });
 t('스키마는 구조화 출력이 받는 말만 쓴다 — 수 범위·글 길이는 넣지 않는다', () => {
-  const allowed = new Set(['type', 'properties', 'required', 'additionalProperties', 'description', 'enum', 'anyOf']);
+  // items 는 목록(list) 칸의 줄 모양이다 — 구조화 출력이 받는다.
+  const allowed = new Set(['type', 'properties', 'required', 'additionalProperties', 'description', 'enum', 'anyOf', 'items']);
   const walk = (node) => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) return node.forEach(walk);
     for (const [k, v] of Object.entries(node)) {
       if (k !== 'properties') assert.ok(allowed.has(k), `받지 않는 키: ${k}`);
       else for (const p of Object.values(v)) walk(p);
-      if (k === 'anyOf') walk(v);
+      if (k === 'anyOf' || k === 'items') walk(v);
     }
   };
   for (const name of Object.keys(TASKS)) {

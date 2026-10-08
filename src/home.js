@@ -151,6 +151,7 @@ const slim = (it) => ({
  * 훑은 날들에서 내 예약을 추리고, 못 읽은 날을 센다.
  * 못 읽은 날을 조용히 넘기면 "내 예약이 없다"는 거짓말이 된다 — 그래서 여기서 같이 센다.
  *   skippedDates — 읽었지만 확신할 수 없어 뺀 날
+ *   skipped      — 그 날을 회의실·차량 어느 쪽에서 무슨 까닭으로 뺐는가. 날 수만 적으면 고칠 데를 찾을 수 없다.
  *   unread       — 회의실이든 차량이든 기록 자체가 없는 날(훑기가 도중에 죽었을 때)
  */
 export function summarize(dates, days, { name = '', booked = [], failed = [] } = {}) {
@@ -158,7 +159,27 @@ export function summarize(dates, days, { name = '', booked = [], failed = [] } =
   const skippedDates = [...new Set(skipped.map((s) => s.date))];
   const have = new Set(days.map((d) => `${d.kind}|${d.date}`));
   const unread = dates.filter((d) => !have.has(`room|${d}`) || !have.has(`car|${d}`));
-  return { items: items.map(slim), skippedDates, unread, failed: [...failed] };
+  return {
+    items: items.map(slim), skippedDates,
+    skipped: skipped.map(({ kind, date, reason }) => ({ kind, date, reason })).sort((a, b) => a.date.localeCompare(b.date)),
+    unread, failed: [...failed],
+  };
+}
+
+const SCAN_NAME = { room: '회의실', car: '차량' };
+const SKIP_SHOWN = 3;
+
+/**
+ * 확인 불가로 뺀 날을 어느 날·어느 쪽·무슨 까닭인지까지 적는다 — "10/23 회의실: 달력은 3건인데 표에서 2건만 읽었습니다".
+ * 셋이 넘으면 나머지는 "외 N건"으로 줄인다. 까닭을 담기 전에 담아 둔 것(skipped 없음)은 날 수만 적는다.
+ */
+export function skippedText(cache) {
+  const head = `⚠ ${cache.skippedDates.length}일은 확인 불가라 제외했습니다`;
+  const list = cache.skipped || [];
+  if (!list.length) return head;
+  const one = (s) => `${shortLabel(s.date)} ${SCAN_NAME[s.kind] || s.kind}: ${String(s.reason || '확인 불가').replace(/\.$/, '')}`;
+  const more = list.length > SKIP_SHOWN ? ` 외 ${list.length - SKIP_SHOWN}건` : '';
+  return `${head} — ${list.slice(0, SKIP_SHOWN).map(one).join(' / ')}${more}`;
 }
 
 /* ------------------------------------------------------------ 근태 */
@@ -166,7 +187,7 @@ export function summarize(dates, days, { name = '', booked = [], failed = [] } =
 const clockMinutes = (t) => (/^\d{2}:\d{2}$/.test(t || '') ? +t.slice(0, 2) * 60 + +t.slice(3) : 0);
 
 /**
- * 읽어 둔 근태에서 카드에 올릴 것만 — 그 기간에 걸친 출장·외근·휴가(PLAN_GROUPS)를 예약과 같은 한 건 모양으로.
+ * 읽어 둔 근태에서 카드에 올릴 것만 — 그 기간에 걸친 출장·외근·휴가(PLAN_GROUPS — 휴가에는 외출·건강검진도 든다)를 예약과 같은 한 건 모양으로.
  * 올려 두었거나 결재가 끝난 것만이고(plansIn), 시각이 없는 건(전일 휴가)은 timed 가 거짓이다.
  * 출장만은 다녀온 뒤 4주까지 남는다(plansToShow) — 다녀온 출장은 여비를 정산해야 해서 눈에 띄어야 한다.
  * 몇 주까지 남길지(4주·8주·안 봄)는 근태 탭의 신청 내역에서 고른 값을 따르고, 사후정산이 완료됐거나 증빙을 담당자에게 보낸
@@ -415,11 +436,11 @@ const STYLE = `${CARD_STYLE}
 .krs-mine .krs-mine-login { margin-left: 4px; color: #1f4e9c; text-decoration: underline; }
 `;
 
-/** 근태 칩의 풍선말. 휴가는 연차·체력단련이고, 외근에는 같은 신청서로 올리는 교육이 들어간다. */
+/** 근태 칩의 풍선말. 휴가는 연차·체력단련·외출·건강검진이고, 외근에는 같은 신청서로 올리는 교육이 들어간다. */
 const PLAN_CHIP_TITLE = {
   trip: '오늘부터의 내 출장과, 다녀온 뒤 여비 정산이 덜 끝난 출장 (결재요청·결재완료)',
   out: '오늘부터의 내 외근·교육 (결재요청·결재완료)',
-  leave: '오늘부터의 내 휴가 — 연차·체력단련 (결재요청·결재완료)',
+  leave: '오늘부터의 내 휴가 — 연차·체력단련·외출·건강검진 (결재요청·결재완료)',
 };
 
 /** 홈 카드의 공통 겉(homecard.js)을 만들고, 안쪽 목록은 우리 것으로 채운다. */
@@ -1184,7 +1205,7 @@ export function createHomeCard(doc, deps = {}) {
         ? `이름을 e-Class 에서 읽지 못했습니다(${nameNote}). 예약 패널의 "설정 및 연결"에 이름을 넣으면 예약자 이름으로도 찾습니다`
         : '이름을 넣으면 예약자 이름으로도 찾습니다 — 예약 패널의 "설정 및 연결"');
     }
-    if (cache.skippedDates?.length) warn.push(`⚠ ${cache.skippedDates.length}일은 확인 불가라 제외했습니다`);
+    if (cache.skippedDates?.length) warn.push(skippedText(cache));
     if (cache.unread?.length) warn.push(`⚠ ${cache.unread.length}일은 아예 읽지 못했습니다`);
     warn.push(...(cache.failed || []));
     ui.warn.textContent = warn.join(' · ');
@@ -1568,9 +1589,9 @@ export function createHomeCard(doc, deps = {}) {
     const it = view.all[+li.dataset.i];
     if (!it) return;
     // 패널이 어느 날짜·종류를 열지 부탁을 남기고 연다. 이미 열려 있으면 패널이 저장소 변화로 알아챈다.
-    // 근태 건은 근태 탭으로 간다 — 취소·변경은 거기서 한다.
+    // 근태 건은 근태 탭으로 가서 그 건(docNo)의 카드를 편다 — 취소·변경은 거기서 한다.
     const mode = it.kind === 'attend' ? 'attend' : it.kind === 'car' ? 'car' : 'room';
-    await storage.set({ [JUMP_KEY]: { date: it.from.date, mode, at: now() } });
+    await storage.set({ [JUMP_KEY]: { date: it.from.date, mode, ...(mode === 'attend' ? { docNo: it.docNo } : {}), at: now() } });
     await askPanel();
   });
 

@@ -395,7 +395,7 @@ button.danger:hover { filter: brightness(1.08); }
 
 /* ------------------------------------------------------------ 근태 */
 
-/* 네 탭이 한 줄에 들어가도록 글자 사이를 조금 줄인다. */
+/* 탭이 한 줄에 들어가도록 글자 사이를 조금 줄인다(다섯 탭이 된 뒤의 간격은 아래 공문 쪽에서 더 줄인다). */
 .tabs .tab { padding: 8px 4px; white-space: nowrap; }
 
 .attend { margin-bottom: 18px; }
@@ -751,8 +751,12 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-span .at-plus { grid-column: 9; padding: 8px 8px; background: var(--free); border-color: var(--free-line); }
 .attend .at-span .at-plus:hover { background: var(--free-hover); border-color: var(--free-line); }
 .attend .at-span .at-plus.active { background: #1f9d61; border-color: #1f9d61; color: #fff; }
-/* 여비계산서 사전정산을 켜면 나오는 한 줄 — 출장지 · 근무지 · 교통편 아이콘(기차·비행기·버스). */
+/* 같은 묶음(group)의 칸이 나란히 서는 한 줄. */
 .attend .at-group { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+/* 출장의 출장지(좁게) · 장소 한 줄 — 사전정산과 상관없이 늘 나온다(2026-10-08 사용자 지정). */
+.attend .at-group.at-spot { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+/* 여비계산서 사전정산을 켜면 나오는 한 줄 — 근무지 · 교통편 아이콘(기차·비행기·버스). */
+.attend .at-group.at-where { grid-template-columns: minmax(0, 1fr) auto; }
 .attend .at-icons .at-chips { flex-wrap: nowrap; gap: 3px; }
 /* 교통편 아이콘 — 고르면 버튼이 아니라 **아이콘의 색**이 바뀐다(2026-10-03 사용자 지정). 안 고른 것은 흐린 회색, 고른 것은 파랑,
    특실(기차를 한 번 더 누른 것 — 출장 카드에서는 비행기도)은 주황색이고 오른쪽 위에 "+" 가 붙는다. 여럿이 함께 켜질 수 있다. 신청 폼과 출장 카드의 가는 편·오는 편이 같이 쓴다. */
@@ -767,7 +771,7 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-leg .at-chip.at-icon:disabled { opacity: .7; }
 /* 출장 폼의 체크박스 둘(여비계산서 사전정산 · 차량 조회)은 한 줄에 나란히 선다. 좁으면 차량 조회가 다음 줄로 내려간다. */
 .attend .at-group.at-opts { display: flex; flex-wrap: wrap; gap: 8px 18px; }
-/* 차량 조회를 켰을 때의 근무지(좁게) · 행선지 한 줄 — 출장지·근무지 줄이 없는 폼(외근, 사전정산을 끈 출장)에서만 나온다. */
+/* 차량 조회를 켰을 때의 근무지(좁게) · 행선지 한 줄 — 근무지 칸이 없는 폼(외근, 사전정산을 끈 출장 — 출장은 행선지가 출장지라 근무지만)에서만 나온다. */
 .attend .at-group.at-carwhere { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
 /* 출장의 날짜·시각 두 줄(2026-10-06 사용자 지정) — 출발일 오른쪽에 출발 시각(go), 도착일 오른쪽에 도착 시각(back).
    시각 칸은 줄의 오른쪽 3할쯤이되 "도착 20:00" 이 들어갈 폭은 지킨다. 날짜 칸은 평소 한 줄을 다 쓰지만(at-date) 묶음 안에서는 제 칸만 쓴다. */
@@ -914,3 +918,172 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-send-btns { display: flex; gap: 6px; margin-top: 8px; }
 .attend .at-send-btns button { min-height: 34px; font-size: 12px; }
 .attend .at-send-go { flex: 1; }
+
+/* ------------------------------------------------------------ 공문 */
+
+/* 탭이 다섯 개(근태·공문·회의실·차량·현황)라 한 칸씩 조금 더 좁힌다. */
+.tabs { gap: 2px; }
+.tabs .tab { padding: 8px 2px; }
+
+.gongmun { margin-bottom: 18px; }
+.gongmun .gm-kinds { margin-bottom: 12px; }
+.gongmun .gm-kind-row { display: flex; gap: 3px; }
+.gongmun .gm-kind {
+  flex: 1 0 auto; gap: 4px; min-height: 32px; padding: 4px 2px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap;
+}
+.gongmun .gm-kind small { font-size: 10px; font-weight: 600; color: var(--faint); }
+.gongmun .gm-kind:hover { background: var(--pick-soft); border-color: var(--pick); }
+.gongmun .gm-kind.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+.gongmun .gm-kind.active small { color: rgb(255 255 255 / 75%); }
+
+/* 채팅 칸 — 근태의 말로 채우기와 같은 모양. 여러 줄 표를 붙여 넣으면 칸이 자란다(gongmunpanel.js 의 growChat). */
+.gongmun .gm-chat { margin-bottom: 12px; padding: 9px 11px; }
+.gongmun .gm-chat .ask-bar { align-items: flex-start; }
+.gongmun .gm-chat .sparkle-icon { margin-top: 11px; }
+.gongmun .gm-chat textarea {
+  flex: 1; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; border: 1px solid transparent; border-radius: 10px;
+  background: var(--surface-soft); font: inherit; font-size: 14px; line-height: 1.5; color: inherit; resize: none; overflow-y: auto;
+}
+.gongmun .gm-chat textarea::placeholder { color: var(--faint); }
+.gongmun .gm-chat.off .ask-bar button { background: var(--surface-soft); color: var(--muted); opacity: 1; }
+.gongmun .gm-chat.off .sparkle-icon { color: var(--faint); opacity: .55; }
+.gongmun .gm-chat-log { list-style: none; margin: 0; padding: 0; }
+.gongmun .gm-chat-log:not(:empty) { margin-top: 9px; }
+.gongmun .gm-say { margin-top: 5px; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+.gongmun .gm-say.me { margin-left: 18%; background: var(--pick-soft); color: var(--fg); }
+.gongmun .gm-say.ai { margin-right: 8%; background: var(--surface-soft); color: var(--muted); }
+.gongmun .gm-say.error { color: var(--danger); }
+
+.gongmun .gm-soon { margin: 0 0 12px; padding: 12px 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+/* 문서 넣는 곳. 고르는 단추는 감추고(탭으로는 닿는다) 점선 상자 전체가 끌어다 놓는 자리이자 누르는 자리다. */
+.gongmun .gm-intake { position: relative; padding: 10px; }
+.gongmun .gm-intake input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.gongmun .gm-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-height: 84px; padding: 12px; border: 1.5px dashed color-mix(in srgb, var(--pick) 55%, var(--line)); border-radius: 12px;
+  background: var(--pick-soft); text-align: center; cursor: pointer;
+}
+.gongmun .gm-drop:hover, .gongmun .gm-intake.over .gm-drop { border-color: var(--pick); background: color-mix(in srgb, var(--pick) 16%, var(--surface)); }
+.gongmun .gm-drop:has(input[type="file"]:focus-visible) { outline: 2px solid var(--pick); outline-offset: 2px; }
+.gongmun .gm-drop-lead { display: inline-flex; align-items: center; gap: 6px; color: var(--pick); font-size: 14px; font-weight: 650; }
+.gongmun .gm-drop-lead svg { width: 17px; height: 17px; }
+.gongmun .gm-drop-how { color: var(--muted); font-size: 12px; word-break: keep-all; }
+.gongmun .gm-file { color: var(--faint); font-size: 12px; overflow-wrap: anywhere; }
+.gongmun .gm-file:empty { display: none; }
+.gongmun .gm-intake[aria-busy="true"] .gm-drop { opacity: .65; cursor: progress; }
+.gongmun .gm-intake.off .gm-drop { border-color: var(--line); background: var(--surface-soft); }
+.gongmun .gm-intake.off .gm-drop-lead { color: var(--muted); }
+/* 문서 넣는 곳 아래의 두 단추 — 웹페이지 통째로 캡처, 문서 없이 쓰기. */
+.gongmun .gm-intake-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; margin-top: 6px; }
+.gongmun .gm-intake-actions button { font-size: 12px; }
+.gongmun .gm-capture { display: inline-flex; align-items: center; gap: 5px; color: var(--pick); font-weight: 600; }
+.gongmun .gm-capture svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gongmun .gm-capture:disabled { opacity: .6; cursor: progress; }
+.gongmun .gm-intake .cli-help { margin: 8px 2px 0; }
+.gongmun .statusline { margin-bottom: 10px; }
+
+/* 읽은 내용·공문 카드 */
+.gongmun .gm-draft, .gongmun .gm-doc { margin-bottom: 12px; padding: 14px 16px; }
+.gongmun .gm-draft { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
+.gongmun .gm-source { display: flex; flex-direction: column; gap: 3px; margin: -4px 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.gongmun .gm-note { display: block; color: color-mix(in srgb, var(--mine) 70%, var(--fg)); font-size: 12px; line-height: 1.5; }
+.gongmun .gm-items { list-style: none; margin: 0 0 10px; padding: 0; border-top: 1px solid var(--line); }
+.gongmun .gm-items:empty { display: none; }
+.gongmun .gm-items li { display: flex; flex-direction: column; padding: 6px 2px; border-bottom: 1px solid var(--line); }
+.gongmun .gm-item-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.gongmun .gm-item-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.gongmun .gm-limit {
+  margin: 0 0 12px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line)); border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger); font-size: 13px; line-height: 1.6;
+}
+.gongmun .gm-limit.warn { border-color: color-mix(in srgb, var(--mine) 45%, var(--line)); background: color-mix(in srgb, var(--mine) 10%, var(--surface)); color: var(--fg); }
+.gongmun .gm-label { display: block; margin: 12px 0 5px; color: var(--muted); font-size: 13px; }
+.gongmun .gm-draft > .gm-label:first-of-type { margin-top: 4px; }
+
+/* 과제 고르기 — 다섯 개까지. 긴 과제명은 두 줄까지 보이고 잘린다(전체는 툴팁). */
+.gongmun .gm-projects { display: flex; flex-direction: column; gap: 4px; }
+.gongmun .gm-proj {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; min-height: 0; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left;
+}
+.gongmun .gm-proj:hover { border-color: var(--pick); background: var(--pick-soft); }
+.gongmun .gm-proj.active { border-color: var(--pick); background: var(--pick-soft); box-shadow: inset 3px 0 0 var(--pick); }
+.gongmun .gm-proj-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.gongmun .gm-proj.active .gm-proj-name { color: var(--pick); }
+.gongmun .gm-proj-lead { color: var(--muted); font-size: 11px; }
+.gongmun .gm-noproj { margin: 0; color: var(--muted); font-size: 13px; }
+/* 고른 과제의 기본 내용 — 별명(제목)·번호·연구기간(과제 개요)·내용(사유 근거). 빈 것은 흐리게. */
+.gongmun .gm-proj-info { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin: 6px 0 0; padding: 7px 10px;
+  border-radius: 10px; background: var(--surface-soft); font-size: 12px; color: var(--muted); }
+.gongmun .gm-proj-info strong { width: 100%; color: inherit; font-size: 11px; font-weight: 600; }
+.gongmun .gm-proj-info b { color: var(--fg); font-weight: 600; }
+.gongmun .gm-proj-info .gm-miss { opacity: .7; font-style: italic; }
+.gongmun .gm-proj-info button { margin-left: auto; }
+
+.gongmun .gm-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 12px; }
+.gongmun .gm-fields:empty { display: none; }
+.gongmun .gm-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gongmun .gm-field.wide { grid-column: 1 / -1; }
+.gongmun .gm-field label { color: var(--muted); font-size: 12px; }
+.gongmun .gm-field input, .gongmun .gm-field textarea, .gongmun .gm-field select,
+.gongmun .gm-doc input, .gongmun .gm-doc textarea,
+.gongmun .gm-box input[type="text"], .gongmun .gm-box select, .gongmun .gm-box textarea {
+  width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px;
+  background: var(--surface-soft); font: inherit; font-size: 14px; color: inherit;
+}
+.gongmun textarea { resize: vertical; line-height: 1.55; }
+.gongmun .gm-doc textarea, .gongmun .gm-box textarea { font-family: ui-monospace, "D2Coding", "Malgun Gothic", monospace; font-size: 12.5px; white-space: pre; overflow-x: auto; }
+.gongmun input:focus, .gongmun textarea:focus, .gongmun select:focus { border-color: var(--pick); outline: none; }
+
+/* 결재선 — 기안자 → 합의자(과제책임자) → 결재자(부서장) · 참조자 */
+.gongmun .gm-line { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.gongmun .gm-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.gongmun .gm-step { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 8px; border-radius: 8px; background: var(--surface-soft); }
+.gongmun .gm-step em, .gongmun .gm-refs em { font-style: normal; font-size: 11px; font-weight: 650; color: var(--pick); }
+.gongmun .gm-step small { color: var(--faint); font-size: 11px; }
+.gongmun .gm-step.miss { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.gongmun .gm-arrow { color: var(--faint); font-size: 12px; }
+.gongmun .gm-refs { display: inline-flex; gap: 6px; align-items: baseline; padding: 0 2px; color: var(--fg); }
+.gongmun .gm-need { margin: 12px 0 0; color: color-mix(in srgb, var(--mine) 70%, var(--fg)); font-size: 13px; font-weight: 600; line-height: 1.6; }
+.gongmun .gm-need:empty { display: none; }
+
+.gongmun .gm-form-name { color: var(--muted); font-size: 12px; }
+.gongmun .gm-doc .gm-label:first-of-type { margin-top: 0; }
+.gongmun .gm-edited { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.gongmun .gm-actions { display: flex; gap: 6px; margin-top: 10px; }
+.gongmun .gm-actions button { flex: 1; }
+.gongmun .gm-steps-list { margin: 12px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.gongmun .gm-steps-list b { margin-right: 4px; color: var(--fg); font-weight: 600; }
+
+/* 양식·사전 설정 — 접어 두는 칸. 설정의 접는 줄과 같은 모양이다. */
+.gongmun .gm-box { margin-bottom: 10px; padding: 0 14px; border-radius: 14px; }
+.gongmun details > summary { display: flex; align-items: center; gap: 9px; min-height: 43px; color: var(--muted); font-size: 14px; cursor: pointer; list-style: none; }
+.gongmun details > summary::-webkit-details-marker { display: none; }
+.gongmun details > summary > svg { width: 15px; height: 15px; }
+.gongmun details > summary::after { content: ""; width: 5px; height: 5px; margin: 0 3px; border-right: 1.4px solid var(--faint); border-bottom: 1.4px solid var(--faint); transform: rotate(-45deg); transition: transform .15s; }
+.gongmun details[open] > summary::after { transform: rotate(45deg); }
+.gongmun .gm-box > summary > span:first-of-type { color: var(--fg); font-weight: 600; }
+.gongmun .gm-box-body { padding: 0 0 14px; }
+.gongmun .gm-box-body > .gm-label:first-child { margin-top: 2px; }
+.gongmun .gm-box input[hidden] { display: none; }
+.gongmun .gm-box #gmTplFormId { margin-top: 6px; }
+.gongmun .gm-vars-box { margin-top: 10px; }
+.gongmun .gm-vars-box > summary { min-height: 34px; font-size: 13px; }
+.gongmun .gm-vars { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 10px; margin: 0 0 6px; font-size: 12px; line-height: 1.5; }
+.gongmun .gm-vars dt { font-family: ui-monospace, monospace; color: var(--pick); }
+.gongmun .gm-vars dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.gongmun .gm-proj-head { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+.gongmun .gm-proj-head .gm-label { margin: 0; }
+.gongmun .gm-proj-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.gongmun .gm-proj-row { padding: 8px 10px 10px; border: 1px solid var(--line); border-radius: 12px; }
+.gongmun .gm-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.gongmun .gm-row-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.gongmun .gm-row-fields input.wide { grid-column: 1 / -1; }
+.gongmun .gm-row-fields input { min-height: 34px; font-size: 13px; }
+/* 사유 칸 머리 — 이름 오른쪽에 "과제 내용으로 쓰기". 첨부가 될 문서 줄. 과제 내용 칸. */
+.gongmun .gm-field-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
+.gongmun .gm-reason { min-height: 22px; padding: 1px 7px; font-size: 11px; color: var(--pick); border: 1px solid color-mix(in srgb, var(--pick) 35%, var(--line)); border-radius: 7px; }
+.gongmun .gm-attach { color: var(--fg); font-weight: 600; }
+.gongmun .gm-row-fields textarea { grid-column: 1 / -1; min-height: 60px; font-size: 13px; }

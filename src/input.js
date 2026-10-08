@@ -42,8 +42,16 @@ function typeLabel(f) {
     case 'number': return `수${range(f)}`;
     case 'enum': return f.values.map((v) => `"${v}"`).join(' | ');
     case 'boolean': return 'true | false';
+    case 'list': return `목록(${f.max ?? 50}줄까지) — 줄마다 아래 키의 객체`;
     default: return '글';
   }
+}
+
+/** 칸 한 줄의 설명. 목록이면 그 아래에 줄의 키를 들여 적는다. */
+function keyLines(key, f, indent = '') {
+  const head = `${indent}- ${key} (${typeLabel(f)}${f.required ? ', 필수' : ' 또는 null'}): ${f.desc}`;
+  if (f.type !== 'list') return [head];
+  return [head, ...Object.entries(f.item).flatMap(([k, sf]) => keyLines(k, sf, `${indent}    `))];
 }
 
 /**
@@ -52,8 +60,7 @@ function typeLabel(f) {
  */
 export function systemPrompt(task, { jsonOnly = false } = {}) {
   const spec = specOf(task);
-  const keys = Object.entries(spec.fields).map(([key, f]) =>
-    `- ${key} (${typeLabel(f)}${f.required ? ', 필수' : ' 또는 null'}): ${f.desc}`);
+  const keys = Object.entries(spec.fields).flatMap(([key, f]) => keyLines(key, f));
   return [
     spec.role,
     '',
@@ -67,21 +74,27 @@ export function systemPrompt(task, { jsonOnly = false } = {}) {
   ].join('\n');
 }
 
-const JSON_TYPE = { date: 'string', time: 'string', string: 'string', enum: 'string', integer: 'integer', number: 'number', boolean: 'boolean' };
+const JSON_TYPE = { date: 'string', time: 'string', string: 'string', enum: 'string', integer: 'integer', number: 'number', boolean: 'boolean', list: 'array' };
+
+/** 칸 하나의 스키마. 목록은 줄마다 같은 모양의 객체다(줄 안의 칸도 모두 받고, 없는 값은 null). */
+function propOf(f) {
+  const description = f.type === 'enum' || f.type === 'boolean' || f.type === 'string' || f.type === 'list' ? f.desc : `${f.desc} (${typeLabel(f)})`;
+  const base = { type: JSON_TYPE[f.type], ...(f.type === 'enum' ? { enum: f.values } : {}), ...(f.type === 'list' ? { items: objectOf(f.item) } : {}) };
+  return f.required ? { ...base, description } : { anyOf: [base, { type: 'null' }], description };
+}
+
+function objectOf(fields) {
+  const properties = {};
+  for (const [key, f] of Object.entries(fields)) properties[key] = propOf(f);
+  return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
+}
 
 /**
  * API 구조화 출력(output_config.format)에 넘길 스키마.
  * 구조화 출력은 수 범위(minimum·maximum)와 글 길이를 받지 않는다 — 설명에 적고, 지키는지는 관문이 본다.
  */
 export function jsonSchema(task) {
-  const spec = specOf(task);
-  const properties = {};
-  for (const [key, f] of Object.entries(spec.fields)) {
-    const description = f.type === 'enum' || f.type === 'boolean' || f.type === 'string' ? f.desc : `${f.desc} (${typeLabel(f)})`;
-    const base = { type: JSON_TYPE[f.type], ...(f.type === 'enum' ? { enum: f.values } : {}) };
-    properties[key] = f.required ? { ...base, description } : { anyOf: [base, { type: 'null' }], description };
-  }
-  return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
+  return objectOf(specOf(task).fields);
 }
 
 /* ------------------------------------------------------------------ 관문 */
@@ -117,8 +130,34 @@ function convert(f, v) {
     case 'enum': return typeof v === 'string' && f.values.includes(v.trim()) ? v.trim() : undefined;
     case 'boolean': return typeof v === 'boolean' ? v : undefined;
     case 'string': return typeof v === 'string' ? v.trim().slice(0, f.max ?? 2000) : undefined;
+    case 'list': return asList(f, v)?.rows;
     default: return undefined;
   }
+}
+
+/**
+ * 목록. 줄마다 줄의 칸(item)을 같은 규칙으로 본다 — 줄의 필수 칸이 없거나 틀리면 그 줄을 빼고, 나머지 칸은 틀리면 비운다.
+ * 배열이 아니면 받지 않는다(undefined). dropped 는 뺀 줄 수다.
+ */
+function asList(f, v) {
+  if (!Array.isArray(v)) return undefined;
+  const rows = [];
+  let dropped = 0;
+  for (const x of v.slice(0, f.max ?? 50)) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) { dropped++; continue; }
+    const row = {};
+    let ok = true;
+    for (const [k, sf] of Object.entries(f.item)) {
+      const sv = x[k];
+      const absent = sv == null || (typeof sv === 'string' && !sv.trim());
+      const val = absent ? undefined : convert(sf, sv);
+      row[k] = val ?? null;
+      if (val === undefined && sf.required) ok = false;
+    }
+    if (ok) rows.push(row);
+    else dropped++;
+  }
+  return { rows, dropped };
 }
 
 const show = (v) => {
@@ -154,6 +193,13 @@ export function structure(task, raw, { kind } = {}) {
     const absent = v == null || (typeof v === 'string' && !v.trim());
     const value = absent ? undefined : convert(f, v);
     data[key] = value ?? null;
+    // 목록은 받되 틀린 줄만 뺐으면 그 사실을 알린다. 필수 목록이 다 빠져 비었으면 없는 것과 같다.
+    if (f.type === 'list' && value) {
+      const dropped = asList(f, v).dropped;
+      if (dropped) notes.push(`${nameOf(f, key)} 중 ${dropped}줄은 받을 수 없어 뺐습니다`);
+      if (!value.length && f.required) problems.push(`${key} 가 비어 있습니다`);
+      continue;
+    }
     if (value !== undefined) continue;
     if (f.required) problems.push(absent ? `${key} 가 없습니다` : `${key} 값(${show(v)})이 틀렸습니다`);
     else if (!absent) notes.push(`${nameOf(f, key)} 값(${show(v)})은 받을 수 없어 뺐습니다`);

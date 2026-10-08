@@ -191,16 +191,17 @@ console.log('실제 차량 화면 (2026-09-16 캡처)');
 }
 
 console.log('신청할 한 건');
-t('고른 차량·기간과 함께 사용목적(폼의 목적)과 행선지가 나간다 — 사전정산을 켠 출장은 출장지가 행선지다', () => {
+t('고른 차량·기간과 함께 사용목적(폼의 목적)과 행선지가 나간다 — 출장은 사전정산과 상관없이 출장지(장소)가 행선지다', () => {
   const form = trip({ days: 2, purpose: ' 착수회의 참석 ', settle: true, place: ' 대전 ', carPlace: '쓰지 않는 값' });
   assert.deepEqual([carPlaceKey(form), carPlaceOf(form)], ['place', '대전']);
   assert.deepEqual(carPick(carWindow(form), CARS[0], form), {
     date: '2026-10-20', endDate: '2026-10-21', start: 420, end: 1200, car: { name: '아반테 (181허4360)', value: '70' }, title: '착수회의 참석', place: '대전',
   });
+  const off = trip({ purpose: '협의', settle: false, place: '대전', venue: '한국기계연구원', carPlace: '세종' });
+  assert.deepEqual([carPlaceKey(off), carPick(carWindow(off), CARS[0], off).place], ['place', '대전(한국기계연구원)'], '여비계산서의 출장지와 같은 글이다');
+  assert.equal(carPlaceOf(trip({ purpose: '협의' })), '', '아직 안 적었으면 빈 글이다 — 차량을 누를 때 묻는다');
 });
-t('출장지 칸이 없는 폼(외근, 사전정산을 끈 출장)은 차량 조회 옆의 행선지 칸에서 받는다 — 보이지 않는 출장지 값은 쓰지 않는다', () => {
-  const hidden = trip({ purpose: '협의', settle: false, place: '대전', carPlace: '세종' });
-  assert.deepEqual([carPlaceKey(hidden), carPick(carWindow(hidden), CARS[0], hidden).place], ['carPlace', '세종']);
+t('출장지 칸이 없는 폼(외근)은 차량 조회 옆의 행선지 칸에서 받는다', () => {
   const o = out({ start: '14:00', span: 120, purpose: '과제 협의 (부산시청)', carPlace: '부산시청' });
   assert.deepEqual([carPick(carWindow(o), CARS[1], o).title, carPick(carWindow(o), CARS[1], o).place], ['과제 협의 (부산시청)', '부산시청']);
   assert.equal(carPlaceOf(out({ start: '14:00', span: 120 })), '', '아직 안 적었으면 빈 글이다 — 차량을 누를 때 묻는다');

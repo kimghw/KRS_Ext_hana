@@ -13,7 +13,7 @@ import { render, renderReview, changes, checkRules, checkFares, mergeFares, with
 import { TRAVEL_RULES, KTX_FARES } from '../src/travelspec.js';
 import {
   TRANSPORTS, DEFAULT_TRANSPORT, TRAIN_GRADES, DEFAULT_GRADE, stationOf, stationsOf, pathOf, pathKnown, legParts, legTimesAll,
-  isWeekend, fareOf, hoursOf, legTimes, mealsOf, dailyOf, settlePlan, describePlan,
+  isWeekend, fareOf, hoursOf, legTimes, mealsOf, dailyOf, settlePlan, describePlan, tripLocation,
   parseTripList, tripListPages, tripUser, tripStage, tripDocFor, formFields, saveBody, parseFeeRows, pickFeeRow,
   tripIconState, settleLabel, transportsOf, trainGradeOf, nextTransport, nextLegPick, parseTransRows, pickOfRow, legsOfRows, ticketsOf, seatTickets,
   picksWithTickets, legPlan, describeTrans, sameTrans,
@@ -328,6 +328,14 @@ t('당일 출장: 당일출장(주재국)·사무실소재지외, 일비·식비
   assert.deepEqual(p.trans.map((r) => [r.shr, r.ehr]), [[7, 9], [18, 20]], '부산↔대전 2시간 — 07시에 떠나 09시에 닿고, 18시에 떠나 20시에 닿는다');
   assert.deepEqual([p.location, p.purpose, p.notes], ['대전', '착수회의 참석', []]);
   assert.equal(describePlan(p), '당일출장(주재국) · 대전 · KTX 부산↔대전 일반석 33,100원 × 2');
+});
+t('출장지 칸에는 "출장지(장소)"가 들어간다 — 장소를 안 적었으면 출장지만. KTX 역은 출장지에서 찾는다', () => {
+  const p = settlePlan(trip({ venue: ' 한국기계연구원 ' }));
+  assert.equal(p.location, '대전(한국기계연구원)');
+  assert.deepEqual(p.trans.map((r) => [r.dep, r.arr]), [['부산', '대전'], ['대전', '부산']]);
+  assert.equal(describePlan(p), '당일출장(주재국) · 대전(한국기계연구원) · KTX 부산↔대전 일반석 33,100원 × 2');
+  assert.deepEqual([tripLocation({ place: ' 대전 ', venue: '' }), tripLocation({ place: '세종', venue: '정부세종청사' }), tripLocation({})], ['대전', '세종(정부세종청사)', '']);
+  assert.deepEqual(settlePlan(trip({ place: '부산', venue: '서울역 회의실' })).notes, ['근무지와 출장지가 같은 역(부산)이라 교통편 내역은 비워 둡니다'], '장소에 적힌 역 이름은 보지 않는다');
 });
 t('1박 2일: 일반출장, 일수 2·일비 2·식수 6. 가는 길은 출발일, 오는 길은 도착일이다', () => {
   const p = settlePlan(trip({ days: 2, place: '경기도 고양시 킨텍스' }));

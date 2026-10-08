@@ -301,12 +301,13 @@ export function timeOptions(form) {
 export function blankForm(kind, today) {
   const base = {
     kind: KINDS[kind] ? kind : '', dateFrom: today, dateTo: today, start: '', end: '',
-    place: '', workplace: '', purpose: '', flexStart: '', allDay: true, expense: '', file: null, days: 1,
-    // 출장의 여비계산서(사전정산): 올린 뒤 자동으로 만들지(settle)와 교통편. 출장지·근무지는 이것을 켰을 때만 묻는다.
+    place: '', venue: '', workplace: '', purpose: '', flexStart: '', allDay: true, expense: '', file: null, days: 1,
+    // 출장의 여비계산서(사전정산): 올린 뒤 자동으로 만들지(settle)와 교통편. 근무지·교통편은 이것을 켰을 때만 묻는다
+    // (출장지 place 와 장소 venue 는 출장이면 늘 묻는다).
     // 교통편은 여럿을 함께 고를 수 있어 목록이다(기차 + 비행기). trainGrade 는 기차의 좌석 등급(일반석·특실)이다.
     settle: false, transport: [DEFAULT_TRANSPORT], trainGrade: DEFAULT_GRADE,
     // 출장·외근의 차량 조회: 켜면 폼의 날짜·시간에 빈 차량을 찾아 보이고, 누르면 그 차량을 신청한다(src/carfind.js).
-    // carPlace 는 차량 신청의 행선지 — 폼에 출장지 칸이 없을 때(외근, 사전정산을 끈 출장) 받는다. 둘 다 HR 에는 올라가지 않는다.
+    // carPlace 는 차량 신청의 행선지 — 폼에 출장지 칸이 없을 때(외근) 받는다. 둘 다 HR 에는 올라가지 않는다.
     car: false, carPlace: '',
     sub: SUBS[kind]?.[0].value || '', half: '', span: '',
     flexMode: 'day', ...Object.fromEntries(FLEX_DAYS.map((d) => [d.key, ''])),
@@ -381,7 +382,8 @@ export function fieldsFor(form) {
   // 누르면 그 차량을 그 시간으로 신청한다. 화면만의 값이라 HR 신청서에는 들어가지 않는다.
   const car = { key: 'car', label: '차량 조회', type: 'check', required: false, hint: '이 날짜·시간에 빈 차량을 찾습니다. 빈 차량을 누르면 그 시간으로 신청합니다.' };
   // 차량은 근무지(서울·부산)의 것을 잡고, 신청에는 행선지가 있어야 한다(사이트가 요구한다). 폼에 근무지·출장지 칸이 없으면
-  // (외근, 사전정산을 끈 출장) 차량 조회를 켰을 때 한 줄로 받는다. 근무지는 사전정산의 근무지와 같은 값이고 한 번 적으면 남는다.
+  // (외근) 차량 조회를 켰을 때 한 줄로 받는다. 출장은 출장지(장소)가 행선지라 근무지만 받는다(사전정산을 꺼 두었을 때).
+  // 근무지는 사전정산의 근무지와 같은 값이고 한 번 적으면 남는다.
   // 근태 신청의 필수 칸은 아니다 — 비어 있으면 차량 상자가 말해 준다.
   const carWhere = [
     { key: 'workplace', label: '근무지', type: 'text', required: false, group: 'carwhere', hint: '서울 또는 부산' },
@@ -407,24 +409,27 @@ export function fieldsFor(form) {
     const fields = [{ ...date, label: '출발일', group: 'go' }, { ...start, label: '출발', hint: '정시 단위', group: 'go' },
       { key: 'dateTo', label: '도착일', type: 'date', required: true, group: 'back' }, { ...end, label: '도착', hint: '정시 단위', group: 'back' },
       { ...days, chips: dayChips(7), inline: true },
-      { key: 'purpose', label: '목적', type: 'text', required: true, hint: '예) 착수회의 참석 (대전)' },
+      // 출장지·장소는 사전정산과 상관없이 늘 묻고 한 줄에 나란히 선다(2026-10-08 사용자 지정). 출장지는 도시·지역(KTX 역을 여기서 찾는다),
+      // 장소는 찾아갈 기관·건물이다. 여비계산서의 출장지 칸에는 둘을 "출장지(장소)"로 넣는다(src/travel.js 의 tripLocation).
+      { key: 'place', label: '출장지', type: 'text', required: true, group: 'spot', hint: '예) 대전' },
+      { key: 'venue', label: '장소', type: 'text', required: false, group: 'spot', hint: '예) 한국기계연구원' },
+      { key: 'purpose', label: '목적', type: 'text', required: true, hint: '예) 착수회의 참석' },
       // 켜면 결재요청이 올라간 뒤 eclass 에 여비계산서(사전정산)를 자동으로 만든다(2026-10-02 사용자 지정).
       // 그 옆에 차량 조회가 나란히 선다(같은 묶음 opts).
       { key: 'settle', label: '여비계산서 사전정산', type: 'check', required: false, group: 'opts' },
       { ...car, group: 'opts' }];
-    // 출장지·근무지·교통편은 여비계산서를 만들 때만 묻는다. 셋이 한 줄에 나란히 선다(group) — 출장지 옆에 교통편 아이콘이 온다.
+    // 근무지·교통편은 여비계산서를 만들 때만 묻는다. 둘이 한 줄에 나란히 선다(group) — 근무지 옆에 교통편 아이콘이 온다.
     // 근무지는 떠나는 곳이고, 한 번 적으면 다음 신청서에도 남는다(패널이 저장해 둔다). 기차(KTX)가 끼어 있으면
     // KTX 구간의 운임을 근무지의 역에서 찾으므로, 근무지는 그때만 필수다.
     // 출장 증빙은 신청할 때 묻지 않는다 — 신청 내역의 출장 카드에서 넣는다(2026-10-03 사용자 지정).
     if (form.settle) {
       fields.push(
-        { key: 'place', label: '출장지', type: 'text', required: true, group: 'where', hint: '예) 대전' },
         { key: 'workplace', label: '근무지', type: 'text', required: transportsOf(form).includes('train'), group: 'where', hint: '예) 부산' },
         { key: 'transport', label: '교통편', type: 'icons', required: true, group: 'where', options: TRANSPORTS.map(({ value, label }) => ({ value, label })) },
       );
     } else if (form.car) {
-      // 사전정산을 켰으면 그 줄의 근무지·출장지가 곧 차량의 근무지·행선지다. 꺼 두었으면 그 칸들이 없어 따로 받는다.
-      fields.push(...carWhere);
+      // 사전정산을 켰으면 그 줄의 근무지가 곧 차량의 근무지다. 꺼 두었으면 근무지 칸이 없어 따로 받는다 — 행선지는 늘 출장지(장소)다.
+      fields.push(carWhere[0]);
     }
     return fields;
   }
@@ -522,26 +527,27 @@ export const readyToSend = (form) => !!KINDS[form?.kind] && !missingFields(form)
 
 /**
  * 신청서 "내용". 패널의 목적이 그대로 들어간다 — HR 의 외근·출장 신청서가 받는 글은 이 하나뿐이다.
- * 출장은 여비계산서 사전정산을 켜고 출장지·근무지를 적었으면 목적 뒤에 괄호로 붙인다 —
- * "착수회의 참석 (출장지: 대전, 근무지: 부산)". 꺼 두면 그 칸들이 화면에 없으므로 붙이지 않는다(보이지 않는 값은 올리지 않는다).
- * 문서를 되읽을 때는 splitContent 가 다시 칸으로 가른다.
+ * 출장은 적은 출장지·장소(와 여비계산서 사전정산을 켰으면 근무지)를 목적 뒤에 괄호로 붙인다 —
+ * "착수회의 참석 (출장지: 대전, 장소: 한국기계연구원, 근무지: 부산)". 근무지는 사전정산을 꺼 두면 화면에 없으므로 붙이지 않는다
+ * (보이지 않는 값은 올리지 않는다). 문서를 되읽을 때는 splitContent 가 다시 칸으로 가른다.
  */
 export function contentOf(form) {
   const purpose = String(form.purpose || '').trim();
-  if (form.kind !== 'trip' || !form.settle) return purpose;
-  const where = [['출장지', form.place], ['근무지', form.workplace]]
+  if (form.kind !== 'trip') return purpose;
+  const where = [['출장지', form.place], ['장소', form.venue], ...(form.settle ? [['근무지', form.workplace]] : [])]
     .filter(([, v]) => filled(v)).map(([name, v]) => `${name}: ${String(v).trim()}`);
   return where.length ? `${purpose} (${where.join(', ')})` : purpose;
 }
 
-const WHERE_TAIL = /\s*\((?:출장지: (.+?))?(?:, )?(?:근무지: (.+?))?\)$/;
+const WHERE_TAIL = /\s*\((?:출장지: (.+?))?(?:, )?(?:장소: (.+?))?(?:, )?(?:근무지: (.+?))?\)$/;
 
-/** 출장 문서의 "내용"을 목적·출장지·근무지로 다시 가른다(contentOf 의 반대). 붙여 둔 것이 없으면 전부 목적이다. */
+/** 출장 문서의 "내용"을 목적·출장지·장소·근무지로 다시 가른다(contentOf 의 반대). 붙여 둔 것이 없으면 전부 목적이다. */
 export function splitContent(text) {
   const all = String(text || '').trim();
   const m = all.match(WHERE_TAIL);
-  if (!m || !(m[1] || m[2])) return { purpose: all, place: '', workplace: '' };
-  return { purpose: all.slice(0, m.index).trim(), place: (m[1] || '').trim(), workplace: (m[2] || '').trim() };
+  if (!m || !(m[1] || m[2] || m[3])) return { purpose: all, place: '', venue: '', workplace: '' };
+  const [place, venue, workplace] = [m[1], m[2], m[3]].map((s) => (s || '').trim());
+  return { purpose: all.slice(0, m.index).trim(), place, venue, workplace };
 }
 
 /** 한 줄 요약. 확인 문구와 기록에 쓴다. */
@@ -916,6 +922,24 @@ export function itemsIn(items, from, to) {
     .sort((a, b) => `${day(b)} ${b.start}`.localeCompare(`${day(a)} ${a.start}`) || (a.docNo < b.docNo ? 1 : -1));
 }
 
+/**
+ * 기간을 넓혀 그 안의 **출장 줄의 출장기간을 다 덮게** 한다 — 여비계산서는 출장기간으로 찾으므로(src/travel.js 의 tripDocFor) 조회 기간에
+ * 한쪽만 걸친 출장(4W 로 9/10 부터 보는데 9/9~9/10 출장)의 계산서를 찾으려면 목록을 그 출장의 첫날부터 읽어야 한다(2026-10-08 사용자 보고:
+ * 그런 줄이 "조회 기간이 이 출장기간을 다 덮지 않습니다"라고만 했다). 출장이 아닌 줄과 근태 날짜가 없는 줄은 보지 않는다.
+ * @param {{from:string,to:string}} range YYYY-MM-DD
+ * @param {object[]} items 보이는 줄(listItems 의 것)
+ * @returns {{from:string,to:string}} 넓힌 기간(넓힐 것이 없으면 그대로)
+ */
+export function rangeCovering({ from, to }, items) {
+  for (const it of items || []) {
+    if (it.formId !== 'TR' || !it.from) continue;
+    if (it.from < from) from = it.from;
+    const end = it.to || it.from;
+    if (end > to) to = end;
+  }
+  return { from, to };
+}
+
 /** 이미 지난 건인가 — 끝나는 날이 오늘보다 앞이다. */
 export function isPast(it, today) {
   const end = it.to || it.from || it.requested;
@@ -927,13 +951,14 @@ const PLAN_LABEL = { 국내출장: '출장', 해외출장: '출장', '정기 건
 
 /**
  * 홈의 WORKSPACE 카드가 근태를 세는 세 묶음(2026-10-02 사용자 지정). kinds 는 HR 목록의 근태종류 이름이다.
- * 외근에는 같은 신청서로 올리는 교육이 들어가고, 휴가는 연차·체력단련(HR 의 "체력관리")이다.
- * 여기에 없는 종류(외출·건강검진·유연근무)는 홈 카드에 올리지 않는다 — 패널의 현황에는 다 보인다.
+ * 외근에는 같은 신청서로 올리는 교육이 들어가고, 휴가는 연차·체력단련(HR 의 "체력관리")·외출·정기 건강검진이다
+ * (외출·건강검진은 2026-10-07 사용자 지정으로 더했다 — 자리를 비우는 일이라 휴가로 센다).
+ * 여기에 없는 종류(유연근무)는 홈 카드에 올리지 않는다 — 패널의 현황에는 다 보인다.
  */
 export const PLAN_GROUPS = [
   { key: 'trip', label: '출장', kinds: ['국내출장', '해외출장'] },
   { key: 'out', label: '외근', kinds: ['외근', '교육'] },
-  { key: 'leave', label: '휴가', kinds: ['연차', '체력관리'] },
+  { key: 'leave', label: '휴가', kinds: ['연차', '체력관리', '외출', '정기 건강검진'] },
 ];
 const GROUP_OF = Object.fromEntries(PLAN_GROUPS.flatMap((g) => g.kinds.map((k) => [k, g.key])));
 
@@ -976,7 +1001,7 @@ export function formFromDoc(formId, d, today) {
     if (!kind || String(d.wrkGubun) !== '04') return null;
     // 문서의 글은 "내용"이다. 숨은 목적 칸은 내용이 비었을 때만 본다(예전에 패널이 따로 채워 둔 문서).
     const text = String(d.biztripContent || '').trim() || String(d.biztripPurpose || '').trim();
-    // 출장은 내용 뒤에 붙여 올린 출장지·근무지를 다시 칸으로 가른다.
+    // 출장은 내용 뒤에 붙여 올린 출장지·장소·근무지를 다시 칸으로 가른다.
     const where = kind === 'trip' ? splitContent(text) : { purpose: text };
     const dateTo = d.biztripDateTo || d.biztripDateFrom;
     // 목적이 "부서소통회"인 외근은 소통 갈래로 돌아온다(HR 에는 그 갈래가 없다 — 외근으로 올라가 있다).
@@ -986,8 +1011,8 @@ export function formFromDoc(formId, d, today) {
     return { ...f, kind, sub: meet ? MEET.value : kind === 'out' ? d.biztripKind : '',
       dateFrom: d.biztripDateFrom, dateTo, days: spanDays(d.biztripDateFrom, dateTo),
       start, end, span: kind === 'out' ? spanOf(start, end) : '',
-      // 출장지·근무지를 붙여 올린 문서는 여비계산서 사전정산을 켠 채로 돌아온다 — 그래야 그 칸들이 보인다.
-      ...where, settle: !!(where.place || where.workplace), expense: d.biztripExpKind || (kind === 'trip' ? 'Y' : 'N') };
+      // 근무지를 붙여 올린 문서는 여비계산서 사전정산을 켠 채로 돌아온다 — 그래야 그 칸이 보인다(출장지·장소는 늘 보인다).
+      ...where, settle: !!where.workplace, expense: d.biztripExpKind || (kind === 'trip' ? 'Y' : 'N') };
   }
   if (formId === 'ET') {
     if (d.workCodeKind !== 'ZLO') return null;
@@ -1043,7 +1068,7 @@ export function normalizePatch(raw) {
     const m = String(raw[key] ?? '').match(/^(\d{1,2}):(\d{2})$/);
     if (m && +m[1] < 24 && +m[2] < 60) p[key] = `${pad(+m[1])}:${m[2]}`;
   }
-  for (const key of ['place', 'purpose']) {
+  for (const key of ['place', 'venue', 'purpose']) {
     if (typeof raw[key] === 'string' && raw[key].trim()) p[key] = raw[key].trim().slice(0, 200);
   }
   if (FLEX_TIMES.some((t) => t.start === raw.flexStart)) p.flexStart = raw.flexStart;
@@ -1101,18 +1126,18 @@ export function applyPatch(form, patch, today) {
     const span = spanDays(next.dateFrom, p.dateTo);
     if (validDays(span) && span !== next.days) { next.days = span; changed.push('days'); }
   }
-  // 여비계산서 사전정산을 켠 출장은 출장지 칸이 있어 말로 한 장소가 거기에 들어간다. 그 밖의 출장·외근에는
-  // 장소 칸이 없어 목적 뒤에 붙여 눈에 보이게 한다 — 보이지 않는 값이 올라가면 안 된다.
-  // 장소를 쓰지 않는 종류(휴가·유연근무·외출·건강검진)에서는 버린다.
-  const hasPlace = next.kind === 'trip' && next.settle;
-  if (!hasPlace && filled(next.place)) {
-    const place = next.place.trim();
+  // 출장은 출장지·장소 칸이 있어 말로 한 곳이 거기에 들어간다. 외근에는 그 칸이 없어 목적 뒤에 붙여 눈에 보이게 한다
+  // — 보이지 않는 값이 올라가면 안 된다. 장소를 쓰지 않는 종류(휴가·유연근무·외출·건강검진)에서는 버린다.
+  const hasPlace = next.kind === 'trip';
+  if (!hasPlace && (filled(next.place) || filled(next.venue))) {
     const purpose = String(next.purpose || '').trim();
-    if (['trip', 'out'].includes(next.kind) && !purpose.includes(place)) {
-      next.purpose = purpose ? `${purpose} - ${place}` : place;
+    const spot = [next.place, next.venue].map((s) => String(s || '').trim()).filter((s) => s && !purpose.includes(s)).join(' ');
+    if (next.kind === 'out' && spot) {
+      next.purpose = purpose ? `${purpose} - ${spot}` : spot;
       if (!changed.includes('purpose')) changed.push('purpose');
     }
     next.place = '';
+    next.venue = '';
   }
   if (next.kind === 'health' && (p.start || p.end) && p.allDay === undefined) next.allDay = false;
   // 요일별로 말했으면("월요일 7시, 금요일 11시") 따로 말하지 않아도 주간이다.
@@ -1137,7 +1162,7 @@ export function applyPatch(form, patch, today) {
     Object.assign(next, { start: '', end: '', span: '' });
   }
   // 화면에 칸이 없는 값은 바뀐 칸으로 치지 않는다(종료 시각은 몇 시간 칸이 대신한다).
-  const gone = new Set(['dateTo', ...(hasPlace ? [] : ['place']),
+  const gone = new Set(['dateTo', ...(hasPlace ? [] : ['place', 'venue']),
     ...(next.kind === 'leave' ? ['start', 'end'] : spanned(next) ? ['end'] : [])]);
   return { form: next, changed: changed.filter((k) => !gone.has(k)) };
 }

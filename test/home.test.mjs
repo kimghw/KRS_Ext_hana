@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import {
-  mountHome, startHome, createHomeCard, findAnchor, summarize, spanOf, cacheUsable, agoText, dayLabel, planItems,
+  mountHome, startHome, createHomeCard, findAnchor, summarize, skippedText, spanOf, cacheUsable, agoText, dayLabel, planItems,
   homeEnabled, CACHE_KEY, JUMP_KEY, ENABLE_KEY, ROOT_ID, HIDDEN_KEY, FOLD_KEY, LEGS_KEY, PICKS_KEY, tripMarks, legsSlim,
 } from '../src/home.js';
 import { MARKS_KEY } from '../src/evidence.js';
@@ -514,6 +514,21 @@ await ta('확신 없는 날은 제외하고 몇 일인지 적는다', async () =
   const m = await mount({ rooms });
   assert.match(m.text('warn'), /1일은 확인 불가라 제외/);
 });
+await ta('뺀 날은 어느 날·어느 쪽·무슨 까닭인지까지 적고, 그 까닭을 같이 담는다', async () => {
+  const d2 = '2026-09-18';
+  const rooms = fakeScan('room', { [d2]: day('room', d2, [], false, '달력은 3건인데 표에서 2건만 읽었습니다.') });
+  const cars = fakeScan('car', { [d2]: day('car', d2, [], false, '날짜를 옮기지 못했습니다.') });
+  const m = await mount({ rooms, cars });
+  assert.match(m.text('warn'), /⚠ 1일은 확인 불가라 제외했습니다 — 9\/18 회의실: 달력은 3건인데 표에서 2건만 읽었습니다 \/ 9\/18 차량: 날짜를 옮기지 못했습니다/);
+  assert.deepEqual(m.storage.data[CACHE_KEY].skipped.map((s) => s.kind), ['room', 'car']);
+});
+t('뺀 날이 셋을 넘으면 나머지는 건수로 줄이고, 까닭 없이 담아 둔 예전 것은 날 수만 적는다', () => {
+  const skipped = ['2026-09-18', '2026-09-19', '2026-09-21', '2026-09-22', '2026-09-23']
+    .map((date) => ({ kind: 'room', date, reason: '예약 표(RadGrid)를 찾지 못했습니다.' }));
+  const text = skippedText({ skippedDates: skipped.map((s) => s.date), skipped });
+  assert.match(text, /^⚠ 5일은 확인 불가라 제외했습니다 — 9\/18 회의실: .* \/ 9\/21 회의실: 예약 표\(RadGrid\)를 찾지 못했습니다 외 2건$/);
+  assert.equal(skippedText({ skippedDates: ['2026-09-18'] }), '⚠ 1일은 확인 불가라 제외했습니다');
+});
 await ta('한쪽 훑기가 죽으면 실패 이유와 못 읽은 날 수를 적고, 그 사실을 같이 담는다', async () => {
   const rooms = fakeScan('room', { [TODAY]: day('room', TODAY, [room({ mine: true })]) });
   const cars = fakeScan('car', {}, { fail: new Error('HTTP 500') });
@@ -633,9 +648,9 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     hr('E-1', '교육', 'TRO', '2026-09-19', '2026-09-19', { start: '09:00', end: '12:00', reason: '안전관리 교육' }),
     hr('L-1', '연차', 'LV', '2026-09-21', '2026-09-21', { gubun: '전일', status: '3', statusName: '결재요청' }),
     hr('L-2', '체력관리', 'LV', '2026-09-25', '2026-09-25', { gubun: '전일' }),
-    // 아래는 카드에 올리지 않는다: 세 묶음 밖의 종류, 임시저장, 지난 것(출장만은 다녀온 뒤 4주까지 보인다), 기간 밖.
-    hr('X-1', '외출', 'ET', '2026-09-18', '2026-09-18', { start: '14:00', end: '15:00', reason: '병원' }),
-    hr('X-2', '정기 건강검진', 'LV', '2026-09-23', '2026-09-23', { gubun: '전일' }),
+    // 아래는 카드에 올리지 않는다: 세 묶음 밖의 종류(유연근무), 임시저장, 지난 것(출장만은 다녀온 뒤 4주까지 보인다), 기간 밖.
+    // 외출·건강검진은 휴가로 세므로(2026-10-07 사용자 지정) 여기 두지 않는다 — 아래 따로 본다.
+    hr('X-1', '유연근무', 'FW', '2026-09-18', '2026-09-18', { start: '08:00', end: '17:00' }),
     hr('X-3', '국내출장', 'TR', '2026-09-24', '2026-09-24', { start: '07:00', end: '20:00', status: '1', statusName: '임시저장' }),
     hr('X-4', '국내출장', 'TR', '2026-09-10', '2026-09-11', { start: '07:00', end: '20:00' }),   // 엿새 전에 끝난 출장 → 보인다
     hr('X-6', '국내출장', 'TR', '2026-08-15', '2026-08-16', { start: '07:00', end: '20:00' }),   // 한 달 전 → 안 보인다(8주로 고르면 보인다)
@@ -655,12 +670,23 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     assert.deepEqual([got[1].timed, got[1].from.minutes, got[1].to.minutes], [true, 780, 900]);
     assert.equal(got[4].timed, false);
   });
+  t('외출·건강검진은 휴가로 센다(2026-10-07 사용자 지정) — 외출은 시각, 하루 전체 건강검진은 시각 없이', () => {
+    const got = planItems([
+      hr('V-1', '외출', 'ET', '2026-09-18', '2026-09-18', { start: '14:00', end: '15:00', reason: '병원' }),
+      hr('H-1', '정기 건강검진', 'LV', '2026-09-23', '2026-09-23', { gubun: '전일', reason: '건강검진 진료' }),
+      hr('H-2', '정기 건강검진', 'LV', '2026-10-08', '2026-10-08', { start: '13:00', end: '18:00' }),
+    ], TODAY, '2026-10-16');
+    assert.deepEqual(got.map((p) => [p.docNo, p.group, p.label, p.timed]), [
+      ['V-1', 'leave', '외출', true], ['H-1', 'leave', '검진', false], ['H-2', 'leave', '검진', true],
+    ]);
+    assert.equal(got[1].gubun, '전일');
+  });
   await ta('제목은 WORKSPACE 이고 칩은 회의실·차량·출장·외근·휴가다', async () => {
     const m = await mount();
     assert.equal(m.root.querySelector('.krs-card-title').textContent, 'WORKSPACE');
     assert.deepEqual([...m.root.querySelectorAll('.krs-card-chip > span')].map((s) => s.textContent),
       ['회의실', '차량', '출장', '외근', '휴가']);
-    assert.match(m.root.querySelector('[data-role="leave"]').closest('.krs-card-chip').title, /연차·체력단련/);
+    assert.match(m.root.querySelector('[data-role="leave"]').closest('.krs-card-chip').title, /연차·체력단련·외출·건강검진/);
   });
   await ta('오늘 읽어 둔 근태가 없으면 배경에 부탁하고, 예약과 날짜순으로 섞어 건수를 칩에 적는다', async () => {
     const rooms = fakeScan('room', { '2026-09-19': day('room', '2026-09-19', [room({ date: '2026-09-19', mine: true, start: 840, end: 900 })]) });
@@ -670,6 +696,18 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     assert.deepEqual(['rooms', 'cars', 'trip', 'out', 'leave'].map(m.text), ['1', '0', '2', '2', '2']);
     assert.equal(m.root.querySelector('[data-role="out"]').classList.contains('on'), true);
     assert.equal(m.text('planWarn'), '');
+  });
+  await ta('외출·건강검진도 휴가 칩에 세고 줄로 올린다', async () => {
+    const m = await mount({ plans: fakePlans([
+      hr('V-1', '외출', 'ET', '2026-09-18', '2026-09-18', { start: '14:00', end: '15:00', reason: '병원' }),
+      hr('H-1', '정기 건강검진', 'LV', '2026-09-23', '2026-09-23', { gubun: '전일', reason: '건강검진 진료' }),
+    ]) });
+    assert.deepEqual(kinds(m), ['외출', '검진']);
+    assert.equal(m.text('leave'), '2');
+    const [out, health] = m.items();
+    assert.match(out.querySelector('.krs-mine-when').textContent, /^9\/18 \(금\) 14:00~15:00$/);
+    assert.match(health.querySelector('.krs-mine-when').textContent, /^9\/23 \(수\) 전일$/);
+    assert.ok(health.querySelector('.krs-mine-kind').classList.contains('leave'));
   });
   await ta('근태 한 건: 종류 딱지 · 날짜와 시각(시각이 없으면 구분) · 결재 상태 · 내용', async () => {
     const m = await mount({ plans: fakePlans(HR) });
@@ -1511,11 +1549,11 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     assert.deepEqual(m.plans.calls, []);
     assert.equal(m.text('trip'), '2');
   });
-  await ta('근태 건을 누르면 근태 탭으로 가 달라는 부탁을 남기고 패널을 연다', async () => {
+  await ta('근태 건을 누르면 근태 탭으로 가서 그 건의 카드를 펴 달라는 부탁을 남기고 패널을 연다', async () => {
     const m = await mount({ plans: fakePlans(HR) });
     m.items()[1].click();   // [0] 은 지난 출장(9/10)이다
     await tick();
-    assert.deepEqual(m.storage.data[JUMP_KEY], { date: '2026-09-18', mode: 'attend', at: NOW });
+    assert.deepEqual(m.storage.data[JUMP_KEY], { date: '2026-09-18', mode: 'attend', docNo: 'O-1', at: NOW });
     assert.equal(m.panelCalls.length, 1);
   });
   await ta('카드를 끄면 읽는 중이던 근태가 뒤늦게 와도 아무것도 하지 않는다', async () => {
