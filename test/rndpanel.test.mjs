@@ -5,10 +5,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
 
+import { readZip } from '../src/zip.js';
+
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
 const ta = async (name, fn) => { await fn(); pass++; console.log('  ok  ' + name); };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (ok) => { for (let i = 0; i < 80 && !ok(); i++) await wait(25); };
 
 const html = fs.readFileSync(new URL('../sidepanel.html', import.meta.url), 'utf8');
 const { window } = new JSDOM(html, { url: 'https://example.org/' });
@@ -31,7 +34,9 @@ const make = () => createRndPanel({
   logEvent: (kind, ok, text) => logs.push({ kind, ok, text }),
   copyText: async (text) => { copied.push(text); return true; },
   flash: (btn, text) => flashed.push([btn.id, text]),
-  download: async (text, name) => { downloads.push({ text, name }); },
+  download: async (text, name, type) => { downloads.push({ text, name, type }); },
+  // 확장 안의 파일(rnd/skills.json · rnd/skills/…)은 저장소에서 읽는다.
+  readAsset: async (p, as) => { const buf = fs.readFileSync(new URL(`../${p}`, import.meta.url)); return as === 'bytes' ? new Uint8Array(buf) : buf.toString('utf8'); },
   today: () => '2026-10-08',
 });
 let panel = make();
@@ -48,7 +53,11 @@ const years = () => [...$('rdYears').querySelectorAll('[data-year]')].map((b) =>
 const rows = () => [...$('rdBudget').querySelectorAll('.rd-brow')].map((r) => [r.querySelector('[data-k="item"]').value, r.querySelector('[data-k="plan"]').value, r.querySelector('[data-k="used"]').value, r.querySelector('[data-left]').textContent]);
 const row = (item) => [...$('rdBudget').querySelectorAll('.rd-brow')].find((r) => r.querySelector('[data-k="item"]').value === item);
 const sum = () => [...$('rdBudgetSum').children].map((s) => s.textContent);
-const logItems = () => [...$('rdLogs').querySelectorAll('li')].map((li) => [li.querySelector('.rd-date').textContent, li.querySelector('.rd-title').textContent, li.querySelector('.rd-text')?.textContent || '']);
+// 연구내역의 줄들만(:scope > li) — 계획서에서 온 줄 안에는 목록(li)이 더 있다.
+const logItems = () => [...$('rdLogs').querySelectorAll(':scope > li')].map((li) => [li.querySelector('.rd-date').textContent, li.querySelector('.rd-title').textContent, li.querySelector('.rd-text')?.textContent || '']);
+/** 계획서에서 온 줄의 꼴 — 참여연구자 표의 줄들, 계획의 절 제목들. */
+const rosterTable = (li) => [...li.querySelectorAll('.rd-table tbody tr')].map((tr) => [...tr.children].map((td) => td.textContent));
+const sectionHeads = (li) => [...li.querySelectorAll('.rd-sec h4')].map((h) => h.textContent);
 const chItems = () => [...$('rdChanges').querySelectorAll('li')].map((li) => [
   li.querySelector('.rd-date').textContent, li.querySelector('.rd-kind').textContent, li.querySelector('.rd-title').textContent,
   li.querySelector('.rd-diff')?.textContent || '', li.querySelector('.rd-reason')?.textContent || '', li.classList.contains('auto'),
@@ -339,7 +348,7 @@ await ta('요약 복사 — 보고 있는 과제·차년도의 개요·예산·�
   assert.equal(copied.length, 1);
   assert.match(copied[0], /^\[차단기 과제\] 1차년도 \(2026\.04\.01 ~ 2027\.03\.31\) — 진행 중\n/);
   assert.match(copied[0], /- 인건비: 계획 15,000,000원 · 집행 8,000,000원 · 잔액 7,000,000원 · 집행률 53%/);
-  assert.match(copied[0], /- 2026\.10\.08 차단기 시제품 1차 시험 — 10kV 인가 \/ 차단 성공/);
+  assert.match(copied[0], /- 2026\.10\.08 차단기 시제품 1차 시험\n  10kV 인가\n  차단 성공\n/);
   assert.match(copied[0], /\[연구진\] 과제책임자: 박기도 → 김철수/);
   assert.deepEqual(flashed.at(-1), ['rdCopy', '복사했습니다 ✓']);
 });
@@ -386,6 +395,191 @@ await ta('공문 탭의 과제 가져오기 — 이미 있으면 그대로(빈 �
   assert.equal(chips().length, 3);
 });
 
+console.log('연구개발계획서 YAML 넣기 — RND 폴더의 KR_<과제>.yaml · history/*.yaml');
+const fx = (name) => fs.readFileSync(new URL(`./fixtures/rnd/${name}`, import.meta.url), 'utf8');
+const dropFiles = (files, target = $('rnd')) => {
+  const ev = new window.Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, 'dataTransfer', { value: { files, types: ['Files'], dropEffect: '' } });
+  target.dispatchEvent(ev);
+  return ev;
+};
+const paste = (text, target = doc.body) => {
+  const ev = new window.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, 'clipboardData', { value: { files: [], getData: () => text, types: ['text/plain'] } });
+  target.dispatchEvent(ev);
+  return ev;
+};
+await ta('스냅샷을 탭 어디에나 끌어다 놓으면 과제가 생기고(1월 1일 기준 차년도) 예산·계획·참여연구자가 들어간다', async () => {
+  const ev = dropFiles([new window.File([fx('snapshot_r0.yaml')], 'KR_test.yaml', { type: 'application/x-yaml' })], $('rdLogs'));
+  assert.ok(ev.defaultPrevented);
+  await until(() => chips().length === 4);
+  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구', '시험용 직류 차단기 개발']);
+  assert.equal(chips().at(-1)[1], true, '넣은 과제가 켜진다');
+  assert.deepEqual(years(), ['1차년도올해*', '2차년도', '3차년도', '4차년도']);
+  assert.equal($('rdYearNote').textContent, '1차년도 · 2026.04.01 ~ 2026.12.31 · 진행 중');
+  assert.match($('rdMeta').textContent, /과제번호 RS-2026-00000001.*책임자 홍길동.*연구기간 2026\.04\.01 ~ 2029\.12\.31 \(총 4차년도 · 1월 1일 기준\).*산업통상부/);
+  assert.deepEqual(rows().map((r) => [r[0], r[1]]), [['인건비', '30,000,000'], ['연구시설·장비비', ''], ['연구재료비', ''], ['연구활동비', '50,000,000'], ['연구수당', '6,000,000'], ['간접비', '20,000,000']]);
+  assert.equal($('rdBudgetState').textContent, '계획 1.1억 · 집행 0원 (0%)');
+  assert.deepEqual(logItems().map((l) => [l[0], l[1]]), [['2026.05.22', '참여연구자 — 1차년도'], ['2026.05.22', '연구개발 계획 — 1차년도']]);
+  // 계획서에서 온 줄은 "계획서" 딱지가 붙고, 참여연구자는 표로, 계획은 절 제목과 번호·점 목록으로 보인다(글은 그대로).
+  const [roster, plan] = $('rdLogs').querySelectorAll(':scope > li');
+  assert.ok(roster.classList.contains('rd-file') && plan.classList.contains('rd-file'));
+  assert.equal(roster.querySelector('.rd-kind').textContent, '계획서');
+  assert.deepEqual([...roster.querySelectorAll('.rd-table th')].map((th) => th.textContent), ['성명', '직위', '계상률', '참여', '계상인건비']);
+  assert.deepEqual(rosterTable(roster), [['이몽룡', '수석', '15%', '9개월', '11,250,000원'], ['홍길동', '수석', '20%', '9개월', '15,000,000원'], ['성춘향', '책임', '10%', '9개월', '3,750,000원']]);
+  assert.deepEqual(sectionHeads(plan), ['개발목표', '개발내용', '성능목표', '주요결과물', '수행일정9개월']);
+  assert.deepEqual([...plan.querySelectorAll('.rd-sec:first-child ol > li')].map((n) => n.textContent), ['규정 공백 분석 및 평가 기준 도출', '용어 분류 체계 설계']);
+  assert.deepEqual([...plan.querySelectorAll('.rd-sec:nth-child(2) > ul > li > ul > li')].map((n) => n.textContent), ['선급규정 및 국제표준 비교', '시험기준 도출', '핵심 개념 추출']);
+  assert.equal(plan.querySelector('.rd-sec:nth-child(3) li b').textContent, '규정 공백 분석', '"항목: 값" 은 항목이 굵다');
+  assert.ok(!plan.querySelector('.rd-text'), '글 그대로가 아니라 꼴을 입혔다');
+  assert.equal(chItems().length, 0, '처음 넣는 것은 기준선');
+  assert.match(status(), /^연구개발계획서 스냅샷\(KR_test\.yaml\): 과제 만듦: 시험용 직류 차단기 개발 · 1차년도 · 비목 4개/);
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /YAML 넣음 — 연구개발계획서 스냅샷/.test(l.text)));
+});
+await ta('과제 고치기 폼에 1월 1일 기준이 켜져 있다 — 끄면 차년도가 시작일 기준으로 바뀌고 변경이력에 남는다', async () => {
+  $('rdEdit').click();
+  assert.ok($('rdFCalendar').checked);
+  $('rdFCalendar').checked = false;
+  $('rdFSave').click();
+  assert.deepEqual(years().slice(0, 2), ['1차년도올해*', '2차년도']);
+  assert.equal($('rdYearNote').textContent, '1차년도 · 2026.04.01 ~ 2027.03.31 · 진행 중');
+  assert.deepEqual(chItems()[0].slice(1, 4), ['연구기간', '차년도 끊는 기준', '1월 1일(첫 해는 시작일부터 12월 31일까지)→시작일부터 한 해씩']);
+  $('rdEdit').click();
+  $('rdFCalendar').checked = true;
+  $('rdFSave').click();
+  assert.equal($('rdYearNote').textContent, '1차년도 · 2026.04.01 ~ 2026.12.31 · 진행 중');
+  assert.equal(chItems().length, 2);
+});
+await ta('r2 재생성본과 history 세 파일을 한꺼번에 넣으면 차례대로(스냅샷 → 레지스트리 → 예산 → 참여연구원) 들어가고 변경이력이 선다', async () => {
+  dropFiles([
+    new window.File([fx('researchers_history.yaml')], 'researchers_history.yaml'),
+    new window.File([fx('revisions.yaml')], 'revisions.yaml'),
+    new window.File([fx('snapshot_r2.yaml')], 'KR_test_r2.yaml'),
+    new window.File([fx('budget_history.yaml')], 'budget_history.yaml'),
+  ]);
+  await until(() => /참여연구원 이력/.test(status()));
+  assert.deepEqual(rows().map((r) => [r[0], r[1]]).filter((r) => r[1]), [['인건비', '30,000,000'], ['연구시설·장비비', '10,000,000'], ['연구활동비', '40,000,000'], ['연구수당', '6,000,000'], ['간접비', '20,000,000']]);
+  const items = chItems();
+  // 앞서 둘(차년도 기준) + 스냅샷 r2 의 달라진 것 셋 + 레지스트리 셋 + 예산 이력은 스냅샷 줄에 사유만 붙임 + 참여연구원 둘
+  assert.equal(items.length, 2 + 3 + 3 + 0 + 2);
+  assert.ok(items.some((c) => c[1] === '예산' && c[2] === '연구활동비' && c[3] === '50,000,000원→40,000,000원' && c[4] === '연구활동비→연구시설·장비비 10,000 재배분' && c[0] === '2026.07.15'), '스냅샷이 남긴 줄에 예산 이력의 사유·날짜가 붙는다');
+  assert.ok(items.some((c) => c[1] === '연구진' && c[2] === '이몽룡' && c[3].endsWith('→제외')));
+  assert.ok(items.some((c) => c[0] === '2026.07.15' && c[1] === '예산' && c[2] === 'r2 계획수정'));
+  assert.ok(items.some((c) => c[1] === '연구진' && c[2] === '참여연구자' && c[3] === '이몽룡 15% · 홍길동 20% · 성춘향 10%→홍길동 27.45% · 성춘향 20%'));
+  assert.match(status(), /^연구개발계획서 스냅샷\(KR_test_r2\.yaml\): .* \/ 개정 레지스트리\(revisions\.yaml\): .* \/ 예산 이력\(budget_history\.yaml\): .*2건에 사유 붙임.* \/ 참여연구원 이력\(researchers_history\.yaml\): .*2건 넣음$/);
+  assert.equal($('rdChangeState').textContent, '10건 · 사유 없음 2', '사유가 빈 것은 앞서 손으로 바꾼 차년도 기준 두 줄뿐 — 파일에서 온 줄은 사유가 있다');
+  assert.deepEqual(rosterTable(q('#rdLogs li')), [['홍길동', '수석', '27.45%', '9개월', '20,900,000원'], ['성춘향', '책임', '20%', '9개월', '9,100,000원']]);
+  // 고치기로 글을 열면 꼴이 아니라 글 그대로가 칸에 올라온다
+  q('#rdLogs li [data-edit]').click();
+  assert.equal($('rdLogText').value.split('\n')[0], '홍길동 — 수석 · 27.45% · 9개월 · 인건비 20,900,000원');
+  $('rdLogCancel').click();
+});
+await ta('칸마다 복사 — 예산은 탭으로 나눈 표, 참여연구자 줄도 표, 연구내역·변경이력은 전부·한 줄', async () => {
+  const n = copied.length;
+  $('rdBudgetCopy').click();
+  await until(() => copied.length === n + 1);
+  assert.equal(copied[n], ['비목\t계획(원)\t집행(원)\t잔액(원)\t집행률', '인건비\t30,000,000\t0\t30,000,000\t0%', '연구시설·장비비\t10,000,000\t0\t10,000,000\t0%', '연구활동비\t40,000,000\t0\t40,000,000\t0%', '연구수당\t6,000,000\t0\t6,000,000\t0%', '간접비\t20,000,000\t0\t20,000,000\t0%', '합계\t106,000,000\t0\t106,000,000\t0%'].join('\n'));
+  assert.deepEqual(flashed.at(-1), ['rdBudgetCopy', '복사됨 ✓']);
+  q('#rdLogs li [data-copy]').click();
+  await until(() => copied.length === n + 2);
+  assert.equal(copied[n + 1], ['참여연구자 — 1차년도', '성명\t직위\t계상률\t참여\t계상인건비', '홍길동\t수석\t27.45%\t9개월\t20,900,000원', '성춘향\t책임\t20%\t9개월\t9,100,000원'].join('\n'));
+  $('rdLogsCopy').click();
+  await until(() => copied.length === n + 3);
+  assert.match(copied[n + 2], /^- 2026\.05\.22 연구개발 계획 — 1차년도\n  ■ 개발목표\n  1\. 규정 공백 분석/);
+  assert.match(copied[n + 2], /\n- 2026\.05\.22 참여연구자 — 1차년도\n  홍길동 — 수석 · 27\.45%/);
+  $('rdChangesCopy').click();
+  await until(() => copied.length === n + 4);
+  const lines = copied[n + 3].split('\n');
+  assert.equal(lines.length, 10);
+  assert.match(lines[0], /^- 2026\.05\.22 \[기타\] r0 최초협약 \(최초 기준선\)$/);
+  assert.ok(lines.includes('- 2026.07.15 [예산] 연구활동비: 50,000,000원 → 40,000,000원 (연구활동비→연구시설·장비비 10,000 재배분)'));
+  q('#rdChanges li [data-copy]').click();
+  await until(() => copied.length === n + 5);
+  assert.match(copied[n + 4], /^2026\.10\.08 \[연구진\] 참여연구자: 이몽룡 15% · 홍길동 20% · 성춘향 10% → 홍길동 27\.45% · 성춘향 20% \(/, '맨 위 줄(같은 날짜면 뒤에 넣은 것)');
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /R&D 복사 — 예산 표 \(시험용 직류 차단기 개발 1차년도\)/.test(l.text)));
+});
+await ta('붙여 넣은 YAML 글도 읽는다 — 주석의 과제명으로 과제를 찾고, 칸에 적는 중이면 가로채지 않는다', async () => {
+  q('#rdProjects [data-proj]').click();   // 다른 과제를 보고 있어도
+  const ev = paste(fx('revisions.yaml').replace('rev: r2', 'rev: r3'));
+  assert.ok(ev.defaultPrevented);
+  await until(() => /개정 레지스트리/.test(status()));
+  assert.equal(chips().at(-1)[1], true, '넣은 과제로 간다');
+  assert.equal(chItems().filter((c) => c[2] === 'r3 계획수정').length, 1);
+  assert.equal(chItems().length, 11);
+  const ev2 = paste('meta:\n  과제명: x', $('rdLogTitle'));
+  assert.ok(!ev2.defaultPrevented);
+  const ev3 = paste('그냥 글');
+  assert.ok(!ev3.defaultPrevented);
+});
+await ta('YAML 이 아니거나 모르는 모양이면 말만 하고 아무것도 바꾸지 않는다', async () => {
+  dropFiles([new window.File(['a: [1, 2'], 'bad.yaml')]);
+  await until(() => /읽지 못했습니다/.test(status()));
+  assert.match(status(), /^bad\.yaml: YAML 을 읽지 못했습니다/);
+  dropFiles([new window.File(['foo: 1\n'], 'other.yaml')]);
+  await until(() => /아는 모양/.test(status()));
+  dropFiles([new window.File(['x'], 'note.txt')]);
+  await wait(30);
+  assert.match(status(), /YAML 파일\(\.yaml · \.yml\)만/);
+  assert.equal(chItems().length, 11);
+  assert.ok(logs.some((l) => l.kind === 'rnd' && !l.ok && /YAML 넣기 실패/.test(l.text)));
+});
+await ta('과제가 없는 장부에 이력 파일만 넣으면 먼저 스냅샷을 넣으라고 한다', async () => {
+  const empty = createRndPanel({ $: (id) => doc.getElementById(id), escapeHtml, logEvent: () => {}, today: () => '2026-10-08' });
+  // 같은 화면을 빌려 쓰되 저장소는 빈 것으로 — 배선은 하지 않고 넣기만 부른다
+  const saved = store.rndBook;
+  delete store.rndBook;
+  const gm = store.gongmunProjects;
+  store.gongmunProjects = [];
+  await empty.show();
+  assert.ok(!hidden('rdEmpty'));
+  assert.match($('rdEmpty').textContent, /연구개발계획서 YAML/);
+  store.rndBook = saved;
+  store.gongmunProjects = gm;
+  await panel.show();
+});
+
+console.log('차년도 YAML 뽑는 스킬 — 목록·묶음 저장(zip)·쓰는 법 복사');
+await ta('칸을 펴면 스킬 다섯 개가 서고, zip 으로 받고(README 가 맨 앞), 쓰는 법을 복사한다', async () => {
+  assert.equal($('rdSkills').children.length, 0, '펴기 전에는 읽지 않는다');
+  $('rdSkillBox').open = true;
+  $('rdSkillBox').dispatchEvent(new window.Event('toggle'));
+  await until(() => $('rdSkills').children.length > 0);
+  assert.deepEqual([...$('rdSkills').querySelectorAll('li strong')].map((s) => s.textContent), ['rnd-kr-extract', 'rnd-kr-history', 'rnd-manpower-change', 'rnd-budget-change', 'rnd-export-latest']);
+  assert.match($('rdSkillState').textContent, /^스킬 5개 · \d+K · 복사 \d{4}-\d{2}-\d{2}$/);
+  assert.match(q('#rdSkills li').title, /^인자: /);
+  const n = downloads.length;
+  $('rdSkillZip').click();
+  await until(() => downloads.length === n + 1);
+  const d = downloads[n];
+  assert.deepEqual([d.name, d.type], ['rnd-skills_2026-10-08.zip', 'application/zip']);
+  assert.ok(d.text instanceof Uint8Array);
+  const names = readZip(d.text).map((e) => e.name);
+  assert.equal(names[0], 'README.md');
+  assert.ok(names.includes('rnd-kr-extract/SKILL.md') && names.includes('rnd-kr-history/templates/history/revisions.yaml') && names.includes('rnd-kr-extract/scripts/year_slice.py'));
+  assert.equal(names.length, 31);
+  assert.match(status(), /스킬 묶음을 저장했습니다 — rnd-skills_2026-10-08\.zip \(\d+K\)\. 과제 작업 프로젝트의 \.claude\/skills\/ 에 푸세요\./);
+  assert.deepEqual(flashed.at(-1), ['rdSkillZip', '저장됨 ✓']);
+  const c = copied.length;
+  $('rdSkillGuide').click();
+  await until(() => copied.length === c + 1);
+  assert.match(copied[c], /^KRS WORKSPACE — R&D 과제의 차년도 YAML 을 뽑는 Claude Code 스킬 묶음 \(2026-10-08\)\n/);
+  assert.match(copied[c], /\n1\. 연구개발계획서\(PDF·HWP\)를 구조화 — \/rnd-kr-extract <계획서\.pdf> --format structured --stage <n>차년도\n/);
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /스킬 묶음 저장: rnd-skills_2026-10-08\.zip/.test(l.text)));
+});
+await ta('목록을 못 읽으면 버튼을 잠그고 까닭을 보인다', async () => {
+  // 같은 화면을 빌려 쓰되 배선은 하지 않는다(배선된 패널의 리스너가 이미 붙어 있다) — 읽기만 직접 부른다.
+  const broken = createRndPanel({ $: (id) => doc.getElementById(id), escapeHtml, logEvent: () => {}, readAsset: async () => { throw new Error('없음'); }, today: () => '2026-10-08' });
+  assert.equal(await broken.skills(), null);
+  assert.match($('rdSkills').textContent, /스킬 목록을 읽지 못했습니다 — 없음/);
+  assert.ok($('rdSkillZip').disabled && $('rdSkillGuide').disabled);
+  assert.equal($('rdSkillState').textContent, '목록 없음');
+  assert.equal(await broken.skills(), null, '다시 불러도 다시 읽지 않고 같은 까닭');
+  const m = await panel.skills();
+  assert.equal(m.skills.length, 5);
+  assert.ok(!$('rdSkillZip').disabled);
+  $('rdSkillBox').open = false;
+});
+
 console.log('다시 열기');
 await ta('저장된 것으로 다시 선다 — 공문 탭에서 다시 가져오지 않는다', async () => {
   await wait(500);
@@ -394,11 +588,13 @@ await ta('저장된 것으로 다시 선다 — 공문 탭에서 다시 가져�
   panel = make();
   await panel.show();
   assert.ok(!hidden('rnd'));
-  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구']);
+  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구', '시험용 직류 차단기 개발']);
+  assert.equal(chips().at(-1)[1], true);
   assert.equal(logItems().length, 2);
-  assert.equal(chItems().length, 4);
-  assert.equal(rows().find((r) => r[0] === '인건비')[1], '15,000,000');
-  assert.equal(panel.book().projects.length, 3);
+  assert.equal(chItems().length, 11);
+  assert.equal(rows().find((r) => r[0] === '인건비')[1], '30,000,000');
+  assert.equal(panel.book().projects.length, 4);
+  assert.equal(panel.book().projects[3].years[1].snapshot.rev, 'r2');
 });
 
 console.log(`\n${pass} passed`);

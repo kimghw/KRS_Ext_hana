@@ -120,14 +120,13 @@
           <span class="gm-drop-how">캡처해 붙여 넣기(Ctrl+V) · 끌어다 놓기 · 눌러서 고르기</span>
           <span id="gmFileName" class="gm-file"></span>
         </label>
-        <!-- 이 창에 열어 둔 웹페이지를 골라 위에서 아래까지 통째로 찍어 읽는다(src/pagecap.js) — 교육 안내 페이지를 조각조각 캡처하지 않아도 된다.
-             누르면 웹페이지 탭 목록(gmTabs)이 펼쳐지고 전체 또는 하나 이상 골라 찍는다. 처음 찍을 때 한 번 사이트 접근 권한을 묻는다.
-             탭 고르기 칸은 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js). -->
+        <!-- 웹페이지 캡처 단추 둘(src/pagecap.js) — 교육 안내 페이지를 조각조각 캡처하지 않아도 된다. 보고 있는 탭 아이콘은 그 탭을 위에서 아래까지
+             통째로, 부분 골라 캡처는 페이지 위에서 프레임(틀·상자)을 눌러 하나 이상 고른 것만 찍는다. 처음 찍을 때 한 번 사이트 접근 권한을 묻는다.
+             단추는 gongmunpanel.js 가 그린다 — 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js). -->
         <div class="gm-intake-actions">
-          <button type="button" id="gmCapture" class="ghost small wp-open" aria-controls="gmTabs" aria-expanded="false" title="이 창에 열어 둔 웹페이지(탭)를 전체 또는 하나 이상 골라 위에서 아래까지 캡처하고 화면의 글자와 함께 읽습니다. 캡처는 A4 크기로 잘려 첨부 PDF 가 됩니다. 처음 찍을 때 한 번 사이트 접근 권한을 묻습니다."><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5V3m8 2V3"/></svg>웹페이지 골라 통째로 캡처해 읽기</button>
+          <span id="gmCapture" class="gm-capture" role="group" aria-label="웹페이지 캡처"></span>
           <button type="button" id="gmManual" class="ghost small gm-manual">문서 없이 쓰기</button>
         </div>
-        <div id="gmTabs" class="wp-tabs hidden" role="group" aria-label="캡처할 웹페이지"></div>
         <p class="cli-help" hidden><span>Claude 가 연결되지 않아 문서를 읽을 수 없습니다.</span><button type="button" class="small cli-guide-copy" title="이 PC 의 Claude Code·Codex 같은 코딩 에이전트에 붙여 넣으면 로컬 Claude CLI 를 연결해 줍니다. 확장 폴더 경로와 확장 ID 가 함께 들어갑니다.">연결 지침 복사</button></p>
       </div>
       <div class="statusline"><span id="gmStatus" class="status" role="status" aria-live="polite"></span></div>
@@ -135,6 +134,8 @@
       <div id="gmDraft" class="gm-draft card hidden">
         <div class="booking-head"><strong>읽은 내용</strong><button id="gmReset" class="ghost small">비우기</button></div>
         <p id="gmSource" class="gm-source"></p>
+        <!-- 구매 — 쇼핑몰 화면에서 가격과 그 둘레만 오린 견적서(src/quotecut.js). 더 넓게·원래 장으로. -->
+        <div id="gmCut" class="gm-cut hidden"></div>
         <ul id="gmItems" class="gm-items"></ul>
         <div id="gmLimit" class="gm-limit hidden" role="alert"></div>
         <div class="gm-label">과제</div>
@@ -201,8 +202,17 @@
     <section id="rnd" class="rnd hidden" aria-label="R&amp;D 과제 관리">
       <!-- 과제 칩 한 줄 — 별명(없으면 과제명)으로, 맨 끝의 ＋ 로 과제를 더한다. -->
       <div id="rdProjects" class="rd-projects" role="group" aria-label="과제"></div>
+      <!-- 연구개발계획서 YAML 넣기 — RND 폴더의 KR_<과제>.yaml(스냅샷)과 history/*.yaml(개정 레지스트리·예산 이력·참여연구원 이력).
+           탭 어디에 놓아도 여기로 온다. 글을 붙여 넣어도 읽는다. src/rndyaml.js 가 과제·차년도에 맞춰 넣고, YAML 은 vendor/yaml 로 푼다. -->
+      <div id="rdIntake" class="rd-intake card">
+        <label class="rd-drop" for="rdYaml">
+          <input type="file" id="rdYaml" accept=".yaml,.yml,text/yaml,application/x-yaml,application/yaml" multiple />
+          <span class="rd-drop-lead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><span id="rdDropLead">연구개발계획서 YAML 넣기</span></span>
+          <span class="rd-drop-how">RND 폴더의 KR_&lt;과제&gt;.yaml · history/*.yaml — 끌어다 놓기 · 붙여 넣기(Ctrl+V) · 눌러서 고르기</span>
+        </label>
+      </div>
       <div id="rdEmpty" class="rd-empty card hidden">
-        <p>적어 둔 과제가 없습니다. 공문 탭의 사전 설정에 둔 과제를 가져오거나 새 과제를 더하세요.</p>
+        <p>적어 둔 과제가 없습니다. 위에 연구개발계획서 YAML 을 넣거나, 공문 탭의 사전 설정에 둔 과제를 가져오거나, 새 과제를 더하세요.</p>
         <div class="rd-actions">
           <button type="button" id="rdEmptyImport" class="ghost small">공문 탭의 과제 가져오기</button>
           <button type="button" id="rdEmptyAdd" class="primary small">과제 더하기</button>
@@ -225,6 +235,8 @@
           <label class="rd-field"><span>과제책임자</span><input type="text" id="rdFLead" autocomplete="off" placeholder="예) 박기도" /></label>
           <label class="rd-field"><span>연구 시작일</span><input type="date" id="rdFStart" /></label>
           <label class="rd-field"><span>연구 종료일</span><input type="date" id="rdFEnd" /></label>
+          <!-- 차년도 끊는 기준. 산업부 과제는 첫 해만 협약일~12월 31일이고 그 뒤는 해마다라 1월 1일에 끊는다. 끄면 시작일부터 한 해씩. -->
+          <label class="rd-field wide rd-check"><input type="checkbox" id="rdFCalendar" /><span>차년도를 <strong>1월 1일</strong>에 끊기 — 첫 해는 시작일부터 12월 31일까지, 그 뒤는 해마다 (산업부 과제). 끄면 시작일부터 한 해씩</span></label>
           <label class="rd-field wide"><span>비고</span><input type="text" id="rdFNote" autocomplete="off" placeholder="예) 산업부 · 주관기관 KRS" /></label>
         </div>
         <p id="rdFNeed" class="rd-need" role="status"></p>
@@ -240,6 +252,7 @@
         <details id="rdBudgetBox" class="rd-box card" open>
           <summary><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/></svg><span>예산</span><span id="rdBudgetState" class="summary-detail"></span></summary>
           <div class="rd-box-body">
+            <div class="rd-box-tools"><button type="button" id="rdBudgetCopy" class="ghost small" title="비목별 계획·집행·잔액·집행률과 합계를 탭으로 나눈 표로 복사합니다 — 엑셀·한글 표에 그대로 붙습니다">표 복사</button></div>
             <div class="rd-bhead" aria-hidden="true"><span>비목</span><span>계획(원)</span><span>집행(원)</span><span>잔액</span><span></span></div>
             <div id="rdBudget" class="rd-budget" role="table" aria-label="비목별 예산"></div>
             <div id="rdBudgetSum" class="rd-bsum"></div>
@@ -261,6 +274,7 @@
                 <button type="button" id="rdLogCancel" class="ghost small hidden">고치기 그만두기</button>
               </div>
             </div>
+            <div class="rd-box-tools"><button type="button" id="rdLogsCopy" class="ghost small" title="이 차년도의 연구내역 전부를 이른 것부터 글로 복사합니다. 줄 하나만 복사하려면 그 줄의 복사를 누르세요">전부 복사</button></div>
             <ul id="rdLogs" class="rd-list"></ul>
           </div>
         </details>
@@ -285,6 +299,7 @@
                 <button type="button" id="rdChCancel" class="ghost small hidden">고치기 그만두기</button>
               </div>
             </div>
+            <div class="rd-box-tools"><button type="button" id="rdChangesCopy" class="ghost small" title="이 차년도의 변경이력 전부를 이른 것부터 글로 복사합니다. 줄 하나만 복사하려면 그 줄의 복사를 누르세요">전부 복사</button></div>
             <ul id="rdChanges" class="rd-list"></ul>
           </div>
         </details>
@@ -296,6 +311,20 @@
           <button type="button" id="rdImportGm" class="ghost small" title="공문 탭 사전 설정의 과제(과제명·별명·과제번호·책임자·연구기간)를 가져옵니다. 이미 있는 과제는 빈 칸만 채웁니다.">공문 탭의 과제 가져오기</button>
         </div>
       </div>
+      <!-- 차년도 YAML 을 뽑는 스킬 묶음 — RND 프로젝트의 Claude Code 스킬 다섯 개를 rnd/skills/ 에 복사해 두고(tools/rndskills.mjs sync, 목록 rnd/skills.json),
+           여기서 zip 으로 내려받거나 쓰는 법을 복사한다. 이 확장이 뽑지는 않는다(2026-10-08 사용자 지정). src/rndskills.js. 과제가 없어도 보인다. -->
+      <details id="rdSkillBox" class="rd-box card">
+        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="M2 13l10 5 10-5M2 18l10 5 10-5"/></svg><span>차년도 YAML 뽑는 스킬</span><span id="rdSkillState" class="summary-detail">Claude Code 스킬 묶음</span></summary>
+        <div class="rd-box-body">
+          <p class="rd-skill-lead">연구개발계획서에서 차년도 YAML(KR_&lt;과제&gt;.yaml)과 이력(history/*.yaml)을 뽑는 <strong>RND 프로젝트의 Claude Code 스킬</strong>입니다.
+            이 확장은 뽑지 않습니다 — 묶음을 받아 과제 작업 프로젝트의 <code>.claude/skills/</code> 에 풀고, 나온 YAML 을 위 상자에 넣으세요.</p>
+          <ol id="rdSkills" class="rd-skills" aria-label="스킬"></ol>
+          <div class="rd-actions">
+            <button type="button" id="rdSkillZip" class="primary small" title="스킬 다섯 개(SKILL.md · 스크립트 · 참고 · 양식)를 zip 하나로 내려받습니다. 맨 앞에 쓰는 법(README.md)이 들어 있습니다">스킬 묶음 저장 (zip)</button>
+            <button type="button" id="rdSkillGuide" class="ghost small" title="zip 을 어디에 풀고 어떤 차례로 무엇을 부르는지를 글로 복사합니다 — 코딩 에이전트에 붙여 넣어도 됩니다">쓰는 법 복사</button>
+          </div>
+        </div>
+      </details>
     </section>
     <section class="controls card" aria-label="조회 날짜와 시간">
       <div class="date-bar">

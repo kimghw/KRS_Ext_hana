@@ -6,7 +6,8 @@
     "test": "node --test \"test/*.test.mjs\" gmail/gmail.test.mjs",
     "gen": "node tools/refdata.mjs gen",
     "check": "node tools/refdata.mjs check",
-    "refdata": "node tools/refdata.mjs"
+    "refdata": "node tools/refdata.mjs",
+    "rndskills": "node tools/rndskills.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.0.1",

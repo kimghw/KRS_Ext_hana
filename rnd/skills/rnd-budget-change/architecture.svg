@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 1054" width="1040" height="1054" font-family="'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#37474f"/>
+    </marker>
+    <marker id="arrowDash" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7e57c2"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { font-size: 24px; font-weight: 700; fill: #1a237e; }
+    .subtitle { font-size: 13px; fill: #546e7a; }
+    .boxh     { font-size: 14px; font-weight: 700; }
+    .boxt     { font-size: 11.5px; }
+    .small    { font-size: 10.5px; fill: #455a64; }
+    .stage    { font-size: 12px; font-weight: 700; fill: #1565c0; }
+    .edge     { stroke: #37474f; stroke-width: 1.6; fill: none; }
+    .edgelbl  { font-size: 10.5px; fill: #37474f; }
+    .legtxt   { font-size: 11px; fill: #37474f; }
+  </style>
+
+  <!-- ===== Title ===== -->
+  <text x="40" y="42" class="title">rnd-budget-change — 연구개발비 비목 간 이동 계산기</text>
+  <text x="40" y="64" class="subtitle">KR 스냅샷 입력 → §0 입력확정 · §1 추출 · §2 이동입력 · §3 계산 → 산출물 4종 → pending 검토 큐 복사 · 이력 핸드오프 (총액 고정, 인건비 제외)</text>
+
+  <!-- ===== Legend ===== -->
+  <g transform="translate(40, 80)">
+    <rect x="0"   y="0" width="16" height="12" rx="2" fill="#eceff1" stroke="#90a4ae"/>
+    <text x="22"  y="10" class="legtxt">입력(읽기전용)</text>
+    <rect x="140" y="0" width="16" height="12" rx="2" fill="#e3f2fd" stroke="#1976d2"/>
+    <text x="162" y="10" class="legtxt">처리</text>
+    <rect x="220" y="0" width="16" height="12" rx="2" fill="#e8f5e9" stroke="#388e3c"/>
+    <text x="242" y="10" class="legtxt">산출물</text>
+    <rect x="320" y="0" width="16" height="12" rx="2" fill="#ffebee" stroke="#e57373"/>
+    <text x="342" y="10" class="legtxt">인건비 제외(분기)</text>
+    <rect x="470" y="0" width="16" height="12" rx="2" fill="#f3e5f5" stroke="#7e57c2" stroke-dasharray="4 3"/>
+    <text x="492" y="10" class="legtxt">외부 스킬</text>
+    <rect x="570" y="0" width="16" height="12" rx="2" fill="#e0f2f1" stroke="#00897b"/>
+    <text x="592" y="10" class="legtxt">검토 큐(pending)</text>
+  </g>
+
+  <!-- ===== Input snapshot ===== -->
+  <g>
+    <rect x="370" y="104" width="300" height="60" rx="8" fill="#eceff1" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="520" y="125" text-anchor="middle" class="boxh" fill="#37474f">입력: KR 스냅샷  KR_&lt;과제&gt;.yaml</text>
+    <text x="520" y="142" text-anchor="middle" class="boxt" fill="#455a64">정본(읽기 전용) · 예산.비목별[연차].직접비</text>
+    <text x="520" y="157" text-anchor="middle" class="small">/rnd-kr-extract 산출 · RND_PROJECT\&lt;과제&gt;\&lt;연차&gt;\ — 절대 수정 안 함</text>
+  </g>
+  <path class="edge" d="M520,164 L520,192" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 0 ===== -->
+  <text x="40" y="230" class="stage">§0 입력 확정</text>
+  <text x="40" y="246" class="small">AskUserQuestion</text>
+  <g>
+    <rect x="120" y="194" width="800" height="74" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="217" class="boxh" fill="#0d47a1">AskUserQuestion — 과제/연차 · 출발 비목 · 도착 비목 · 이동 금액 · 품의서/작성일</text>
+    <text x="135" y="237" class="boxt" fill="#1a237e">스냅샷·--project 로 과제, --year 로 연차 확정 · 품의서 있으면 시행일=작성일 (우선순위 시행일 &gt; --date &gt; 오늘)</text>
+    <text x="135" y="253" class="small">회차·산출 폴더명 결정: rev&lt;NN&gt;_&lt;작성일&gt; · 같은 회차 존재 시 덮어쓰기 / 다음 회차 증번(권장) 질의</text>
+  </g>
+  <path class="edge" d="M520,268 L520,296" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 1 ===== -->
+  <text x="40" y="338" class="stage">§1 추출</text>
+  <g>
+    <rect x="120" y="298" width="800" height="74" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="321" class="boxh" fill="#0d47a1">budget_calc.py  --extract  →  budget_input_&lt;연차&gt;_revNN.json (scaffold)</text>
+    <text x="135" y="341" class="boxt" fill="#1a237e">스냅샷 예산.비목별[연차].직접비 에서 현재 비목·간접비·총액 자동 추출 — 손으로 안 옮김 · 이동칸은 빈 채로</text>
+    <text x="135" y="357" class="small">표준 5비목(인건비·연구시설·장비비·연구재료비·연구활동비·연구수당) 0 보정 → 0원 비목도 도착지로 새로 계상 가능</text>
+  </g>
+  <path class="edge" d="M520,372 L520,400" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 2 ===== -->
+  <text x="40" y="446" class="stage">§2 이동 입력</text>
+  <text x="40" y="462" class="small">AskUserQuestion</text>
+  <g>
+    <rect x="120" y="402" width="800" height="96" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="425" class="boxh" fill="#0d47a1">AskUserQuestion → input.json 이동[] 채우기  (from · to · 금액, 여러 건 가능)</text>
+
+    <rect x="140" y="438" width="520" height="50" rx="6" fill="#ffffff" stroke="#64b5f6"/>
+    <text x="400" y="457" text-anchor="middle" class="boxt" font-weight="700" fill="#1565c0">출발 비목 → 도착 비목 · 이동 금액(천원, 잔액 이하)</text>
+    <text x="400" y="475" text-anchor="middle" class="small">대상 4비목: 연구시설·장비비 · 연구재료비 · 연구활동비 · 연구수당</text>
+
+    <rect x="675" y="438" width="230" height="50" rx="6" fill="#ffebee" stroke="#e57373" stroke-width="1.4"/>
+    <text x="790" y="457" text-anchor="middle" class="boxt" font-weight="700" fill="#c62828">⚠ 인건비 제외</text>
+    <text x="790" y="475" text-anchor="middle" class="small" fill="#c62828">개인별 재배분 → /rnd-manpower-change</text>
+  </g>
+  <path class="edge" d="M520,498 L520,526" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 3 ===== -->
+  <text x="40" y="574" class="stage">§3 계산·문서</text>
+  <g>
+    <rect x="120" y="528" width="800" height="94" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="551" class="boxh" fill="#0d47a1">budget_calc.py  input.json  --yaml-out  --md-out   (결정론 계산 · 2-pass 재검산)</text>
+    <text x="135" y="571" class="boxt" fill="#1a237e">from −= X · to += X · <tspan font-weight="700">직접비 소계·간접비·총액 고정</tspan> · 후값 독립 재합산으로 교차확인(재검산_일치)</text>
+    <text x="135" y="587" class="small">검증 불변식 7종: 표준비목 · 인건비미관여 · 자기이동금지 · 잔액≥0 · 소계불변 · 간접비/총액불변 · Σ증감=0  (실패 시 exit 2 → 재질의)</text>
+    <text x="135" y="607" class="small">md2pdf.py: 변경안 .md → PDF (pandoc → 헤드리스 Edge/Chrome · Malgun Gothic · 제목 "연구개발비 비목 변경 현황")</text>
+  </g>
+  <path class="edge" d="M520,622 L520,650" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 4 Outputs ===== -->
+  <text x="40" y="686" class="stage" fill="#2e7d32">§4 산출물</text>
+  <text x="40" y="702" class="small">budget_change\</text>
+  <text x="40" y="716" class="small">revNN_작성일\</text>
+  <g>
+    <rect x="120" y="656" width="190" height="76" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="215" y="681" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">변경안 문서</text>
+    <text x="215" y="699" text-anchor="middle" class="small">rev안_&lt;연차&gt;_revNN.md</text>
+    <text x="215" y="716" text-anchor="middle" class="small">3절(개요·요약·내역)</text>
+
+    <rect x="320" y="656" width="190" height="76" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="415" y="681" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">변경안 PDF</text>
+    <text x="415" y="699" text-anchor="middle" class="small">rev안_&lt;연차&gt;_revNN.pdf</text>
+    <text x="415" y="716" text-anchor="middle" class="small">제출·회람용 (--no-pdf 생략)</text>
+
+    <rect x="520" y="656" width="200" height="76" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="620" y="678" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">비교 YAML</text>
+    <text x="620" y="695" text-anchor="middle" class="small">연구개발비비목_…_revNN.yaml</text>
+    <text x="620" y="711" text-anchor="middle" class="small">비목별 전→후·증감</text>
+    <text x="620" y="726" text-anchor="middle" class="small">top key 연구개발비비목_변경비교</text>
+
+    <rect x="730" y="656" width="190" height="76" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="825" y="681" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">계산 입력 JSON</text>
+    <text x="825" y="699" text-anchor="middle" class="small">budget_input_…_revNN.json</text>
+    <text x="825" y="716" text-anchor="middle" class="small">재현·재계산용</text>
+  </g>
+
+  <!-- arrow: outputs -> pending review-queue copy -->
+  <path class="edge" d="M520,732 L520,756" marker-end="url(#arrow)"/>
+
+  <!-- ===== Pending review-queue copy band ===== -->
+  <text x="40" y="784" class="stage" fill="#00695c">pending 복사</text>
+  <text x="40" y="800" class="small">산출 직후 자동</text>
+  <g>
+    <rect x="120" y="758" width="800" height="60" rx="8" fill="#e0f2f1" stroke="#00897b" stroke-width="1.5"/>
+    <text x="135" y="779" class="boxh" fill="#00695c">pending 검토 큐 복사  (자동, --no-pending 로 끔)</text>
+    <text x="135" y="797" class="boxt" fill="#00695c">to_pending.py → RND_PROJECT\_pending\&lt;과제&gt;\&lt;연차&gt;_비목_revNN_작성일\ — 회차 폴더 통째 복사(원본 out_dir 보존)</text>
+    <text x="135" y="811" class="small" fill="#00695c">과제 무관 미확정 변경안 집결 · _export 관례와 짝</text>
+  </g>
+
+  <!-- ===== Key invariants band ===== -->
+  <g>
+    <rect x="120" y="834" width="800" height="46" rx="8" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4"/>
+    <text x="135" y="853" class="boxt" font-weight="700" fill="#e65100">핵심 불변식</text>
+    <text x="135" y="871" class="small"><tspan font-weight="700" fill="#e65100">직접비 소계·간접비·총액 불변(총 연구개발비 고정)</tspan> · <tspan font-weight="700" fill="#e65100">나간 만큼 들어옴(Σ증감=0)</tspan> · <tspan font-weight="700" fill="#c62828">인건비 제외(→/rnd-manpower-change)</tspan> · 산술은 budget_calc.py 전담(LLM 암산 금지, 천원 정수)</text>
+  </g>
+
+  <!-- arrow to handoff -->
+  <path class="edge" d="M620,818 L620,908" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="630" y="898" class="edgelbl">확정 시</text>
+
+  <!-- ===== Stage 5 Handoff (external skills) ===== -->
+  <text x="40" y="942" class="stage" fill="#5e35b1">§5 핸드오프</text>
+  <text x="40" y="958" class="small">이력은 이 스킬이</text>
+  <text x="40" y="972" class="small">직접 수정 안 함</text>
+  <g>
+    <rect x="120" y="916" width="380" height="64" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="310" y="938" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-kr-extract</text>
+    <text x="310" y="956" text-anchor="middle" class="small">비교 YAML '후' 값을 스냅샷 예산.비목별[연차].직접비 반영</text>
+    <text x="310" y="971" text-anchor="middle" class="small">→ 재구조화 (정본 갱신)</text>
+
+    <rect x="540" y="916" width="380" height="64" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="730" y="938" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-kr-history</text>
+    <text x="730" y="956" text-anchor="middle" class="small">비목 이동 변경이력 rev 적재 (전→후 diff)</text>
+    <text x="730" y="971" text-anchor="middle" class="small">changelog · current 뷰 생성</text>
+  </g>
+  <path d="M500,948 L538,948" class="edge" stroke="#7e57c2" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+
+  <text x="120" y="1008" class="small" fill="#7e57c2">분리 구도:  /rnd-kr-extract (스냅샷) → rnd-budget-change (변경안만 생성) → /rnd-kr-history (이력 적재).  이 스킬은 스냅샷·이력을 직접 수정하지 않는다.</text>
+</svg>

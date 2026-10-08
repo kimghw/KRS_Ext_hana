@@ -853,7 +853,7 @@ console.log('공문 탭');
   t('공문 탭 클릭과 공문 화면의 리스너', () => {
     assert.ok(wired.get('tabGongmun')?.has('click'));
     const want = [['gmKinds', 'click'], ['gmChatGo', 'click'], ['gmChatInput', 'keydown'], ['gmFile', 'change'], ['gmCapture', 'click'], ['gmManual', 'click'],
-      ['gmReset', 'click'], ['gmProjects', 'click'], ['gmFields', 'input'], ['gmTitle', 'input'], ['gmBody', 'input'], ['gmRegen', 'click'],
+      ['gmReset', 'click'], ['gmCut', 'click'], ['gmProjects', 'click'], ['gmFields', 'input'], ['gmTitle', 'input'], ['gmBody', 'input'], ['gmRegen', 'click'],
       ['gmCopyTitle', 'click'], ['gmCopyBody', 'click'], ['gmOpen', 'click'], ['gmSavePdf', 'click'], ['gmTplForm', 'change'], ['gmTplTitle', 'input'],
       ['gmTplBody', 'input'], ['gmTplReset', 'click'], ['gmDept', 'input'], ['gmHead', 'input'], ['gmRefs', 'input'], ['gmProjAdd', 'click'],
       ['gmProjList', 'input'], ['gongmun', 'dragover'], ['gongmun', 'drop']];
@@ -987,7 +987,8 @@ console.log('R&D 탭');
       ['rdBudget', 'input'], ['rdBudget', 'change'], ['rdBudget', 'click'], ['rdBudgetAdd', 'click'],
       ['rdLogAdd', 'click'], ['rdLogCancel', 'click'], ['rdLogTitle', 'keydown'], ['rdLogs', 'click'],
       ['rdChAdd', 'click'], ['rdChCancel', 'click'], ['rdChanges', 'click'], ['rdChanges', 'change'],
-      ['rdCopy', 'click'], ['rdExport', 'click'], ['rdImport', 'change'], ['rdImportGm', 'click']];
+      ['rdCopy', 'click'], ['rdBudgetCopy', 'click'], ['rdLogsCopy', 'click'], ['rdChangesCopy', 'click'], ['rdExport', 'click'], ['rdImport', 'change'], ['rdImportGm', 'click'],
+      ['rdYaml', 'change'], ['rnd', 'dragover'], ['rnd', 'drop'], ['rdSkillBox', 'toggle'], ['rdSkillZip', 'click'], ['rdSkillGuide', 'click']];
     for (const [id, type] of want) assert.ok(wired.get(id)?.has(type), `${id} 에 ${type}`);
   });
   t('회의실 탭에서는 R&D 화면이 숨어 있다', () => assert.ok(doc.getElementById('rnd').classList.contains('hidden')));
@@ -1157,7 +1158,125 @@ console.log('공문 탭 — 교육: 견적서에 교육 내용 캡처를 더 넣
   });
 }
 
-console.log('공문 탭 — 웹페이지 골라 통째로 캡처해 읽기(2026-10-08): 탭 고르기 → 권한 → 그 탭을 앞에 두고 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 보던 탭으로 → 교육 내용 PDF');
+console.log('공문 탭 — 구매: 쇼핑몰 화면을 넣으면 가격과 그 둘레를 오려 견적서로 첨부(2026-10-08) → 더 넓게 → 첨부 PDF → 원래 장으로 → 가격 부분만');
+{
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const asked = [];
+  const fetchImpl = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) throw new Error('offline');
+    const body = JSON.parse(init.body);
+    const props = Object.keys(body.output_config.format.schema.properties);
+    asked.push({ props, system: JSON.stringify(body.system) });
+    let record;
+    if (props.includes('parts')) {
+      // 쿠팡 상품 화면 — 가격과 그 둘레는 그림의 위쪽 가운데(왼쪽 10~60%, 위 20~50%)에 있다. 사양표는 따로 넣은 그림이다.
+      record = {
+        docType: 'order', vendor: '쿠팡', gist: '34인치 모니터', total: 489000, summary: '쿠팡 34인치 모니터 상품 화면 489,000원', use: '연구 자료 검토용',
+        items: [{ name: 'LG 34WR50QK 34인치 모니터', qty: 1, unit: '대', amount: 489000 }],
+        parts: [{ file: '쿠팡_상품.png', kind: 'order' }, { file: '사양표.png', kind: 'other' }],
+        quoteArea: [{ file: '쿠팡_상품.png', left: 10, top: 20, right: 60, bottom: 50 }],
+      };
+    } else if (props.includes('reason')) {
+      record = { reason: '과제 회의에서 회로도·시험 데이터를 함께 검토할 대화면이 필요함', use: null };
+    } else {
+      throw new Error(`모르는 작업: ${props}`);
+    }
+    return { ok: true, status: 200, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(record) }] }) };
+  };
+  const saved = {
+    mode: 'gongmun', gongmunKind: 'purchase', apiKey: 'sk-ant-test', myName: '김거화',
+    gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
+    gongmunProjects: [{ name: 'MVDC 차단기 개발', code: 'RND-20-2026', lead: '박기도', about: '', content: '', account: '' }],
+  };
+  const { window, calls, store } = await boot(saved, { fetchImpl });
+  const doc = window.document;
+  // 가짜 캔버스 — 오린 자리(drawImage 의 앞 네 수)와 캔버스 크기를 적는다. 넣은 그림은 1000×800 이다(짧은 변 800).
+  const made = [];
+  const kept = { canvas: globalThis.OffscreenCanvas, bitmap: globalThis.createImageBitmap };
+  globalThis.OffscreenCanvas = class {
+    constructor(w, h) { this.width = w; this.height = h; this.drawn = []; made.push(this); }
+    getContext() { const c = this; return { fillRect() {}, drawImage(bm, ...a) { c.drawn.push(a.slice(0, 4)); } }; }
+    async convertToBlob({ type }) { return new window.Blob([PNG], { type }); }
+  };
+  globalThis.createImageBitmap = async () => ({ width: 1000, height: 800, close() {} });
+  const blobs = [];
+  globalThis.URL.createObjectURL = (b) => { blobs.push(b); return 'blob:gongmun-cut'; };
+  globalThis.URL.revokeObjectURL = () => {};
+  const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  const drop = (names) => {
+    const ev = new window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: names.map((n) => new window.File([PNG], n, { type: 'image/png' })) } });
+    doc.getElementById('gmIntake').dispatchEvent(ev);
+  };
+  const cutBox = () => doc.getElementById('gmCut');
+  const cutBtn = (act) => doc.querySelector(`#gmCut [data-cut="${act}"]`);
+  const body = () => doc.getElementById('gmBody').value;
+  await settle();
+  t('구매가 아니거나 읽기 전에는 오린 견적서 칸이 숨어 있다', () => assert.ok(cutBox().classList.contains('hidden')));
+
+  drop(['쿠팡_상품.png', '사양표.png']);
+  await settle(250);
+  t('읽기 지시문에 오릴 칸(quoteArea)이 들어 있다', () => {
+    const read = asked.find((a) => a.props.includes('parts'));
+    assert.ok(read?.props.includes('quoteArea'));
+    assert.match(read.system, /가격과 그 둘레/);
+  });
+  t('읽기가 짚은 칸을 둘레(짧은 변의 3% = 24px)까지 넣어 오리고, 오린 그림을 보여 준다', () => {
+    assert.ok(!cutBox().classList.contains('hidden'), `칸이 숨었다 — ${doc.getElementById('gmStatus').textContent} / ${doc.getElementById('gmSource').textContent}`);
+    assert.deepEqual(made.at(-1).drawn, [[76, 136, 548, 288]]);
+    assert.deepEqual([made.at(-1).width, made.at(-1).height], [548, 288]);
+    assert.match(cutBox().querySelector('img').getAttribute('src'), /^data:image\/png;base64,/);
+    assert.match(cutBox().textContent, /가격과 그 둘레를 오렸습니다 — 쿠팡_상품\.png/);
+    assert.ok(cutBtn('wide') && cutBtn('off'));
+  });
+  t('첨부 — 오린 그림이 견적서이고 상품 화면 장은 빠진다, 따로 넣은 사양표는 남는다', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 견적서 · 참고 자료/);
+    assert.match(body(), /※ 첨 부\n {4}1\. 견적서 1부\.\n {4}2\. 참고 자료 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSavePdf').textContent, /첨부 PDF 2개 저장 \(견적서 · 참고 자료\)/);
+    assert.equal(doc.getElementById('gmTitle').value, '34인치 모니터 구매 품의');
+  });
+
+  cutBtn('wide').click();
+  await settle(120);
+  t('더 넓게 — 둘레를 더 넣어(3% → 8% = 64px) 다시 오린다', () => {
+    assert.deepEqual(made.at(-1).drawn, [[36, 96, 628, 368]]);
+    assert.match(body(), /1\. 견적서 1부\./);
+  });
+
+  doc.getElementById('gmSavePdf').click();
+  await settle(500);
+  await ta('첨부 PDF — 견적서는 오린 그림 한 쪽, 사양표는 참고 자료', async () => {
+    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['견적서_쿠팡.pdf', '참고자료_쿠팡.pdf']);
+    const { PDFDocument } = await import('../vendor/pdf-lib.esm.min.js');
+    assert.equal((await PDFDocument.load(new Uint8Array(await blobs[0].arrayBuffer()))).getPageCount(), 1);
+  });
+
+  cutBtn('off').click();
+  await settle();
+  t('원래 장으로 — 넣은 장 그대로(주문 내역·참고 자료) 첨부하고, 가격 부분만 첨부로 돌아가는 단추가 선다', () => {
+    assert.match(cutBox().textContent, /넣은 장 그대로 첨부합니다/);
+    assert.equal(cutBox().querySelector('img'), null);
+    assert.match(body(), /※ 첨 부\n {4}1\. 주문 내역 1부\.\n {4}2\. 참고 자료 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSavePdf').textContent, /\(주문 내역 · 참고 자료\)/);
+  });
+  cutBtn('on').click();
+  await settle();
+  t('가격 부분만 첨부 — 다시 오린 견적서가 첫 줄', () => {
+    assert.match(body(), /※ 첨 부\n {4}1\. 견적서 1부\.\n {4}2\. 참고 자료 1부\.  끝\./);
+    assert.ok(cutBox().querySelector('img'));
+  });
+  await settle(500);
+  t('저장되는 초안에는 오린 그림(data URL)이 들지 않고, 첨부 목록은 남는다', () => {
+    const draft = JSON.stringify(store.gongmunDraft ?? {});
+    assert.match(draft, /견적서_가격부분_/);
+    assert.ok(!draft.includes('data:image'));
+  });
+  doc.querySelector('#gmKinds [data-kind="edu"]').click();
+  t('교육 갈래로 가면 오린 견적서 칸은 숨는다', () => assert.ok(cutBox().classList.contains('hidden')));
+  Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap });
+}
+
+console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10-08, 아이콘 단추): 권한 → 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 교육 내용 PDF');
 {
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
   const asked = [];
@@ -1192,16 +1311,15 @@ console.log('공문 탭 — 웹페이지 골라 통째로 캡처해 읽기(2026-
   };
   const { window, calls } = await boot(saved, { fetchImpl });
   const doc = window.document;
-  // 가짜 크롬 — 이 창(7)에서 보고 있는 탭(12)은 Outlook 받은 편지함이고(사용자가 겪은 일), 인프런 강의 화면(11)은 뒤에 있다:
-  // 높이 6000, 뷰포트 600×1000(폭이 좁아 A4 장이 일곱 장 나온다 — 읽기 다섯 장 + 첨부만 두 장). 확장 화면 탭(13)은 찍지 못해 목록에서 빠진다.
+  // 가짜 크롬 — 이 창(7)에서 보고 있는 탭(11)은 인프런 강의 화면이고, Outlook 받은 편지함(12)은 뒤에 있다(찍히면 안 된다):
+  // 높이 6000, 뷰포트 600×1000(폭이 좁아 A4 장이 일곱 장 나온다 — 읽기 다섯 장 + 첨부만 두 장).
   const page = { scrollY: 0, steps: [], done: null };
   const perms = { asked: 0, has: false };
   const tabs = [
     { id: 11, url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의 - 인프런', status: 'complete' },
     { id: 12, url: 'https://outlook.office.com/mail/', title: '메일 - 받은 편지함 - Outlook', status: 'complete' },
-    { id: 13, url: 'chrome://extensions/', title: '확장 프로그램', status: 'complete' },
   ];
-  const front = { id: 12 };
+  const front = { id: 11 };
   const fronted = [];
   Object.assign(window.chrome, {
     windows: { getCurrent: async () => ({ id: 7 }) },
@@ -1242,51 +1360,27 @@ console.log('공문 탭 — 웹페이지 골라 통째로 캡처해 읽기(2026-
   const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
   const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
   await settle();
-  t('문서 넣는 곳 아래에 "웹페이지 골라 통째로 캡처해 읽기" 단추가 있다', () => {
-    const btn = doc.getElementById('gmCapture');
-    assert.match(btn.textContent, /웹페이지 골라 통째로 캡처해 읽기/);
-    assert.ok(btn.closest('#gmIntake'), '문서 넣는 곳 안에 있어야 한다');
-    assert.ok(!btn.disabled);
-    assert.ok(doc.getElementById('gmTabs').classList.contains('hidden'));
+  const tabBtn = () => doc.querySelector('#gmCapture [data-pick="tab"]');
+  const partBtn = () => doc.querySelector('#gmCapture [data-pick="part"]');
+  t('문서 넣는 곳 아래에 단추 둘 — 보고 있는 탭(아이콘, 이름은 낭독기·풍선말)과 "부분 골라 캡처". 탭 목록은 없다', () => {
+    const box = doc.getElementById('gmCapture');
+    assert.ok(box.closest('#gmIntake'), '문서 넣는 곳 안에 있어야 한다');
+    assert.equal(tabBtn().textContent, '', '아이콘만');
+    assert.ok(tabBtn().querySelector('svg'));
+    assert.equal(tabBtn().getAttribute('aria-label'), '보고 있는 탭 통째로 캡처해 읽기');
+    assert.match(tabBtn().title, /보고 있는 웹페이지를 위에서 아래까지 캡처/);
+    assert.equal(partBtn().textContent, '부분 골라 캡처');
+    assert.equal(partBtn().getAttribute('aria-pressed'), 'false');
+    assert.ok(!tabBtn().disabled && !partBtn().disabled);
+    assert.equal(doc.getElementById('gmTabs'), null);
   });
-  doc.getElementById('gmCapture').click();
-  await settle(20);
-  const pickBox = (id) => doc.querySelector(`#gmTabs [data-tab="${id}"]`);
-  const goBtn = () => doc.querySelector('#gmTabs [data-pick="go"]');
-  t('누르면 바로 찍지 않고 이 창의 웹페이지 탭을 늘어놓는다 — 확장 화면은 빼고, 보고 있는 탭을 적고, 아무것도 미리 고르지 않는다', () => {
-    assert.ok(!doc.getElementById('gmTabs').classList.contains('hidden'));
-    assert.equal(doc.getElementById('gmCapture').getAttribute('aria-expanded'), 'true');
-    const rows = [...doc.querySelectorAll('#gmTabs .wp-tab')].map((r) => r.textContent);
-    assert.deepEqual(rows, ['Hermes Bot 강의 - 인프런inflearn.com', '메일 - 받은 편지함 - Outlookoutlook.office.com · 보고 있는 탭']);
-    assert.ok(!pickBox(11).checked && !pickBox(12).checked);
-    assert.ok(goBtn().disabled);
-    assert.equal(perms.asked, 0, '권한은 찍을 때 묻는다');
-    assert.equal(calls.shots, undefined);
-  });
-  const all = doc.querySelector('#gmTabs [data-pick="all"]');
-  all.click();
-  t('전체를 누르면 다 골라지고, 다시 누르면 다 풀린다', () => {
-    assert.ok(pickBox(11).checked && pickBox(12).checked);
-    assert.equal(goBtn().textContent, '고른 2개 캡처해 읽기');
-    all.click();
-    assert.ok(!pickBox(11).checked && !pickBox(12).checked);
-    assert.ok(goBtn().disabled);
-  });
-  pickBox(11).click();
-  t('하나만 눌러 고르면 전체는 반쯤 표시되고 캡처 단추가 열린다', () => {
-    assert.ok(pickBox(11).checked);
-    assert.ok(all.indeterminate && !all.checked);
-    assert.ok(!goBtn().disabled);
-    assert.equal(goBtn().textContent, '고른 1개 캡처해 읽기');
-  });
-  goBtn().click();
+  tabBtn().click();
   await settle(40);
-  t('캡처를 누르면 먼저 사이트 접근 권한(<all_urls>)을 묻고, 고른 탭을 앞에 두며, 찍는 동안 단추와 파일 고르기가 잠긴다', () => {
-    assert.ok(doc.getElementById('gmTabs').classList.contains('hidden'), '고르기는 접힌다');
+  t('아이콘을 누르면 먼저 사이트 접근 권한(<all_urls>)을 묻고, 보고 있는 탭을 찍는 동안 단추와 파일 고르기가 잠긴다', () => {
     assert.deepEqual(fronted, [11]);
     assert.equal(perms.asked, 1);
     assert.deepEqual(calls.permissions, { origins: ['<all_urls>'] });
-    assert.ok(doc.getElementById('gmCapture').disabled);
+    assert.ok(tabBtn().disabled && partBtn().disabled);
     assert.ok(doc.getElementById('gmFile').disabled);
     assert.equal(doc.getElementById('gmDropLead').textContent, '캡처하는 중…');
     assert.match(doc.getElementById('gmStatus').textContent, /캡처하는 중/);
@@ -1300,11 +1394,11 @@ console.log('공문 탭 — 웹페이지 골라 통째로 캡처해 읽기(2026-
     assert.equal(page.done, 0);
     assert.equal(canvases.length, 7);
     assert.deepEqual(canvases[0], [600, 849]);
-    assert.ok(!doc.getElementById('gmCapture').disabled);
+    assert.ok(!tabBtn().disabled && !partBtn().disabled);
   });
-  t('다 찍으면 누르기 전에 보던 탭(Outlook)을 다시 앞에 둔다', () => {
-    assert.deepEqual(fronted, [11, 12]);
-    assert.equal(front.id, 12);
+  t('뒤에 있던 메일함은 앞에 나오지 않는다 — 보던 탭 그대로', () => {
+    assert.deepEqual(fronted, [11, 11]);
+    assert.equal(front.id, 11);
   });
   t('읽기에는 앞 다섯 장과 화면 글자(머리말 달림)가 가고, 두 장은 첨부에만 들어간다', () => {
     const read = asked.find((a) => a.props.includes('parts'));
@@ -1342,7 +1436,7 @@ console.log('공문 탭 — 웹페이지 골라 통째로 캡처해 읽기(2026-
   Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
 }
 
-console.log('공문 탭 — 웹페이지 여러 개를 골라 한 번에(2026-10-08): 전체 → 메일함 빼기 → 탭마다 차례로 찍기 → 읽기 자리는 탭마다 앞쪽부터 → 탭마다 PDF');
+console.log('공문 탭 — 부분 골라 캡처(2026-10-08 "탭이 아니라 프레임으로 선택"): 페이지 위에서 고르기 → 고르기 취소 → 다시 골라 eClass 본문 틀·상자 → 틀 안을 내리며 찍기 → 고른 것만 읽기');
 {
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
   const asked = [];
@@ -1355,15 +1449,14 @@ console.log('공문 탭 — 웹페이지 여러 개를 골라 한 번에(2026-10
     asked.push({ props, input, images: Array.isArray(content) ? content.filter((c) => c.type === 'image').length : 0 });
     let record;
     if (props.includes('parts')) {
-      // 읽기는 첫 탭의 첫 장을 교육 안내문, 둘째 탭의 첫 장을 교육 내용으로 가렸다 — 나머지 장은 제 탭의 종류를 이어 받는다.
-      const names = [...new Set([...input.matchAll(/화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_\d+\.png/g)].map((m) => m[0]))];
+      const names = [...new Set([...input.matchAll(/화면캡처_eclass\.krs\.co\.kr_\d{4}-\d{2}-\d{2}_\d+\.png/g)].map((m) => m[0]))];
       record = {
-        docType: 'course', vendor: '인프런', courseName: '[단테랩스] Hermes Bot × OpenAI Dots', total: 84700, gist: 'Hermes Bot 강의', summary: '인프런 온라인 강의 안내 84,700원',
-        place: '온라인', courseHours: '7분(수업 19개)', topics: '두 봇 지도', use: 'AI 봇 활용 역량 강화',
-        parts: [{ file: names.find((n) => n.endsWith('_1.png')), kind: 'course' }, { file: names.find((n) => n.endsWith('_5.png')), kind: 'content' }],
+        docType: 'course', vendor: '한국전력기술교육원', courseName: '전력전자 실무', total: 330000, gist: '전력전자 실무 교육', summary: '전력전자 실무 교육 안내 330,000원',
+        place: '대전', courseHours: '16시간', topics: '컨버터 설계', use: '차단기 설계 역량 강화',
+        parts: [{ file: names[0], kind: 'course' }, { file: names[1], kind: 'content' }],
       };
     } else if (props.includes('reason')) {
-      record = { reason: '과제의 AI 봇 플랫폼 활용 역량 확보에 필요함', use: null };
+      record = { reason: '과제의 차단기 설계 역량 확보에 필요함', use: null };
     } else {
       throw new Error(`모르는 작업: ${props}`);
     }
@@ -1372,98 +1465,137 @@ console.log('공문 탭 — 웹페이지 여러 개를 골라 한 번에(2026-10
   const saved = {
     mode: 'gongmun', gongmunKind: 'edu', apiKey: 'sk-ant-test', myName: '김거화',
     gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
-    gongmunProjects: [{ name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', about: '', content: 'AI 도구를 설계 검토에 활용', account: '' }],
+    gongmunProjects: [{ name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', about: '', content: '차단기 설계', account: '' }],
   };
   const { window, calls } = await boot(saved, { fetchImpl });
   const doc = window.document;
-  // 강의 소개(21, 높이 3000 → 세 화면 → A4 네 장)와 커리큘럼(22, 높이 2000 → 두 화면 → A4 세 장)은 같은 사이트, 보고 있는 탭(12)은 메일함.
-  const tabs = [
-    { id: 21, url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의 - 인프런', status: 'complete', height: 3000, text: '강의 소개\n교육비 84,700원' },
-    { id: 22, url: 'https://www.inflearn.com/course/hermes-bot/curriculum', title: '커리큘럼 - 인프런', status: 'complete', height: 2000, text: '섹션 1. 두 봇 지도' },
-    { id: 12, url: 'https://outlook.office.com/mail/', title: '메일 - 받은 편지함 - Outlook', status: 'complete', height: 1000, text: '받은 편지함' },
-  ];
-  const front = { id: 12 };
-  const fronted = [];
-  const ran = [];
+  // 가짜 크롬 — 보고 있는 탭(41)은 eClass 포털: 본문은 틀(iframe, frameId 5 — 테두리 1, 안쪽 1200×700, 안이 2000 높이로 따로 내려간다)이고,
+  // 그 아래 교육비 상자(800×300)가 있다. 창은 1200×1000. 다른 틀(광고, frameId 6)도 있다.
   const perms = { has: false };
+  const front = { id: 41 };
+  const ran = [];
+  const shots = [];
+  const win = { scrollY: 0, inner: 0, hidden: false };
+  const frame5 = { scrollY: 0, done: null };
+  let pending = null;   // 페이지 위의 고르기 — 테스트가 사용자 대신 풀어 준다
+  const PARTS = [
+    { n: 1, tag: 'iframe', title: '교육 안내', frame: { href: null, src: 'https://eclass.krs.co.kr/notice/view?id=7', name: 'content-iframe', w: 1200, h: 700 } },
+    { n: 2, tag: 'div', title: '교육비', frame: null },
+  ];
+  const PLACE = { 1: { top: 80, left: 0, width: 1202, height: 702, frame: true, text: '' }, 2: { top: 900, left: 100, width: 800, height: 300, frame: false, text: '교육비 330,000원 (부가세 포함)' } };
   Object.assign(window.chrome, {
     windows: { getCurrent: async () => ({ id: 7 }) },
     permissions: { contains: async () => perms.has, request: async () => { perms.has = true; return true; } },
   });
-  window.chrome.tabs.query = async (q) => (q.windowId !== 7 ? [] : tabs.filter((t) => !q.active || t.id === front.id).map((t) => ({ ...t, active: t.id === front.id })));
-  window.chrome.tabs.update = async (id, props) => { if (props.active) { front.id = id; fronted.push(id); } return { id }; };
-  window.chrome.tabs.get = async (id) => ({ ...tabs.find((t) => t.id === id), active: id === front.id });
-  window.chrome.tabs.captureVisibleTab = async () => {
-    calls.shots = [...(calls.shots || []), front.id];
-    return `data:image/png;base64,${PNG.toString('base64')}`;
-  };
-  window.chrome.scripting.executeScript = async ({ target, func, args }) => {
-    const tab = tabs.find((x) => x.id === target.tabId);
-    ran.push([target.tabId, func.name]);
-    if (func.name === 'pageInfo') return [{ result: { url: tab.url, title: tab.title, scrollHeight: tab.height, viewportHeight: 1000, viewportWidth: 600, dpr: 1, scrollY: 0, text: tab.text } }];
-    if (func.name === 'pageStep') return [{ result: Math.min(args[0], tab.height - 1000) }];
-    if (func.name === 'pageDone') return [{ result: null }];
+  window.chrome.tabs.query = async (q) => (q.windowId === 7 && q.active ? [{ id: 41, url: 'https://eclass.krs.co.kr/eClassVer4/Home/Index', title: 'e-Class', active: true, status: 'complete' }] : []);
+  window.chrome.tabs.update = async (id) => ({ id });
+  window.chrome.tabs.get = async (id) => ({ id, active: id === front.id, status: 'complete' });
+  window.chrome.tabs.captureVisibleTab = async () => { shots.push([win.scrollY, frame5.scrollY]); return `data:image/png;base64,${PNG.toString('base64')}`; };
+  window.chrome.scripting.executeScript = async ({ target, func, args = [] }) => {
+    assert.equal(target.tabId, 41);
+    ran.push([target.frameIds?.[0] ?? (target.allFrames ? 'all' : 'top'), func.name, ...args]);
+    if (func.name === 'pagePick') return new Promise((resolve) => { pending = (parts) => { pending = null; resolve([{ result: parts }]); }; });
+    if (func.name === 'pickCancel') { pending?.(null); return [{ result: true }]; }
+    if (target.allFrames) {
+      assert.equal(func.name, 'frameProbe');
+      return [
+        { frameId: 0, result: { href: 'https://eclass.krs.co.kr/eClassVer4/Home/Index', name: '', w: 1200, h: 1000, child: false } },
+        { frameId: 5, result: { href: 'https://eclass.krs.co.kr/notice/view?id=7', name: 'content-iframe', w: 1200, h: 700, child: true } },
+        { frameId: 6, result: { href: 'https://ads.example/', name: 'ad', w: 300, h: 250, child: true } },
+      ];
+    }
+    if (target.frameIds) {
+      assert.deepEqual(target.frameIds, [5], '본문 틀 안에서만');
+      if (func.name === 'pageInfo') return [{ result: { url: 'https://eclass.krs.co.kr/notice/view?id=7', title: '교육 안내', scrollHeight: 2000, viewportHeight: 700, viewportWidth: 1200, dpr: 1, scrollY: 0, text: '전력전자 실무 교육 안내\n교육기간 11/3~11/4' } }];
+      if (func.name === 'pageStep') { frame5.scrollY = Math.min(args[0], 1300); return [{ result: frame5.scrollY }]; }
+      if (func.name === 'pageDone') { frame5.done = args[0]; frame5.scrollY = args[0]; return [{ result: null }]; }
+      throw new Error(`틀 안에서 모르는 함수 ${func.name}`);
+    }
+    const p = PLACE[args[0]];
+    if (func.name === 'partInfo') {
+      return [{ result: { url: 'https://eclass.krs.co.kr/eClassVer4/Home/Index', title: 'e-Class', vw: 1200, vh: 1000, scrollY: win.scrollY, top: p.top, width: p.width, height: p.height,
+        edge: { top: 1, left: 1, w: p.width - 2, h: p.height - 2 }, frame: p.frame, box: null, text: p.text } }];
+    }
+    if (func.name === 'partStep') {
+      win.hidden = true;
+      if (args[1] != null) win.scrollY = Math.min(p.top + args[1], 400);   // 부분의 머리 + rel 로 — 페이지 높이 1400
+      return [{ result: { top: p.top - win.scrollY, left: p.left, width: p.width, height: p.height, inner: 0, clip: { top: 0, left: 0, bottom: 1000, right: 1200 } } }];
+    }
+    if (func.name === 'partDone') { win.hidden = false; win.scrollY = 0; return [{ result: null }]; }
     throw new Error(`모르는 함수 ${func.name}`);
   };
+  const canvases = [];
   const kept = { canvas: globalThis.OffscreenCanvas, bitmap: globalThis.createImageBitmap, file: globalThis.File };
   globalThis.OffscreenCanvas = class {
-    constructor(w, h) { this.width = w; this.height = h; }
-    getContext() { return { fillRect() {}, drawImage() {} }; }
+    constructor(w, h) { this.width = w; this.height = h; this.drawn = []; canvases.push(this); }
+    getContext() { const c = this; return { fillRect() {}, drawImage(bm, ...a) { c.drawn.push(a); } }; }
     async convertToBlob({ type }) { return new window.Blob([PNG], { type }); }
   };
-  globalThis.createImageBitmap = async () => ({ width: 600, height: 1000, close() {} });
+  globalThis.createImageBitmap = async () => ({ width: 1200, height: 1000, close() {} });
   globalThis.File = window.File;
-  const blobs = [];
-  globalThis.URL.createObjectURL = (b) => { blobs.push(b); return 'blob:gongmun-cap'; };
-  globalThis.URL.revokeObjectURL = () => {};
   const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  const tabBtn = () => doc.querySelector('#gmCapture [data-pick="tab"]');
+  const partBtn = () => doc.querySelector('#gmCapture [data-pick="part"]');
   await settle();
-  doc.getElementById('gmCapture').click();
-  await settle(20);
-  const pickBox = (id) => doc.querySelector(`#gmTabs [data-tab="${id}"]`);
-  const goBtn = () => doc.querySelector('#gmTabs [data-pick="go"]');
-  doc.querySelector('#gmTabs [data-pick="all"]').click();
-  pickBox(12).click();
-  t('전체를 고른 뒤 메일함을 빼면 두 개가 골라진다', () => {
-    assert.deepEqual([pickBox(21).checked, pickBox(22).checked, pickBox(12).checked], [true, true, false]);
-    assert.equal(goBtn().textContent, '고른 2개 캡처해 읽기');
+  partBtn().click();
+  await settle(30);
+  t('"부분 골라 캡처"를 누르면 권한을 묻고 보고 있는 탭에 고르기 막을 씌운다 — 단추는 "고르기 취소"가 되고, 탭 단추만 잠긴다(파일 넣기는 그대로)', () => {
+    assert.ok(perms.has);
+    assert.deepEqual(ran.map((r) => r.slice(0, 2)), [['top', 'pagePick']]);
+    assert.equal(partBtn().textContent, '고르기 취소');
+    assert.equal(partBtn().getAttribute('aria-pressed'), 'true');
+    assert.ok(!partBtn().disabled && tabBtn().disabled);
+    assert.ok(!doc.getElementById('gmFile').disabled);
+    assert.match(doc.getElementById('gmStatus').textContent, /캡처할 부분\(프레임\)을 누르세요 — 여러 개 고를 수 있고/);
   });
-  const seen = new Set();
-  const watch = setInterval(() => seen.add(doc.getElementById('gmStatus').textContent), 40);
-  goBtn().click();
-  // 다섯 화면 × 0.6초 틈 — 실제 시간으로 기다린다.
-  await settle(5 * 650 + 1200);
-  clearInterval(watch);
-  t('고른 탭을 차례로 앞에 두고 찍은 뒤 보던 탭(메일함)으로 돌아온다 — 메일함은 찍지 않는다', () => {
-    assert.deepEqual(fronted, [21, 22, 12]);
-    assert.deepEqual(calls.shots, [21, 21, 21, 22, 22]);
-    assert.ok(!ran.some(([id]) => id === 12), '메일함 탭에는 스크립트도 넣지 않는다');
-    assert.ok([...seen].some((s) => /1\/2번째 페이지/.test(s)) && [...seen].some((s) => /2\/2번째 페이지/.test(s)), [...seen].join(' | '));
+  partBtn().click();
+  await settle(30);
+  t('고르기 취소를 누르면 페이지의 막을 걷고(pickCancel) 단추가 돌아온다 — 아무것도 찍지 않는다', () => {
+    assert.deepEqual(ran.map((r) => r[1]), ['pagePick', 'pickCancel']);
+    assert.equal(pending, null);
+    assert.equal(partBtn().textContent, '부분 골라 캡처');
+    assert.ok(!tabBtn().disabled);
+    assert.equal(doc.getElementById('gmStatus').textContent, '부분 고르기를 그만뒀습니다.');
+    assert.equal(shots.length, 0);
   });
-  t('읽기 자리 다섯은 탭마다 앞쪽부터 나눈다 — 첫 탭 1·2·3쪽, 둘째 탭 1·2쪽(장 번호는 같은 사이트라 5부터 잇는다), 두 화면의 글자도 함께', () => {
+  partBtn().click();
+  await settle(30);
+  ran.length = 0;
+  pending(PARTS);   // 사용자가 본문 틀과 교육비 상자를 눌러 고르고 페이지 위쪽 띠의 캡처를 눌렀다
+  await settle(30);
+  t('고른 뒤 찍는 동안은 단추와 파일 넣기가 잠긴다', () => {
+    assert.ok(tabBtn().disabled && partBtn().disabled);
+    assert.equal(partBtn().textContent, '부분 골라 캡처');
+    assert.ok(doc.getElementById('gmFile').disabled);
+    assert.match(doc.getElementById('gmStatus').textContent, /캡처하는 중/);
+  });
+  // 틀 안 세 화면 + 상자 한 화면 × 0.6초
+  await settle(4 * 650 + 1200);
+  t('본문 틀은 frameProbe 로 frameId 5 를 맞춰 틀 안을 0·700·1300 으로 내리며 찍고, 상자는 창을 내려 한 번 — 끝에 자리를 다 되돌린다', () => {
+    const order = ran.filter((r) => r[1] !== 'partInfo').map((r) => r.join(' '));
+    assert.deepEqual(order, [
+      'all frameProbe', '5 pageInfo', 'top partStep 1 0 ', '5 pageStep 0 false', '5 pageStep 700 true', '5 pageStep 1300 true', '5 pageDone 0', 'top partDone 1',
+      'top partStep 2 0 ', 'top partDone 2',
+    ]);
+    assert.deepEqual(shots, [[80, 0], [80, 700], [80, 1300], [400, 0]]);
+    assert.deepEqual([win.scrollY, win.hidden, frame5.done], [0, false, 0]);
+  });
+  t('장은 고른 칸만 오린다 — 틀은 테두리 안쪽(창 폭 밖은 뺀다) 1199 폭(짧은 꼬리 304 는 앞 장에 붙어 한 장), 상자는 800 폭', () => {
+    assert.deepEqual(canvases.map((c) => [c.width, c.height]), [[1199, 2000], [800, 300]]);
+    assert.deepEqual(canvases[0].drawn[0], [1, 1, 1199, 700, 0, 0, 1199, 700], '창 안 (1,1) 에서 1199×700 을 오려 장의 맨 위에');
+    assert.deepEqual(canvases[1].drawn[0], [100, 500, 800, 300, 0, 0, 800, 300], '창이 400 까지만 내려가 상자는 창 안 500 에 있다');
+  });
+  t('읽기에는 고른 것만 — 장 둘과 틀 안의 글자·상자의 글자(머리말에 고른 칸 이름)', () => {
     const read = asked.find((a) => a.props.includes('parts'));
     assert.ok(read, `읽기를 부르지 않았다 — ${doc.getElementById('gmStatus').textContent}`);
-    assert.equal(read.images, 5);
-    const names = [...new Set([...read.input.matchAll(/화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_(\d+)\.png/g)].map((m) => m[1]))];
-    assert.deepEqual(names, ['1', '2', '3', '5', '6']);
-    assert.match(read.input, /\[웹페이지 글자 — Hermes Bot 강의 - 인프런\][^"]*강의 소개/);
-    assert.match(read.input, /\[웹페이지 글자 — 커리큘럼 - 인프런\][^"]*섹션 1\. 두 봇 지도/);
-    assert.doesNotMatch(read.input, /받은 편지함/);
-    const src = doc.getElementById('gmSource').textContent;
-    assert.match(src, /화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2} 4장, 화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2} 3장/);
-    assert.match(src, /캡처 7장 가운데 페이지마다 앞쪽부터 5장만 읽었습니다 — 나머지 2장은 첨부 PDF 에만 들어갑니다/);
+    assert.equal(read.images, 2);
+    assert.match(read.input, /\[웹페이지 글자 — e-Class — 교육 안내\] https:\/\/eclass\.krs\.co\.kr\/notice\/view\?id=7\\n전력전자 실무 교육 안내/);
+    assert.match(read.input, /\[웹페이지 글자 — e-Class — 교육비\] https:\/\/eclass\.krs\.co\.kr\/eClassVer4\/Home\/Index\\n교육비 330,000원/);
+    assert.match(doc.getElementById('gmSource').textContent, /화면캡처_eclass\.krs\.co\.kr_\d{4}-\d{2}-\d{2}_1\.png, 화면캡처_eclass\.krs\.co\.kr_\d{4}-\d{2}-\d{2}_2\.png/);
+    assert.equal(doc.querySelector('#gmFields [data-key="course"]').value, '전력전자 실무');
   });
-  t('탭마다 한 묶음 — 첫 탭은 교육 안내문 4장, 둘째 탭은 교육 내용 3장', () => {
-    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 안내문 4장 · 교육 내용 3장/);
-  });
-  doc.getElementById('gmSavePdf').click();
-  await settle(800);
-  await ta('첨부 PDF — 교육 안내문 네 쪽, 교육 내용 세 쪽', async () => {
-    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['교육안내문_인프런.pdf', '교육내용_인프런.pdf']);
-    const { PDFDocument } = await import('../vendor/pdf-lib.esm.min.js');
-    const pages = [];
-    for (const b of blobs) pages.push((await PDFDocument.load(new Uint8Array(await b.arrayBuffer()))).getPageCount());
-    assert.deepEqual(pages, [4, 3]);
+  t('고른 칸마다 한 묶음 — 틀은 교육 안내문, 상자는 교육 내용', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 안내문 · 교육 내용/);
   });
   Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
 }

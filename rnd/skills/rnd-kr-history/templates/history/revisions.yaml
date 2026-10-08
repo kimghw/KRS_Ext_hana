@@ -1,0 +1,14 @@
+# 개정 레지스트리 — 모든 변경의 단일 출처(SSOT).
+# rev 값이 budget/researchers/objectives_history.yaml 의 외래키.
+# 규칙: 추가 전용(append-only). 기존 rev 레코드는 수정하지 않는다.
+project: ""                      # 과제 약어(예: SSCB)
+revisions:
+  # type: 최초협약 | 협약변경 | 연차변경 | 계획수정
+  # status: 확정 | 검토중
+  # date 는 발효일(협약/개정 효력일) — git 커밋 일자와 별개
+  - rev: r0
+    date: ""                     # 예: 2026-04-01
+    type: 최초협약
+    reason: 협약 체결
+    source: ""                   # 근거 문서(예: 사업계획서_v1.pdf)
+    status: 확정

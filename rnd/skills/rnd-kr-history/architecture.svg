@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 1210" width="1300" height="1210" font-family="'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#37474f"/>
+    </marker>
+    <marker id="arrowDash" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7e57c2"/>
+    </marker>
+    <marker id="arrowB" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#ef6c00"/>
+    </marker>
+    <marker id="arrowRev" markerWidth="11" markerHeight="11" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#00838f"/>
+    </marker>
+    <marker id="arrowAuto" markerWidth="11" markerHeight="11" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#ad1457"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { font-size: 24px; font-weight: 700; fill: #1a237e; }
+    .subtitle { font-size: 13px; fill: #546e7a; }
+    .boxh     { font-size: 14px; font-weight: 700; }
+    .boxt     { font-size: 11.5px; }
+    .small    { font-size: 10.5px; fill: #455a64; }
+    .stage    { font-size: 12px; font-weight: 700; fill: #1565c0; }
+    .edge     { stroke: #37474f; stroke-width: 1.6; fill: none; }
+    .edgeB    { stroke: #ef6c00; stroke-width: 1.6; fill: none; }
+    .edgelbl  { font-size: 10.5px; fill: #37474f; }
+    .edgelblB { font-size: 10.5px; fill: #ef6c00; }
+    .edgeRev  { stroke: #00838f; stroke-width: 2.2; fill: none; stroke-dasharray: 8 4; }
+    .edgelblR { font-size: 10.5px; fill: #00838f; font-weight: 700; }
+    .legtxt   { font-size: 11px; fill: #37474f; }
+    .edgeAuto { stroke: #ad1457; stroke-width: 2.2; fill: none; stroke-dasharray: 7 4; }
+    .edgelblAuto { font-size: 10.5px; fill: #ad1457; font-weight: 700; }
+  </style>
+
+  <!-- ===== Title ===== -->
+  <text x="40" y="44" class="title">rnd-kr-history — 변경이력(rev) 관리 (sparse-hybrid append-only)</text>
+  <text x="40" y="66" class="subtitle">두 입력 → 직전 현재값 diff → 신규/변경(전→후)/삭제 → rev 적재 → 뷰 생성.  역방향 snapshot 모드로 이력 → KR_&lt;과제&gt;_r&lt;N&gt;.yaml 재생성(base+overlay).  연차별 격리: year_dir\history\ 한 곳, rev 도 연차별 독립.</text>
+
+  <!-- ===== Legend ===== -->
+  <g transform="translate(40, 80)">
+    <rect x="0"   y="0" width="16" height="12" rx="2" fill="#eceff1" stroke="#90a4ae"/>
+    <text x="22"  y="10" class="legtxt">입력 A(읽기전용)</text>
+    <rect x="150" y="0" width="16" height="12" rx="2" fill="#fff3e0" stroke="#ef6c00"/>
+    <text x="172" y="10" class="legtxt">입력 B(읽기전용)</text>
+    <rect x="300" y="0" width="16" height="12" rx="2" fill="#e3f2fd" stroke="#1976d2"/>
+    <text x="322" y="10" class="legtxt">처리</text>
+    <rect x="380" y="0" width="16" height="12" rx="2" fill="#e8f5e9" stroke="#388e3c"/>
+    <text x="402" y="10" class="legtxt">산출물(정본/뷰)</text>
+    <rect x="510" y="0" width="16" height="12" rx="2" fill="#f3e5f5" stroke="#7e57c2" stroke-dasharray="4 3"/>
+    <text x="532" y="10" class="legtxt">외부 스킬</text>
+    <line x1="610" y1="6" x2="640" y2="6" stroke="#00838f" stroke-width="2.2" stroke-dasharray="8 4"/>
+    <text x="646" y="10" class="legtxt" fill="#00838f">역방향(재생성)</text>
+    <line x1="765" y1="6" x2="795" y2="6" stroke="#ad1457" stroke-width="2.2" stroke-dasharray="7 4"/>
+    <text x="801" y="10" class="legtxt" fill="#ad1457">변경비교 적재 후 자동 재생성</text>
+  </g>
+
+  <!-- ===== Input A: KR snapshot ===== -->
+  <g>
+    <rect x="120" y="110" width="440" height="98" rx="8" fill="#eceff1" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="340" y="132" text-anchor="middle" class="boxh" fill="#37474f">입력 A: KR 스냅샷  KR_&lt;과제&gt;.yaml (읽기 전용)</text>
+    <text x="340" y="150" text-anchor="middle" class="small">과제\KR_*.yaml  또는  과제\연차\KR_*.yaml  ← /rnd-kr-extract --format structured</text>
+    <text x="340" y="166" text-anchor="middle" class="small">meta.수행기관 = KR 확인 (KR-only)</text>
+    <text x="340" y="182" text-anchor="middle" class="small" fill="#1565c0">전체 비교/시드 → budget · researchers · objectives</text>
+    <text x="340" y="200" text-anchor="middle" class="small" fill="#c62828" font-weight="700">★ extract 가 structured 산출 직후 init 자동 트리거 → r0 기준선</text>
+  </g>
+
+  <!-- ===== Input B: 변경비교 YAML ===== -->
+  <g>
+    <rect x="600" y="110" width="570" height="98" rx="8" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.6"/>
+    <text x="885" y="132" text-anchor="middle" class="boxh" fill="#e65100">입력 B: 변경비교 YAML  참여연구자인건비_변경비교 (읽기 전용)</text>
+    <text x="885" y="150" text-anchor="middle" class="small">참여연구자인건비_&lt;연차&gt;_변경&lt;NN&gt;.yaml  ← /rnd-manpower-change</text>
+    <text x="885" y="166" text-anchor="middle" class="small" fill="#e65100">참여자별  전:{…}/후:{…} 가 곧 diff →  전→r0(기준선) · 후→r1(변경) 자동 매핑</text>
+    <text x="885" y="182" text-anchor="middle" class="small" fill="#bf360c" font-weight="700">researchers 전용 · 예산·목표 제외 · 스냅샷 불필요(전/후 = baseline+delta)</text>
+    <text x="885" y="200" text-anchor="middle" class="small">첫 회만 전→r0 시드, 이후 변경비교 YAML 의 후 로 직전 현재값에 누적</text>
+  </g>
+
+  <!-- ===== Modes row ===== -->
+  <text x="40" y="266" class="stage">모드 분기 ($ARGUMENTS)</text>
+  <g>
+    <!-- init -->
+    <rect x="120" y="246" width="185" height="60" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="212" y="268" text-anchor="middle" class="boxt" font-weight="700" fill="#0d47a1">init  (= r0 시드)</text>
+    <text x="212" y="285" text-anchor="middle" class="small">history 없으면 현재</text>
+    <text x="212" y="298" text-anchor="middle" class="small">스냅샷을 r0 로 시드</text>
+
+    <!-- append -->
+    <rect x="320" y="246" width="185" height="60" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2.2"/>
+    <text x="412" y="268" text-anchor="middle" class="boxt" font-weight="700" fill="#0d47a1">append (기본)</text>
+    <text x="412" y="285" text-anchor="middle" class="small">스냅샷 ↔ 직전값 diff</text>
+    <text x="412" y="298" text-anchor="middle" class="small">→ rev 적재</text>
+
+    <!-- undo -->
+    <rect x="520" y="246" width="185" height="60" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="612" y="268" text-anchor="middle" class="boxt" font-weight="700" fill="#0d47a1">undo</text>
+    <text x="612" y="285" text-anchor="middle" class="small">최신 rev 1건 롤백</text>
+    <text x="612" y="298" text-anchor="middle" class="small">(파괴적 · 확인 후)</text>
+
+    <!-- show -->
+    <rect x="720" y="246" width="185" height="60" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="812" y="268" text-anchor="middle" class="boxt" font-weight="700" fill="#0d47a1">show</text>
+    <text x="812" y="285" text-anchor="middle" class="small">엔티티별 항목 수</text>
+    <text x="812" y="298" text-anchor="middle" class="small">최신 rev·변경 건수</text>
+
+    <!-- 변경비교 모드 (입력 B 전용 분기) -->
+    <rect x="940" y="246" width="230" height="60" rx="8" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.6"/>
+    <text x="1055" y="268" text-anchor="middle" class="boxt" font-weight="700" fill="#e65100">변경비교 YAML 모드</text>
+    <text x="1055" y="285" text-anchor="middle" class="small">참여연구자인건비_변경비교 → researchers (전→r0·후→r1)</text>
+    <text x="1055" y="298" text-anchor="middle" class="small" fill="#bf360c">연구개발비비목_변경비교 → budget (전→r0·후→새rev)</text>
+  </g>
+
+  <!-- Input A feeds init & append (& undo) -->
+  <path class="edge" d="M305,208 L212,246" marker-end="url(#arrow)"/>
+  <path class="edge" d="M375,208 L412,246" marker-end="url(#arrow)"/>
+  <path class="edge" d="M425,208 L612,246" marker-end="url(#arrow)" stroke-dasharray="3 3"/>
+
+  <!-- Input B feeds 변경비교 모드 -->
+  <path class="edgeB" d="M955,208 L1055,246" marker-end="url(#arrowB)"/>
+
+  <!-- append pipeline arrow down -->
+  <path class="edge" d="M412,306 L412,348" marker-end="url(#arrow)"/>
+  <text x="420" y="332" class="edgelbl">append 파이프라인</text>
+
+  <!-- 변경비교 모드 → researchers 합류 (점선, 우측으로 내려와 합류) -->
+  <path class="edgeB" d="M1055,306 L1055,356 L920,356" marker-end="url(#arrowB)" stroke-dasharray="5 3"/>
+  <text x="1058" y="334" text-anchor="middle" class="edgelblB">전/후=diff</text>
+  <text x="1058" y="348" text-anchor="middle" class="edgelblB">(해당 엔티티만)</text>
+
+  <!-- ===== Parse → entities ===== -->
+  <g>
+    <rect x="120" y="352" width="800" height="92" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="374" class="boxh" fill="#0d47a1">스냅샷 파싱 (KR-only) → 추적 엔티티 items (item key 포함) · 두 시간축 분리: 단계&gt;연차(계획) ↔ rev(이력)</text>
+
+    <rect x="140" y="384" width="245" height="48" rx="6" fill="#ffffff" stroke="#64b5f6"/>
+    <text x="262" y="400" text-anchor="middle" class="boxt" font-weight="700" fill="#1565c0">budget</text>
+    <text x="262" y="414" text-anchor="middle" class="small">key=(단계,연차,비목)</text>
+    <text x="262" y="427" text-anchor="middle" class="small">금액(천원)·비고</text>
+
+    <rect x="397" y="384" width="245" height="48" rx="6" fill="#ffffff" stroke="#ef6c00" stroke-width="1.6"/>
+    <text x="519" y="399" text-anchor="middle" class="boxt" font-weight="700" fill="#e65100">researchers</text>
+    <text x="519" y="412" text-anchor="middle" class="small">key=(성명,단계,연차) · 인건비 · 급여총액</text>
+    <text x="519" y="425" text-anchor="middle" class="small" fill="#bf360c">참여율 3값: 연평균·참여기간·월별</text>
+
+    <rect x="654" y="384" width="248" height="48" rx="6" fill="#ffffff" stroke="#64b5f6"/>
+    <text x="778" y="400" text-anchor="middle" class="boxt" font-weight="700" fill="#1565c0">objectives</text>
+    <text x="778" y="414" text-anchor="middle" class="small">key=(단계,연차,목표항목)</text>
+    <text x="778" y="427" text-anchor="middle" class="small">지표·목표치·단위·평가방법</text>
+  </g>
+  <text x="935" y="400" class="small" fill="#bf360c">↑ 입력 B 는</text>
+  <text x="935" y="414" class="small" fill="#bf360c">researchers</text>
+  <text x="935" y="428" class="small" fill="#bf360c">만 적재</text>
+  <path class="edge" d="M520,444 L520,478" marker-end="url(#arrow)"/>
+
+  <!-- ===== diff ===== -->
+  <g>
+    <rect x="120" y="482" width="800" height="66" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="504" class="boxh" fill="#0d47a1">자동 diff:  새 스냅샷  ↔  직전 현재값(이력파일 최상위 값)</text>
+    <text x="135" y="524" class="boxt" fill="#1a237e">신규(없던 key) · 변경(전→후) · 삭제(스냅샷에서 빠진 key).  r0(최초)면 전량 신규.</text>
+    <text x="135" y="540" class="small">변경·삭제 사유는 AskUserQuestion 으로 수집 → revisions.yaml 에 이번 rev 레코드 append (type/source/date) · <tspan font-weight="700" fill="#bf360c">date = 품의서 시행일 우선</tspan></text>
+  </g>
+  <path class="edge" d="M520,548 L520,582" marker-end="url(#arrow)"/>
+
+  <!-- ===== load (sparse hybrid) ===== -->
+  <g>
+    <rect x="120" y="586" width="800" height="74" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="608" class="boxh" fill="#0d47a1">적재 (sparse-hybrid · append-only · 연차별 history\)</text>
+    <text x="135" y="628" class="boxt" fill="#1a237e">신규 = 펼친 한 줄 추가 · 변경/삭제 = 해당 항목에 history: 1건 append + 최상위 현재값·rev 갱신</text>
+    <text x="135" y="645" class="small">첫 변경이면 직전 현재값을 history 첫 항목으로 함께 적재 · 기존 history 항목은 수정·삭제 금지 · 안 바뀐 항목은 한 줄 유지</text>
+  </g>
+  <path class="edge" d="M520,660 L520,694" marker-end="url(#arrow)"/>
+
+  <!-- ===== views ===== -->
+  <g>
+    <rect x="120" y="698" width="800" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="720" class="boxh" fill="#0d47a1">뷰 생성 (emit_views · --no-views 면 생략)</text>
+    <text x="135" y="738" class="small">current_&lt;entity&gt;.md (최신 rev pivot 표) · changelog.md (rev별 전→후 diff) · researchers 행엔 참여율 3값 함께</text>
+  </g>
+  <path class="edge" d="M520,748 L520,782" marker-end="url(#arrow)"/>
+
+  <!-- ===== Outputs ===== -->
+  <text x="40" y="822" class="stage" fill="#2e7d32">산출물</text>
+  <text x="40" y="838" class="small">year_dir\history\</text>
+  <text x="40" y="852" class="small">(연차별 격리)</text>
+  <text x="40" y="866" class="small" fill="#c62828">rev 도 연차별</text>
+  <text x="40" y="880" class="small" fill="#c62828">독립(1·2차 따로)</text>
+  <g>
+    <!-- 정본: revisions -->
+    <rect x="120" y="786" width="252" height="96" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="246" y="808" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">정본 · 개정 레지스트리</text>
+    <text x="246" y="826" text-anchor="middle" class="small">revisions.yaml</text>
+    <text x="246" y="844" text-anchor="middle" class="small">rev 단일 출처</text>
+    <text x="246" y="861" text-anchor="middle" class="small">(이력파일 외래키·감사추적)</text>
+    <text x="246" y="877" text-anchor="middle" class="small" fill="#1b5e20">init=r0 시드 · undo=최신 rev 롤백</text>
+
+    <!-- 정본: 엔티티 이력 -->
+    <rect x="384" y="786" width="270" height="96" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="519" y="808" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">정본 · 엔티티 이력 파일</text>
+    <text x="519" y="826" text-anchor="middle" class="small">budget_history.yaml</text>
+    <text x="519" y="843" text-anchor="middle" class="small">researchers_history.yaml</text>
+    <text x="519" y="860" text-anchor="middle" class="small">objectives_history.yaml</text>
+    <text x="519" y="877" text-anchor="middle" class="small" fill="#1b5e20">현재값 펼침 + 변경분만 history</text>
+
+    <!-- 뷰(파생) -->
+    <rect x="666" y="786" width="254" height="96" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6" stroke-dasharray="6 3"/>
+    <text x="793" y="808" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">뷰(파생) · 조회용 .md</text>
+    <text x="793" y="826" text-anchor="middle" class="small">current_&lt;entity&gt;.md</text>
+    <text x="793" y="843" text-anchor="middle" class="small">changelog.md</text>
+    <text x="793" y="860" text-anchor="middle" class="small">사람이 읽는 뷰</text>
+    <text x="793" y="877" text-anchor="middle" class="small" fill="#1b5e20">정본에서 재생성(--no-views 생략)</text>
+  </g>
+
+  <!-- ===== Reverse (snapshot 재생성) flow ===== -->
+  <text x="948" y="778" class="stage" fill="#00838f">역방향(재생성) — snapshot 모드 (읽기전용)</text>
+  <g>
+    <!-- base 스냅샷 (읽기 전용) -->
+    <rect x="948" y="786" width="176" height="96" rx="8" fill="#eceff1" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="1036" y="806" text-anchor="middle" class="boxt" font-weight="700" fill="#37474f">base 스냅샷 (읽기)</text>
+    <text x="1036" y="823" text-anchor="middle" class="small">KR_&lt;과제&gt;.yaml (r0 발췌본)</text>
+    <text x="1036" y="838" text-anchor="middle" class="small">구조·비추적 블록·국적 등</text>
+    <text x="1036" y="853" text-anchor="middle" class="small">불변 필드 출처 (base 필수)</text>
+    <text x="1036" y="870" text-anchor="middle" class="small" fill="#c62828">이력만으론 전체 복원 불가</text>
+
+    <!-- overlay step -->
+    <rect x="1136" y="786" width="150" height="96" rx="8" fill="#e0f7fa" stroke="#00838f" stroke-width="1.8"/>
+    <text x="1211" y="808" text-anchor="middle" class="boxt" font-weight="700" fill="#006064">overlay 처리</text>
+    <text x="1211" y="826" text-anchor="middle" class="small">base + 이력 최신 rev</text>
+    <text x="1211" y="841" text-anchor="middle" class="small">현재값 덮기</text>
+    <text x="1211" y="856" text-anchor="middle" class="small">researchers(+budget/</text>
+    <text x="1211" y="870" text-anchor="middle" class="small">objectives 이력 있을 때만)</text>
+  </g>
+
+  <!-- 이력 파일 산출물 → overlay (역방향, 청록 대시) -->
+  <path class="edgeRev" d="M654,820 C830,905 1010,905 1136,850" marker-end="url(#arrowRev)"/>
+  <text x="820" y="905" text-anchor="middle" class="edgelblR">엔티티 이력 최신 rev 현재값 → overlay (읽기)</text>
+  <text x="720" y="758" class="edgelblR" fill="#00838f">인자 = .yaml 아님(과제이름/폴더) → snapshot 재생성</text>
+
+  <!-- base → overlay -->
+  <path class="edgeRev" d="M1124,834 L1134,834" marker-end="url(#arrowRev)"/>
+
+  <!-- overlay → 재생성 스냅샷 산출물 -->
+  <path class="edgeRev" d="M1211,882 L1211,930" marker-end="url(#arrowRev)"/>
+
+  <!-- ===== 변경비교 적재 to 자동 재생성 (기본 on, no-snapshot flag off) ===== -->
+  <path class="edgeAuto" d="M920,650 L1262,650 L1262,784" marker-end="url(#arrowAuto)"/>
+  <text x="1090" y="602" text-anchor="middle" class="edgelblAuto">변경비교(budget/researchers) 적재 → 자동 재생성 (기본 on)</text>
+  <text x="1090" y="618" text-anchor="middle" class="edgelblAuto">--no-snapshot 로 끔 · base 스냅샷 없으면 재생성만 건너뜀</text>
+  <text x="1090" y="634" text-anchor="middle" class="edgelblAuto">내부 snapshot 모드(S1~S4, 읽기전용) 재사용 — 새 rev 안 만듦</text>
+
+  <!-- 재생성 스냅샷 (새 산출물, 초록) -->
+  <g>
+    <rect x="948" y="934" width="338" height="96" rx="8" fill="#e8f5e9" stroke="#00838f" stroke-width="2.2"/>
+    <text x="1117" y="955" text-anchor="middle" class="boxt" font-weight="700" fill="#00695c">재생성 스냅샷 · KR_&lt;과제&gt;_r&lt;N&gt;.yaml</text>
+    <text x="1117" y="973" text-anchor="middle" class="small">base(r0 발췌본) + 이력 최신 rev overlay</text>
+    <text x="1117" y="988" text-anchor="middle" class="small">year_dir 직하 (history\ 밖 · 원본 KR_&lt;과제&gt;.yaml 불변)</text>
+    <text x="1117" y="1003" text-anchor="middle" class="small" fill="#00695c">급여총액까지 무손실 (계상인건비=급여총액×연평균/100)</text>
+    <text x="1117" y="1020" text-anchor="middle" class="small" fill="#bf360c">인자 = 과제이름/폴더 (또는 snapshot &lt;…&gt;) · revisions 미변경</text>
+  </g>
+
+  <!-- ===== flow band ===== -->
+  <text x="40" y="932" class="stage" fill="#5e35b1">전체 흐름</text>
+  <g>
+    <rect x="120" y="908" width="240" height="48" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="240" y="929" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-kr-extract</text>
+    <text x="240" y="945" text-anchor="middle" class="small">KR 스냅샷(정본) + init 자동 — 입력 A</text>
+
+    <rect x="400" y="908" width="240" height="48" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="520" y="929" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-manpower-change</text>
+    <text x="520" y="945" text-anchor="middle" class="small">변경비교 YAML 생성 — 입력 B</text>
+
+    <rect x="680" y="908" width="240" height="48" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2.2"/>
+    <text x="800" y="929" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">/rnd-kr-history</text>
+    <text x="800" y="945" text-anchor="middle" class="small">이력(rev) 적재 ← 본 스킬</text>
+  </g>
+  <!-- extract → history (init 자동, 굵은 강조) -->
+  <path d="M240,956 L240,980 L800,980 L800,956" class="edge" stroke="#c62828" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="520" y="996" text-anchor="middle" class="small" fill="#c62828" font-weight="700">structured 산출 직후 init 자동 트리거 (r0 기준선, --year &lt;차년도&gt;)</text>
+  <path d="M360,930 L398,930" class="edge" stroke="#7e57c2" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+  <path d="M640,930 L678,930" class="edge" stroke="#7e57c2" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+
+  <text x="120" y="1036" class="small" fill="#7e57c2">입력 A(스냅샷 전체 비교, extract 가 init 자동→r0) · 입력 B(변경비교 YAML, researchers 전용·전→r0·후→r1, 스냅샷 불필요) → 같은 적재 엔진·연차별 이력 파일·뷰로 합류.</text>
+  <text x="120" y="1054" class="small" fill="#7e57c2">정본 = revisions.yaml + {budget,researchers,objectives}_history.yaml (sparse hybrid). 뷰 = current_*.md·changelog.md(파생). KR 외 기관 값은 적재하지 않는다.</text>
+  <text x="120" y="1072" class="small" fill="#455a64">참여율은 researchers 의 3값 — 연평균(인건비/급여총액) · 참여기간(계상률=Σ월별/참여개월) · 월별({YYYY-MM:%}). 셋은 정합(연평균=참여기간×참여개월/12).</text>
+</svg>

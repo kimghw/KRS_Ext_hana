@@ -17,7 +17,8 @@ export const MAX_YEARS = 20;
 export const BUDGET_ITEMS = Object.freeze(['인건비', '연구시설·장비비', '연구재료비', '연구활동비', '연구수당', '간접비']);
 /** 변경이력의 구분. 저절로 남는 줄은 예산(계획·비목)·연구기간·연구진(과제책임자)이다. */
 export const CHANGE_KINDS = Object.freeze(['예산', '연구내용', '연구기간', '연구진', '기타']);
-export const EMPTY_PROJECT = Object.freeze({ id: '', name: '', alias: '', code: '', lead: '', start: '', end: '', note: '', years: {} });
+/** calendar 는 차년도를 1월 1일에 끊는 과제(산업부 과제처럼 첫 해만 협약일~12.31, 그 뒤는 해마다) — 아니면 시작일부터 한 해씩. */
+export const EMPTY_PROJECT = Object.freeze({ id: '', name: '', alias: '', code: '', lead: '', start: '', end: '', note: '', calendar: false, years: {} });
 
 const text = (v, max = 2000) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').slice(0, max).trim() : '');
 const pad = (n) => String(n).padStart(2, '0');
@@ -83,6 +84,7 @@ export const yearLabel = (n) => `${n}차년도`;
 
 /**
  * 연구기간을 차년도로 자른다 — 시작일부터 한 해씩(4월 1일 시작이면 이듬해 3월 31일까지), 마지막은 종료일까지.
+ * calendar 과제는 1월 1일에 끊는다 — 1차년도는 시작일부터 그해 12월 31일까지, 그 뒤는 해마다 1월 1일부터(산업부 과제의 연차).
  * 종료일이 없으면 한 해, 시작일이 없으면 기간 없는 1차년도 하나(span 이 비어 있다 — 연구기간을 적으라고 보인다).
  * @returns {{ n:number, start:string, end:string }[]}
  */
@@ -90,15 +92,22 @@ export function yearsOf(project) {
   const start = isYmd(project?.start) ? project.start : '';
   const end = isYmd(project?.end) ? project.end : '';
   if (!start) return [{ n: 1, start: '', end: '' }];
-  const last = end && end >= start ? end : addDays(addYears(start, 1), -1);
+  const last = end && end >= start ? end : project?.calendar ? `${start.slice(0, 4)}-12-31` : addDays(addYears(start, 1), -1);
   const out = [];
   for (let n = 1, from = start; from <= last && n <= MAX_YEARS; n++) {
-    const to = addDays(addYears(start, n), -1);
+    const to = project?.calendar ? `${from.slice(0, 4)}-12-31` : addDays(addYears(start, n), -1);
     out.push({ n, start: from, end: to < last ? to : last });
     from = addDays(to, 1);
   }
   return out;
 }
+
+/** "1차년도" · "3차년도" · 3 → 3. 못 읽으면 0. */
+export const yearNo = (v) => {
+  const m = String(v ?? '').match(/(\d{1,2})\s*차/);
+  const n = m ? Number(m[1]) : Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= MAX_YEARS ? n : 0;
+};
 
 /** 오늘이 든 차년도. 시작 전이면 1차년도, 끝난 뒤면 마지막 차년도. */
 export function currentYear(project, today = todayStr()) {
@@ -128,20 +137,32 @@ export function blankYear() {
   return { budget: BUDGET_ITEMS.map((item) => ({ id: newId(), item, plan: null, used: null })), logs: [], changes: [] };
 }
 
+/** key 는 파일에서 들여온 줄의 꼬리표(src/rndyaml.js) — 같은 파일을 다시 넣어도 그 줄을 다시 만들지 않는다. 손으로 적은 줄에는 없다. */
+const withKey = (o, raw) => (text(raw?.key, 120) ? { ...o, key: text(raw.key, 120) } : o);
 const normalizeRow = (r) => ({ id: text(r?.id, 40) || newId(), item: text(r?.item, 60), plan: amountOf(r?.plan), used: amountOf(r?.used) });
-const normalizeLog = (l) => ({ id: text(l?.id, 40) || newId(), date: isYmd(l?.date) ? l.date : '', title: text(l?.title, 200), text: text(l?.text, 4000) });
-const normalizeChange = (c) => ({
+const normalizeLog = (l) => withKey({ id: text(l?.id, 40) || newId(), date: isYmd(l?.date) ? l.date : '', title: text(l?.title, 200), text: text(l?.text, 4000) }, l);
+const normalizeChange = (c) => withKey({
   id: text(c?.id, 40) || newId(), date: isYmd(c?.date) ? c.date : '', kind: CHANGE_KINDS.includes(c?.kind) ? c.kind : '기타',
   item: text(c?.item, 100), before: text(c?.before, 300), after: text(c?.after, 300), reason: text(c?.reason, 1000), auto: c?.auto === true,
-});
+}, c);
 
-/** 저장된 차년도를 지금 모양으로. 비목 줄은 이름이 빈 것도 둔다(적는 중일 수 있다) — 내용 없는 연구내역·변경이력은 버린다. */
+/**
+ * 저장된 차년도를 지금 모양으로. 비목 줄은 이름이 빈 것도 둔다(적는 중일 수 있다) — 내용 없는 연구내역·변경이력은 버린다.
+ * snapshot 은 마지막으로 들여온 연구개발계획서 스냅샷(src/rndyaml.js — rev·날짜·파일 이름). 없으면 아직 안 들여온 차년도다.
+ */
 export function normalizeYear(raw) {
   const y = blankYear();
   if (!raw || typeof raw !== 'object') return y;
   if (Array.isArray(raw.budget)) y.budget = raw.budget.map(normalizeRow);
   if (Array.isArray(raw.logs)) y.logs = raw.logs.map(normalizeLog).filter((l) => l.title || l.text);
   if (Array.isArray(raw.changes)) y.changes = raw.changes.map(normalizeChange).filter((c) => c.item || c.before || c.after || c.reason);
+  if (raw.snapshot && typeof raw.snapshot === 'object') {
+    y.snapshot = {
+      rev: text(raw.snapshot.rev, 20), date: isYmd(raw.snapshot.date) ? raw.snapshot.date : '', file: text(raw.snapshot.file, 200),
+      // 그 스냅샷이 계획을 적어 준 비목들 — 다음 스냅샷에 빠진 비목은 계획을 비운다.
+      items: (Array.isArray(raw.snapshot.items) ? raw.snapshot.items : []).map((s) => text(s, 60)).filter(Boolean),
+    };
+  }
   return y;
 }
 
@@ -162,6 +183,7 @@ export function normalizeProject(raw) {
   p.end = isYmd(raw.end) ? raw.end : per?.end || '';
   if (!p.start || (p.end && p.end < p.start)) p.end = '';
   p.note = text(raw.note, 1000);
+  p.calendar = raw.calendar === true;
   const years = raw.years && typeof raw.years === 'object' ? raw.years : {};
   for (const [k, v] of Object.entries(years)) {
     const n = Number(k);
@@ -244,8 +266,11 @@ export function projectChanges(before, after, date = todayStr()) {
   const pb = periodText(before);
   const pa = periodText(after);
   if (pb && pa !== pb) entry('연구기간', '연구기간', pb, pa || '(비움)');
+  if (pb && !!before.calendar !== !!after.calendar) entry('연구기간', '차년도 끊는 기준', calendarLabel(before.calendar), calendarLabel(after.calendar));
   return out;
 }
+
+export const calendarLabel = (calendar) => (calendar ? '1월 1일(첫 해는 시작일부터 12월 31일까지)' : '시작일부터 한 해씩');
 
 /** 날짜가 늦은 것부터. 같은 날은 넣은 차례 그대로(뒤에 넣은 것이 앞). */
 export const newestFirst = (list) => [...(list || [])].map((x, i) => [x, i]).sort((a, b) => (b[0].date || '').localeCompare(a[0].date || '') || b[1] - a[1]).map(([x]) => x);
@@ -282,7 +307,7 @@ export function mergeProjects(book, incoming) {
       continue;
     }
     let touched = false;
-    for (const k of ['alias', 'code', 'lead', 'start', 'end']) {
+    for (const k of ['alias', 'code', 'lead', 'start', 'end', 'calendar']) {
       if (!hit[k] && inc[k]) {
         hit[k] = inc[k];
         touched = true;
@@ -335,6 +360,114 @@ export function importJson(raw) {
   return book;
 }
 
+/* ------------------------------------------------------------ 연구내역 글의 꼴 */
+
+/**
+ * 계획서에서 온 참여연구자 글("홍길동 — 수석 · 20% · 9개월 · 인건비 15,000,000원" 줄들)을 표의 줄로. 그 꼴이 아니면 null.
+ * @returns {{ name:string, role:string, rate:string, months:string, pay:string }[]|null}
+ */
+export function parseRoster(text) {
+  const lines = String(text ?? '').split('\n').filter((s) => s.trim());
+  if (!lines.length) return null;
+  const out = [];
+  for (const s of lines) {
+    const m = s.trim().match(/^(\S+)(?: — (.+))?$/);
+    if (!m) return null;
+    const p = { name: m[1], role: '', rate: '', months: '', pay: '' };
+    for (const bit of (m[2] || '').split(' · ')) {
+      const b = bit.trim();
+      if (!b) continue;
+      if (/^\d+(\.\d+)?%$/.test(b)) p.rate = b;
+      else if (/^\d+개월$/.test(b)) p.months = b;
+      else if (/^인건비 /.test(b)) p.pay = b.replace(/^인건비 /, '');
+      else p.role = p.role ? `${p.role} ${b}` : b;
+    }
+    out.push(p);
+  }
+  return out.some((p) => p.rate || p.pay || p.months) ? out : null;
+}
+
+/**
+ * 계획서에서 온 연구개발 계획 글(■ 절 · "1. " 번호 · "- " 줄표 · "  · " 점)을 절과 항목으로. ■ 절이 하나도 없으면 null.
+ * 절 제목 뒤의 괄호("■ 수행일정 (9개월)")는 note 로. 항목의 n 은 번호(없으면 0), subs 는 그 항목 아래의 점 줄.
+ * @returns {{ title:string, note:string, items:{ n:number, text:string, subs:string[] }[] }[]|null}
+ */
+export function parseSections(text) {
+  const lines = String(text ?? '').split('\n');
+  if (!lines.some((s) => /^■ /.test(s))) return null;
+  const out = [];
+  let cur = null;
+  for (const raw of lines) {
+    const s = raw.replace(/\s+$/, '');
+    if (!s.trim()) continue;
+    const head = s.match(/^■ (.+?)(?: \((.+)\))?$/);
+    if (head) {
+      cur = { title: head[1], note: head[2] || '', items: [] };
+      out.push(cur);
+      continue;
+    }
+    if (!cur) {
+      cur = { title: '', note: '', items: [] };
+      out.push(cur);
+    }
+    const num = s.match(/^(\d+)\. (.+)$/);
+    if (num) {
+      cur.items.push({ n: +num[1], text: num[2], subs: [] });
+      continue;
+    }
+    const sub = s.match(/^\s+[·•] (.+)$/);
+    if (sub && cur.items.length) {
+      cur.items[cur.items.length - 1].subs.push(sub[1]);
+      continue;
+    }
+    const dash = s.match(/^- (.+)$/);
+    cur.items.push({ n: 0, text: dash ? dash[1] : s.trim(), subs: [] });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------ 복사할 글 */
+
+/** 비목별 계획·집행·잔액·집행률과 합계를 탭으로 나눈 표로 — 엑셀·한글 표에 그대로 붙는다. 적은 것이 없는 줄은 뺀다. */
+export function budgetTsv(rows) {
+  const list = (rows || []).filter((r) => r.item && (r.plan != null || r.used != null));
+  const sum = budgetTotals(list);
+  const line = (name, plan, used) => [name, comma(plan), comma(used), comma(plan - used), plan > 0 ? `${Math.round((used / plan) * 100)}%` : ''].join('\t');
+  return ['비목\t계획(원)\t집행(원)\t잔액(원)\t집행률', ...list.map((r) => line(r.item, r.plan || 0, r.used || 0)), ...(list.length ? [line('합계', sum.plan, sum.used)] : [])].join('\n');
+}
+
+/** 연구내역 한 줄을 복사할 글로 — 참여연구자(표의 줄들)는 탭으로 나눈 표, 그 밖은 제목 줄 아래 글 그대로. */
+export function entryText(l) {
+  const people = parseRoster(l.text);
+  if (people) {
+    const cols = [['name', '성명'], ['role', '직위'], ['rate', '계상률'], ['months', '참여'], ['pay', '계상인건비']].filter(([k]) => people.some((x) => x[k]));
+    return [l.title, cols.map(([, h]) => h).join('\t'), ...people.map((x) => cols.map(([k]) => x[k]).join('\t'))].filter(Boolean).join('\n');
+  }
+  return [l.title, l.text].filter(Boolean).join('\n');
+}
+
+/** 연구내역들을 이른 것부터 한 줄씩 — 한 줄 내용은 제목 뒤에 잇고, 여러 줄은 제목 아래 들여 쓴다. */
+export function logLines(logs) {
+  const out = [];
+  for (const l of [...(logs || [])].sort((a, b) => (a.date || '').localeCompare(b.date || ''))) {
+    const head = `- ${dot(l.date) || '날짜 없음'} ${l.title}`;
+    const body = String(l.text ?? '').split('\n').filter((s) => s.trim());
+    if (!body.length) out.push(head);
+    else if (body.length === 1) out.push(`${head}${l.title ? ' — ' : ''}${body[0]}`);
+    else out.push(head, ...body.map((s) => `  ${s}`));
+  }
+  return out;
+}
+
+/** 변경이력 한 줄 — "2026.07.15 [예산] 연구활동비: 50,000,000원 → 40,000,000원 (사유)". */
+export function changeLine(c) {
+  const diff = c.before || c.after ? `: ${c.before || '(없음)'} → ${c.after || '(없음)'}` : '';
+  return `${dot(c.date) || '날짜 없음'} [${c.kind}] ${c.item}${diff}${c.reason ? ` (${c.reason})` : ''}`;
+}
+
+/** 변경이력들을 이른 것부터 한 줄씩. */
+export const changeLines = (changes) => [...(changes || [])].sort((a, b) => (a.date || '').localeCompare(b.date || '')).map((c) => `- ${changeLine(c)}`);
+
 /* ------------------------------------------------------------ 요약 */
 
 /** 과제 한 차년도를 붙여 넣을 글로 — 과제 개요 · 예산표 · 연구내역 · 변경이력. 보고서·메일에 붙여 넣는다. */
@@ -360,17 +493,10 @@ export function summaryText(project, n, today = todayStr()) {
   }
   if (rows.length) lines.push(`- 합계: 계획 ${won(sum.plan)} · 집행 ${won(sum.used)} · 잔액 ${won(sum.left)}${sum.rate == null ? '' : ` · 집행률 ${sum.rate}%`}`);
 
-  const logs = [...book.logs].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  lines.push('', `■ 연구내역 (${logs.length}건)`);
-  if (!logs.length) lines.push('- 적은 것 없음');
-  for (const l of logs) lines.push(`- ${dot(l.date) || '날짜 없음'} ${l.title}${l.text ? `${l.title ? ' — ' : ''}${l.text.replace(/\n+/g, ' / ')}` : ''}`);
+  lines.push('', `■ 연구내역 (${book.logs.length}건)`);
+  lines.push(...(book.logs.length ? logLines(book.logs) : ['- 적은 것 없음']));
 
-  const changes = [...book.changes].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  lines.push('', `■ 변경이력 (${changes.length}건)`);
-  if (!changes.length) lines.push('- 적은 것 없음');
-  for (const c of changes) {
-    const diff = c.before || c.after ? `: ${c.before || '(없음)'} → ${c.after || '(없음)'}` : '';
-    lines.push(`- ${dot(c.date) || '날짜 없음'} [${c.kind}] ${c.item}${diff}${c.reason ? ` (${c.reason})` : ''}`);
-  }
+  lines.push('', `■ 변경이력 (${book.changes.length}건)`);
+  lines.push(...(book.changes.length ? changeLines(book.changes) : ['- 적은 것 없음']));
   return lines.join('\n');
 }

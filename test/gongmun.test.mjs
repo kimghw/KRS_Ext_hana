@@ -7,7 +7,7 @@ import {
   templateOf, templateEdited, templatePatch, normalizePreset, normalizeProjects, namesOf, josa, hasBatchim, fillTemplate,
   totalOf, gistOf, fromRecord, blankDraft, overLimit, approvalLine, lineText, compose, needs, bodyHtml, draftUrl, attachName,
   moneyOf, won, dotDate, summaryOf, parseSetupLocal, mergeSetup, attachList, attachBlock, mergeDraft, applyReason, reasonInput, REASON_KEYS,
-  eduModeOf, EDU_MODES, spreadParts,
+  eduModeOf, EDU_MODES, spreadParts, attachWithCut,
 } from '../src/gongmun.js';
 import { structure, systemPrompt, InputError } from '../src/input.js';
 import { checkSpec } from '../tools/gen-input.mjs';
@@ -433,6 +433,36 @@ t('묶음이 아닌 파일과 가린 것이 없는 묶음은 그대로 둔다 �
   assert.deepEqual(spreadParts([{ file: 'x_2.png', kind: 'content' }], [{ name: 'x_1.png', group: 'g' }, { name: 'x_2.png', group: 'g' }, { name: 'x_3.png', group: 'g' }]),
     [{ file: 'x_2.png', kind: 'content' }, { file: 'x_3.png', kind: 'content' }], '앞 장은 뒤의 것을 거꾸로 받지 않는다');
   assert.deepEqual(spreadParts([{ file: 'a', kind: 'quote' }, { bad: true }, { file: 'b' }], []), [{ file: 'a', kind: 'quote' }], '모양이 틀린 줄은 뺀다');
+});
+
+console.log('구매 — 가격 부분을 오린 견적서(attachWithCut)');
+t('오린 견적서가 있으면 그것이 첫 줄 견적서이고, 오려 낸 화면의 장은 첨부에서 빠진다 — 따로 넣은 문서는 남는다', () => {
+  const files = ['화면캡처_coupang.com_1.png', '화면캡처_coupang.com_2.png', '사양서.pdf'];
+  const parts = [{ file: files[0], kind: 'order' }, { file: files[1], kind: 'order' }, { file: '사양서.pdf', kind: 'other' }];
+  const cut = { name: '견적서_가격부분_2026-10-08.png', drop: files.slice(0, 2), on: true };
+  assert.deepEqual(attachWithCut('purchase', parts, files, cut), [
+    { label: '견적서', files: ['견적서_가격부분_2026-10-08.png'] }, { label: '참고 자료', files: ['사양서.pdf'] },
+  ]);
+  assert.deepEqual(attachWithCut('purchase', parts, files, { ...cut, on: false }), [
+    { label: '주문 내역', files: files.slice(0, 2) }, { label: '참고 자료', files: ['사양서.pdf'] },
+  ], '원래 장으로 — 넣은 파일 그대로');
+  assert.deepEqual(attachWithCut('purchase', parts, files, null), attachList('purchase', parts, files));
+});
+t('초안의 첨부와 본문 ※ 첨부 — 쇼핑몰 화면 일곱 장이 견적서 한 줄이 된다', () => {
+  const tiles = Array.from({ length: 7 }, (_, i) => `화면캡처_coupang.com_${i + 1}.png`);
+  const rec = { docType: 'order', vendor: '쿠팡', gist: '34인치 모니터', total: 489000, parts: tiles.map((file) => ({ file, kind: 'order' })) };
+  const { draft } = fromRecord('purchase', rec, { files: tiles, cut: { name: '견적서_가격부분.png', drop: tiles, on: true } });
+  assert.deepEqual(draft.attach, [{ label: '견적서', files: ['견적서_가격부분.png'] }]);
+  assert.match(compose('purchase', draft, CTX).body, /※ 첨 부\n {4}1\. 견적서 1부\.  끝\.$/);
+});
+t('읽기는 오릴 칸(quoteArea)을 그림마다 % 로 돌려준다 — 범위 밖·빠진 칸의 줄은 뺀다', () => {
+  const { data, notes } = structure('gongmun', {
+    docType: 'order', gist: 'g', summary: 's',
+    quoteArea: [{ file: 'a.png', left: 5, top: 10, right: 95, bottom: 40 }, { file: 'b.png', left: -1, top: 0, right: 50, bottom: 50 }, { file: 'c.png', left: 0, top: 0 }],
+  });
+  assert.deepEqual(data.quoteArea, [{ file: 'a.png', left: 5, top: 10, right: 95, bottom: 40 }]);
+  assert.deepEqual(notes, ['견적서로 오릴 칸 중 2줄은 받을 수 없어 뺐습니다']);
+  assert.match(systemPrompt('gongmun'), /quoteArea 는 구매일 때만 적습니다/);
 });
 
 await ta('Claude 가 닿지 않으면 채팅은 규칙 해석으로 내려가고, 그 답도 관문을 지난다', async () => {

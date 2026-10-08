@@ -6,10 +6,11 @@ import assert from 'node:assert/strict';
 import {
   BOOK_KEY, MAX_PROJECTS, MAX_YEARS, BUDGET_ITEMS, CHANGE_KINDS,
   periodOf, periodText, isYmd, amountOf, comma, won, shortWon,
-  yearsOf, currentYear, yearState, yearLabel,
+  yearsOf, yearNo, currentYear, yearState, yearLabel,
   blankYear, normalizeYear, normalizeProject, normalizeBook, viewYear, yearBook,
   budgetTotals, budgetChanges, projectChanges, newestFirst,
-  fromGongmun, mergeProjects, exportJson, exportName, importJson, restoreBook, summaryText,
+  fromGongmun, mergeProjects, exportJson, exportName, importJson, restoreBook, summaryText, parseRoster, parseSections,
+  budgetTsv, entryText, logLines, changeLine, changeLines,
 } from '../src/rnd.js';
 
 let pass = 0;
@@ -62,6 +63,26 @@ t('2월 29일에 시작해도 날짜가 어긋나지 않는다', () => {
   ]);
 });
 t('잘못 적은 긴 기간도 스무 차년도까지만', () => assert.equal(yearsOf({ start: '2000-01-01', end: '2099-12-31' }).length, MAX_YEARS));
+t('1월 1일에 끊는 과제(calendar) — 첫 해는 시작일부터 12월 31일까지, 그 뒤는 해마다, 마지막은 종료일까지', () => {
+  assert.deepEqual(yearsOf({ start: '2026-04-01', end: '2029-12-31', calendar: true }), [
+    { n: 1, start: '2026-04-01', end: '2026-12-31' }, { n: 2, start: '2027-01-01', end: '2027-12-31' },
+    { n: 3, start: '2028-01-01', end: '2028-12-31' }, { n: 4, start: '2029-01-01', end: '2029-12-31' },
+  ]);
+  assert.deepEqual(yearsOf({ start: '2024-07-01', end: '2024-12-31', calendar: true }), [{ n: 1, start: '2024-07-01', end: '2024-12-31' }]);
+  assert.deepEqual(yearsOf({ start: '2026-04-01', end: '2027-06-30', calendar: true }).map((y) => y.end), ['2026-12-31', '2027-06-30']);
+  assert.deepEqual(yearsOf({ start: '2026-04-01', calendar: true }), [{ n: 1, start: '2026-04-01', end: '2026-12-31' }], '종료일이 없으면 그해까지');
+  assert.deepEqual(yearsOf({ start: '2026-01-01', end: '2027-12-31', calendar: true }), yearsOf({ start: '2026-01-01', end: '2027-12-31' }), '1월 1일 시작이면 둘이 같다');
+  assert.equal(currentYear({ start: '2026-04-01', end: '2029-12-31', calendar: true }, '2027-02-01'), 2);
+});
+t('차년도 번호 읽기', () => {
+  assert.equal(yearNo('1차년도'), 1);
+  assert.equal(yearNo('3차년도'), 3);
+  assert.equal(yearNo(' 12 차년도'), 12);
+  assert.equal(yearNo('3차'), 3);
+  assert.equal(yearNo(3), 3);
+  assert.equal(yearNo('3'), 3);
+  for (const v of ['x', 0, 21, '', null, '0차년도']) assert.equal(yearNo(v), 0, String(v));
+});
 t('오늘이 든 차년도 — 시작 전은 1, 끝난 뒤는 마지막, 기간이 없으면 1', () => {
   assert.equal(currentYear(P, '2026-10-08'), 1);
   assert.equal(currentYear(P, '2027-03-31'), 1);
@@ -135,6 +156,20 @@ t('normalizeYear — 금액 글은 원으로, 내용 없는 연구내역·변경
   assert.deepEqual(noId(y.changes), [{ date: '2026-05-01', kind: '기타', item: 'x', before: '1', after: '2', reason: '', auto: false }]);
   assert.deepEqual(normalizeYear(null).budget.length, 6);
   assert.deepEqual(normalizeYear({ budget: [] }).budget, [], '비목을 다 뺀 차년도는 빈 채로 둔다');
+  // 파일에서 들여온 줄의 꼬리표(key)와 마지막 스냅샷(snapshot)은 남고, 손으로 적은 줄에는 key 가 안 붙는다.
+  const kept = normalizeYear({
+    logs: [{ title: 'a', key: 'plan' }, { title: 'b' }], changes: [{ item: 'x', key: 'rev:r1' }],
+    snapshot: { rev: 'r2', date: '2026-10-08', file: 'KR_x.yaml', items: ['인건비', '', 7], extra: 1 },
+  });
+  assert.deepEqual(kept.logs.map((l) => l.key), ['plan', undefined]);
+  assert.equal(kept.changes[0].key, 'rev:r1');
+  assert.deepEqual(kept.snapshot, { rev: 'r2', date: '2026-10-08', file: 'KR_x.yaml', items: ['인건비'] });
+  assert.equal(normalizeYear({ snapshot: 'x' }).snapshot, undefined);
+});
+t('normalizeProject — 1월 1일 기준 표시는 true 일 때만', () => {
+  assert.equal(normalizeProject({ name: 'a', calendar: true }).calendar, true);
+  assert.equal(normalizeProject({ name: 'a', calendar: 'yes' }).calendar, false);
+  assert.equal(normalizeProject({ name: 'a' }).calendar, false);
 });
 t('normalizeProject — 날짜 칸이 비면 연구기간 글에서, 앞선 종료일은 버림, id 없으면 만듦, 차년도는 1~20 만', () => {
   const p = normalizeProject({ name: ' 차단기 ', period: '2026.04.01 ~ 2029.12.31', years: { 1: { budget: [{ item: '인건비', plan: '1,000만' }] }, x: {}, 0: {}, 21: {} } });
@@ -147,7 +182,7 @@ t('normalizeProject — 날짜 칸이 비면 연구기간 글에서, 앞선 종�
   assert.equal(normalizeProject({ name: 'a', start: '2026-01-01', end: '2027-01-01', period: '2000.01.01 ~ 2001.01.01' }).start, '2026-01-01', '날짜 칸이 이긴다');
   assert.equal(normalizeProject({ name: 'a', start: '2027-01-01', end: '2026-01-01' }).end, '');
   assert.equal(normalizeProject({ name: 'a', end: '2026-01-01' }).end, '', '시작일 없이 종료일만은 버린다');
-  assert.deepEqual(normalizeProject(null), { id: normalizeProject(null).id, name: '', alias: '', code: '', lead: '', start: '', end: '', note: '', years: {} });
+  assert.deepEqual(normalizeProject(null), { id: normalizeProject(null).id, name: '', alias: '', code: '', lead: '', start: '', end: '', note: '', calendar: false, years: {} });
 });
 t('normalizeBook — 이름 없는 과제는 버리고 열 개까지, current 는 있는 과제·차년도만', () => {
   const raw = {
@@ -211,6 +246,9 @@ t('과제의 책임자·연구기간을 고치면 변경이력으로 — 전에 
   assert.deepEqual(projectChanges(a, { ...a, lead: '' }).map((c) => c.after), ['(비움)']);
   assert.deepEqual(projectChanges(a, { ...a, start: '', end: '' }).map((c) => c.after), ['(비움)']);
   assert.deepEqual(projectChanges(a, { ...a, name: '다른 이름', alias: '별명' }), [], '이름·별명은 이력이 아니다');
+  assert.deepEqual(projectChanges(a, { ...a, calendar: true }).map((c) => [c.kind, c.item, c.before, c.after]),
+    [['연구기간', '차년도 끊는 기준', '시작일부터 한 해씩', '1월 1일(첫 해는 시작일부터 12월 31일까지)']]);
+  assert.deepEqual(projectChanges({ lead: '', start: '', end: '' }, { ...a, calendar: true }), [], '연구기간을 처음 적으며 기준을 정하는 것은 변경이 아니다');
 });
 t('늦은 것부터 — 같은 날은 뒤에 넣은 것이 앞, 날짜 없는 것은 맨 뒤', () => {
   const list = [{ date: '2026-01-01', n: 1 }, { date: '2026-03-01', n: 2 }, { date: '2026-03-01', n: 3 }, { date: '', n: 4 }];
@@ -289,7 +327,7 @@ t('과제 한 차년도를 붙여 넣을 글로 — 개요 · 예산표 · 연�
     '', '■ 예산 (1차년도)',
     '- 인건비: 계획 10,000,000원 · 집행 2,500,000원 · 잔액 7,500,000원 · 집행률 25%',
     '- 합계: 계획 10,000,000원 · 집행 2,500,000원 · 잔액 7,500,000원 · 집행률 25%',
-    '', '■ 연구내역 (2건)', '- 2026.05.01 첫째', '- 2026.09.01 둘째 — 여러 / 줄',
+    '', '■ 연구내역 (2건)', '- 2026.05.01 첫째', '- 2026.09.01 둘째', '  여러', '  줄',
     '', '■ 변경이력 (1건)', '- 2026.08.01 [예산] 인건비: 8,000,000원 → 10,000,000원 (인력 충원)',
   ].join('\n'));
   const empty = summaryText(p, 3, '2026-10-08');
@@ -298,6 +336,55 @@ t('과제 한 차년도를 붙여 넣을 글로 — 개요 · 예산표 · 연�
   const bare = summaryText(normalizeProject({ name: '이름만' }), 1, '2026-10-08');
   assert.match(bare, /^\[이름만\] 1차년도 — 연구기간 미정\n과제명: 이름만\n\n■ 예산/);
   assert.match(summaryText(p, 99, '2026-10-08'), /^\[차단기 과제\] 1차년도/, '없는 차년도면 첫 차년도');
+  const one = normalizeProject({ name: 'x', years: { 1: { logs: [{ date: '2026-01-02', title: '', text: '제목 없이 한 줄' }, { date: '2026-01-03', title: '제목만', text: '' }] } } });
+  assert.match(summaryText(one, 1, '2026-10-08'), /- 2026\.01\.02 제목 없이 한 줄\n- 2026\.01\.03 제목만\n/);
+});
+
+console.log('연구내역 글의 꼴');
+t('참여연구자 줄들 → 표의 줄', () => {
+  assert.deepEqual(parseRoster('홍길동 — 수석 · 20% · 9개월 · 인건비 15,000,000원\n성춘향 — 책임 연구원 · 10%\n임꺽정'), [
+    { name: '홍길동', role: '수석', rate: '20%', months: '9개월', pay: '15,000,000원' },
+    { name: '성춘향', role: '책임 연구원', rate: '10%', months: '', pay: '' },
+    { name: '임꺽정', role: '', rate: '', months: '', pay: '' },
+  ]);
+  assert.equal(parseRoster('홍길동 — 수석\n성춘향 — 책임'), null, '참여율·인건비·개월이 하나도 없으면 표가 아니다');
+  assert.equal(parseRoster('10kV 인가\n차단 성공'), null);
+  assert.equal(parseRoster('■ 개발목표\n1. x'), null);
+  assert.equal(parseRoster(''), null);
+});
+t('계획서 글(■ 절·번호·줄표·점) → 절과 항목', () => {
+  const secs = parseSections(['■ 개발목표', '1. 규정 공백 분석', '2. 용어 분류', '■ 개발내용', '- 규정 공백 분석', '  · 선급규정 비교', '  · 시험기준 도출', '- 용어 분류', '■ 성능목표', '- 규정 공백 분석: 1 건 (자체평가)', '■ 수행일정 (9개월)', '- 규정 공백 분석 32주', '그냥 줄'].join('\n'));
+  assert.deepEqual(secs, [
+    { title: '개발목표', note: '', items: [{ n: 1, text: '규정 공백 분석', subs: [] }, { n: 2, text: '용어 분류', subs: [] }] },
+    { title: '개발내용', note: '', items: [{ n: 0, text: '규정 공백 분석', subs: ['선급규정 비교', '시험기준 도출'] }, { n: 0, text: '용어 분류', subs: [] }] },
+    { title: '성능목표', note: '', items: [{ n: 0, text: '규정 공백 분석: 1 건 (자체평가)', subs: [] }] },
+    { title: '수행일정', note: '9개월', items: [{ n: 0, text: '규정 공백 분석 32주', subs: [] }, { n: 0, text: '그냥 줄', subs: [] }] },
+  ]);
+  assert.deepEqual(parseSections('머리 없이\n■ 절'), [{ title: '', note: '', items: [{ n: 0, text: '머리 없이', subs: [] }] }, { title: '절', note: '', items: [] }], '절 앞의 줄은 제목 없는 절');
+  assert.equal(parseSections('10kV 인가\n차단 성공'), null, '■ 절이 없으면 글 그대로');
+  assert.equal(parseSections(''), null);
+});
+
+console.log('복사할 글');
+t('예산 표 — 탭으로 나눈 줄, 적은 것 없는 비목은 빼고 합계까지', () => {
+  const rows = [{ item: '인건비', plan: 10000000, used: 2500000 }, { item: '연구재료비', plan: null, used: null }, { item: '간접비', plan: null, used: 100000 }, { item: '', plan: 5, used: null }];
+  assert.equal(budgetTsv(rows), ['비목\t계획(원)\t집행(원)\t잔액(원)\t집행률', '인건비\t10,000,000\t2,500,000\t7,500,000\t25%', '간접비\t0\t100,000\t-100,000\t', '합계\t10,000,000\t2,600,000\t7,400,000\t26%'].join('\n'));
+  assert.equal(budgetTsv([]), '비목\t계획(원)\t집행(원)\t잔액(원)\t집행률');
+});
+t('연구내역 한 줄 — 참여연구자는 표, 그 밖은 제목 아래 글', () => {
+  assert.equal(entryText({ title: '참여연구자 — 1차년도', text: '홍길동 — 수석 · 20% · 9개월 · 인건비 15,000,000원\n성춘향 — 책임 · 10% · 9개월 · 인건비 3,750,000원' }),
+    ['참여연구자 — 1차년도', '성명\t직위\t계상률\t참여\t계상인건비', '홍길동\t수석\t20%\t9개월\t15,000,000원', '성춘향\t책임\t10%\t9개월\t3,750,000원'].join('\n'));
+  assert.equal(entryText({ title: '시험', text: '10kV 인가\n차단 성공' }), '시험\n10kV 인가\n차단 성공');
+  assert.equal(entryText({ title: '', text: '글만' }), '글만');
+  assert.equal(entryText({ title: '제목만', text: '' }), '제목만');
+});
+t('연구내역·변경이력 전부 — 이른 것부터', () => {
+  assert.deepEqual(logLines([{ date: '2026-09-01', title: '둘째', text: '여러\n줄' }, { date: '2026-05-01', title: '첫째', text: '한 줄' }, { date: '', title: '', text: '' }]),
+    ['- 날짜 없음 ', '- 2026.05.01 첫째 — 한 줄', '- 2026.09.01 둘째', '  여러', '  줄']);
+  assert.equal(changeLine({ date: '2026-07-15', kind: '예산', item: '연구활동비', before: '50,000,000원', after: '40,000,000원', reason: '재배분' }), '2026.07.15 [예산] 연구활동비: 50,000,000원 → 40,000,000원 (재배분)');
+  assert.equal(changeLine({ date: '', kind: '기타', item: 'r0 최초협약', before: '', after: '', reason: '' }), '날짜 없음 [기타] r0 최초협약');
+  assert.deepEqual(changeLines([{ date: '2026-07-15', kind: '예산', item: 'b', before: '1', after: '2', reason: '' }, { date: '2026-06-29', kind: '연구진', item: 'a', before: '', after: '제외', reason: 'x' }]),
+    ['- 2026.06.29 [연구진] a: (없음) → 제외 (x)', '- 2026.07.15 [예산] b: 1 → 2']);
 });
 
 console.log(`\n${pass} passed`);

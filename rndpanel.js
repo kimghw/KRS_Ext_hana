@@ -9,9 +9,12 @@
 import {
   BOOK_KEY, MAX_PROJECTS, CHANGE_KINDS, normalizeBook, normalizeProject, projectOf, viewYear, yearBook, yearsOf, currentYear, yearLabel, yearState,
   periodText, dot, todayStr, isYmd, amountOf, comma, shortWon, budgetTotals, budgetChanges, projectChanges, newestFirst, newId,
-  fromGongmun, mergeProjects, restoreBook, exportJson, exportName, importJson, summaryText,
+  fromGongmun, mergeProjects, restoreBook, exportJson, exportName, importJson, summaryText, parseRoster, parseSections,
+  budgetTsv, entryText, logLines, changeLine, changeLines,
 } from './src/rnd.js';
 import { PROJECTS_KEY as GM_PROJECTS_KEY } from './src/gongmun.js';
+import { kindOf, applyYaml, KIND_ORDER } from './src/rndyaml.js';
+import { MANIFEST_PATH, checkManifest, skillGuide, bundleSkills, zipName, kb } from './src/rndskills.js';
 
 const SAVE_WAIT_MS = 400;
 /** 지우기 버튼은 두 번 누른다 — 처음 누르면 이만큼 동안 "정말 지우기" 로 바뀌고, 그 안에 다시 누르면 지운다. */
@@ -19,26 +22,31 @@ const CONFIRM_MS = 3000;
 
 /**
  * @param {{$:Function, escapeHtml:Function, logEvent:Function, copyText?:(text:string) => Promise<boolean>,
- *   flash?:(btn:HTMLElement, text:string, ms?:number) => void, download?:(text:string, filename:string) => Promise<void>,
- *   today?:() => string}} deps today 는 검사에서 날짜를 못 박는 데 쓴다
+ *   flash?:(btn:HTMLElement, text:string, ms?:number) => void, download?:(data:string|Uint8Array, filename:string, type?:string) => Promise<void>,
+ *   readAsset?:(path:string, as?:'text'|'bytes') => Promise<string|Uint8Array>, today?:() => string}} deps
+ *   readAsset 은 확장 안의 파일(rnd/skills.json · rnd/skills/…)을 읽는 길, today 는 검사에서 날짜를 못 박는 데 쓴다
  */
-export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy, flash = () => {}, download = defaultDownload, today = todayStr }) {
+export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy, flash = () => {}, download = defaultDownload, readAsset = defaultReadAsset, today = todayStr }) {
   const el = {
     root: $('rnd'), projects: $('rdProjects'), empty: $('rdEmpty'), emptyImport: $('rdEmptyImport'), emptyAdd: $('rdEmptyAdd'),
+    intake: $('rdIntake'), yaml: $('rdYaml'),
     head: $('rdHead'), name: $('rdName'), edit: $('rdEdit'), meta: $('rdMeta'), years: $('rdYears'), yearNote: $('rdYearNote'),
     form: $('rdForm'), formTitle: $('rdFormTitle'), fName: $('rdFName'), fAlias: $('rdFAlias'), fCode: $('rdFCode'), fLead: $('rdFLead'),
-    fStart: $('rdFStart'), fEnd: $('rdFEnd'), fNote: $('rdFNote'), fNeed: $('rdFNeed'), fSave: $('rdFSave'), fCancel: $('rdFCancel'), fDel: $('rdFDel'),
+    fStart: $('rdFStart'), fEnd: $('rdFEnd'), fCalendar: $('rdFCalendar'), fNote: $('rdFNote'), fNeed: $('rdFNeed'), fSave: $('rdFSave'), fCancel: $('rdFCancel'), fDel: $('rdFDel'),
     status: $('rdStatus'), body: $('rdBody'),
-    budgetState: $('rdBudgetState'), budget: $('rdBudget'), budgetSum: $('rdBudgetSum'), budgetAdd: $('rdBudgetAdd'),
-    logState: $('rdLogState'), logDate: $('rdLogDate'), logTitle: $('rdLogTitle'), logText: $('rdLogText'), logAdd: $('rdLogAdd'), logCancel: $('rdLogCancel'), logs: $('rdLogs'),
+    budgetState: $('rdBudgetState'), budget: $('rdBudget'), budgetSum: $('rdBudgetSum'), budgetAdd: $('rdBudgetAdd'), budgetCopy: $('rdBudgetCopy'),
+    logState: $('rdLogState'), logDate: $('rdLogDate'), logTitle: $('rdLogTitle'), logText: $('rdLogText'), logAdd: $('rdLogAdd'), logCancel: $('rdLogCancel'), logs: $('rdLogs'), logsCopy: $('rdLogsCopy'),
     changeState: $('rdChangeState'), chDate: $('rdChDate'), chKind: $('rdChKind'), chItem: $('rdChItem'), chBefore: $('rdChBefore'), chAfter: $('rdChAfter'),
-    chReason: $('rdChReason'), chAdd: $('rdChAdd'), chCancel: $('rdChCancel'), changes: $('rdChanges'),
+    chReason: $('rdChReason'), chAdd: $('rdChAdd'), chCancel: $('rdChCancel'), changes: $('rdChanges'), changesCopy: $('rdChangesCopy'),
     copy: $('rdCopy'), export: $('rdExport'), import: $('rdImport'), importGm: $('rdImportGm'),
+    skillBox: $('rdSkillBox'), skillState: $('rdSkillState'), skills: $('rdSkills'), skillZip: $('rdSkillZip'), skillGuide: $('rdSkillGuide'),
   };
   const st = {
     loaded: false, book: normalizeBook(null),
     // editing 은 고치는 중인 과제 id('new' 는 새 과제). snap 은 그린 시점의 예산 줄 — 계획이 바뀌었는지 이것과 견준다.
     editing: null, snap: [], logEdit: null, chEdit: null,
+    // 스킬 목록(rnd/skills.json)은 그 칸을 처음 펼 때 읽는다. 못 읽었으면 까닭을 둔다.
+    manifest: null, manifestError: '',
   };
 
   const cur = () => projectOf(st.book, st.book.current.project);
@@ -119,7 +127,7 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     if (p.alias) meta.push(p.name);
     if (p.code) meta.push(`과제번호 ${p.code}`);
     if (p.lead) meta.push(`책임자 ${p.lead}`);
-    meta.push(p.start ? `연구기간 ${periodText(p)} (총 ${ys.length}차년도)` : '연구기간 미정 — 과제 고치기에서 시작일·종료일을 적으세요');
+    meta.push(p.start ? `연구기간 ${periodText(p)} (총 ${ys.length}차년도${p.calendar ? ' · 1월 1일 기준' : ''})` : '연구기간 미정 — 과제 고치기에서 시작일·종료일을 적으세요');
     if (p.note) meta.push(p.note);
     el.meta.innerHTML = meta.map((m) => `<span>${escapeHtml(m)}</span>`).join('');
     const now = currentYear(p, today());
@@ -157,6 +165,7 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     el.fLead.value = p.lead;
     el.fStart.value = p.start;
     el.fEnd.value = p.end;
+    el.fCalendar.checked = !!p.calendar;
     el.fNote.value = p.note;
     el.fNeed.textContent = '';
     el.fDel.classList.toggle('hidden', id === 'new');
@@ -175,7 +184,7 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
   function saveForm() {
     const draft = normalizeProject({
       id: st.editing === 'new' ? '' : st.editing, name: el.fName.value, alias: el.fAlias.value, code: el.fCode.value, lead: el.fLead.value,
-      start: el.fStart.value, end: el.fEnd.value, note: el.fNote.value,
+      start: el.fStart.value, end: el.fEnd.value, calendar: el.fCalendar.checked, note: el.fNote.value,
     });
     if (!draft.name) {
       el.fNeed.textContent = '과제명을 적으세요.';
@@ -200,7 +209,7 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
       const p = projectOf(st.book, st.editing);
       if (!p) return closeForm();
       const changes = projectChanges(p, draft, today());
-      Object.assign(p, { name: draft.name, alias: draft.alias, code: draft.code, lead: draft.lead, start: draft.start, end: draft.end, note: draft.note });
+      Object.assign(p, { name: draft.name, alias: draft.alias, code: draft.code, lead: draft.lead, start: draft.start, end: draft.end, calendar: draft.calendar, note: draft.note });
       if (changes.length) {
         // 연구기간이 바뀌어 차년도가 달라졌을 수 있다 — 고친 뒤의 보고 있는 차년도에 남긴다.
         yearBook(p, viewYear(st.book, p, today())).changes.push(...changes);
@@ -357,12 +366,46 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     const p = cur();
     if (!p) return;
     const b = curBook(p);
-    el.logs.innerHTML = newestFirst(b.logs).map((l) => `<li data-log="${l.id}"${l.id === st.logEdit ? ' class="editing"' : ''}>`
-      + `<div class="rd-row-head"><span class="rd-date">${escapeHtml(dot(l.date) || '날짜 없음')}</span><strong class="rd-title">${escapeHtml(l.title)}</strong>`
-      + `<span class="rd-row-btns"><button type="button" class="ghost small" data-edit="${l.id}">고치기</button><button type="button" class="ghost small rd-del" data-del="${l.id}">지우기</button></span></div>`
-      + (l.text ? `<p class="rd-text">${escapeHtml(l.text)}</p>` : '')
+    el.logs.innerHTML = newestFirst(b.logs).map((l) => `<li data-log="${l.id}" class="${l.key ? 'rd-file' : ''}${l.id === st.logEdit ? ' editing' : ''}">`
+      + `<div class="rd-row-head"><span class="rd-date">${escapeHtml(dot(l.date) || '날짜 없음')}</span>${l.key ? '<span class="rd-kind" title="연구개발계획서(YAML)에서 넣은 줄">계획서</span>' : ''}<strong class="rd-title">${escapeHtml(l.title)}</strong>`
+      + `<span class="rd-row-btns"><button type="button" class="ghost small" data-copy="${l.id}" title="이 줄을 복사합니다${parseRoster(l.text) ? ' — 표(탭으로 나눈 글)로' : ''}">복사</button><button type="button" class="ghost small" data-edit="${l.id}">고치기</button><button type="button" class="ghost small rd-del" data-del="${l.id}">지우기</button></span></div>`
+      + logBody(l)
       + '</li>').join('');
     el.logState.textContent = b.logs.length ? `${b.logs.length}건` : '적은 것 없음';
+  }
+
+  /**
+   * 연구내역의 내용을 보기 좋게 — 참여연구자 줄들은 표로, 계획서의 ■ 절·번호·줄표·점은 절 제목과 목록으로, 그 밖의 글은 그대로.
+   * 글은 안 바꾼다(고치기·요약 복사는 글 그대로) — 보일 때만 꼴을 입힌다.
+   */
+  function logBody(l) {
+    if (!l.text) return '';
+    const people = parseRoster(l.text);
+    if (people) return rosterHtml(people);
+    const secs = parseSections(l.text);
+    if (secs) return sectionsHtml(secs);
+    return `<p class="rd-text">${escapeHtml(l.text)}</p>`;
+  }
+
+  function rosterHtml(people) {
+    const cols = [['name', '성명'], ['role', '직위'], ['rate', '계상률'], ['months', '참여'], ['pay', '계상인건비']].filter(([k]) => people.some((x) => x[k]));
+    return `<table class="rd-table"><thead><tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr></thead><tbody>`
+      + people.map((x) => `<tr>${cols.map(([k]) => `<td class="rd-td-${k}">${escapeHtml(x[k])}</td>`).join('')}</tr>`).join('')
+      + '</tbody></table>';
+  }
+
+  function sectionsHtml(secs) {
+    // "항목: 값" 꼴은 항목을 굵게 — 성능목표의 "규정 공백 분석: 1 건 (자체평가)".
+    const line = (s) => {
+      const m = s.match(/^([^:：]{2,40})[:：] (.+)$/);
+      return m ? `<b>${escapeHtml(m[1])}</b> ${escapeHtml(m[2])}` : escapeHtml(s);
+    };
+    const item = (it) => `<li>${line(it.text)}${it.subs.length ? `<ul>${it.subs.map((x) => `<li>${line(x)}</li>`).join('')}</ul>` : ''}</li>`;
+    return `<div class="rd-secs">${secs.map((s) => {
+      const tag = s.items.length && s.items.every((it) => it.n > 0) ? 'ol' : 'ul';
+      const head = s.title ? `<h4>${escapeHtml(s.title)}${s.note ? `<small>${escapeHtml(s.note)}</small>` : ''}</h4>` : '';
+      return `<section class="rd-sec">${head}<${tag}>${s.items.map(item).join('')}</${tag}></section>`;
+    }).join('')}</div>`;
   }
 
   function clearLogForm() {
@@ -400,10 +443,15 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
   }
 
   function onLogsClick(e) {
-    const btn = e.target instanceof HTMLElement ? e.target.closest('button[data-edit],button[data-del]') : null;
+    const btn = e.target instanceof HTMLElement ? e.target.closest('button[data-copy],button[data-edit],button[data-del]') : null;
     const p = cur();
     if (!btn || !p) return;
     const b = curBook(p);
+    if (btn.dataset.copy) {
+      const l = b.logs.find((x) => x.id === btn.dataset.copy);
+      if (l) copyWith(btn, entryText(l), `연구내역 한 줄: ${l.title}`);
+      return;
+    }
     if (btn.dataset.edit) {
       const l = b.logs.find((x) => x.id === btn.dataset.edit);
       if (!l) return;
@@ -439,7 +487,7 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
         : `<input type="text" class="rd-reason-in" data-reason="${c.id}" placeholder="${c.auto ? '사유 — 저절로 남은 줄입니다. 왜 바꿨는지 적어 두세요' : '사유'}" aria-label="사유" autocomplete="off" />`;
       return `<li data-ch="${c.id}" class="${c.auto ? 'auto' : ''}${c.id === st.chEdit ? ' editing' : ''}">`
         + `<div class="rd-row-head"><span class="rd-date">${escapeHtml(dot(c.date) || '날짜 없음')}</span><span class="rd-kind">${escapeHtml(c.kind)}</span><strong class="rd-title">${escapeHtml(c.item)}</strong>`
-        + `<span class="rd-row-btns"><button type="button" class="ghost small" data-edit="${c.id}">고치기</button><button type="button" class="ghost small rd-del" data-del="${c.id}">지우기</button></span></div>`
+        + `<span class="rd-row-btns"><button type="button" class="ghost small" data-copy="${c.id}" title="이 줄을 복사합니다">복사</button><button type="button" class="ghost small" data-edit="${c.id}">고치기</button><button type="button" class="ghost small rd-del" data-del="${c.id}">지우기</button></span></div>`
         + diff + reason + '</li>';
     }).join('');
     const open = b.changes.filter((c) => c.auto && !c.reason).length;
@@ -484,10 +532,15 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
   }
 
   function onChangesClick(e) {
-    const btn = e.target instanceof HTMLElement ? e.target.closest('button[data-edit],button[data-del]') : null;
+    const btn = e.target instanceof HTMLElement ? e.target.closest('button[data-copy],button[data-edit],button[data-del]') : null;
     const p = cur();
     if (!btn || !p) return;
     const b = curBook(p);
+    if (btn.dataset.copy) {
+      const c = b.changes.find((x) => x.id === btn.dataset.copy);
+      if (c) copyWith(btn, changeLine(c), `변경이력 한 줄: ${c.item}`);
+      return;
+    }
     if (btn.dataset.edit) {
       const c = b.changes.find((x) => x.id === btn.dataset.edit);
       if (!c) return;
@@ -524,7 +577,15 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     save();
   }
 
-  /* ---------------------------------------------------------- 요약·파일·가져오기 */
+  /* ---------------------------------------------------------- 복사 */
+
+  /** 글을 복사하고 누른 버튼에 결과를 잠깐 보인다. what 은 활동 기록에 적는 말. */
+  async function copyWith(btn, text, what) {
+    const p = cur();
+    const ok = await copyText(text);
+    flash(btn, ok ? '복사됨 ✓' : '복사 못 함');
+    logEvent('rnd', ok, `R&D 복사 — ${what}${p ? ` (${label(p)} ${yearLabel(curYear(p))})` : ''}`);
+  }
 
   async function copySummary() {
     const p = cur();
@@ -534,10 +595,16 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     logEvent('rnd', ok, `R&D 요약 복사: ${label(p)} ${yearLabel(curYear(p))}`);
   }
 
+  const copyBudget = () => { const p = cur(); if (p) copyWith(el.budgetCopy, budgetTsv(curBook(p).budget), '예산 표'); };
+  const copyLogs = () => { const p = cur(); if (p) copyWith(el.logsCopy, logLines(curBook(p).logs).join('\n'), `연구내역 ${curBook(p).logs.length}건`); };
+  const copyChanges = () => { const p = cur(); if (p) copyWith(el.changesCopy, changeLines(curBook(p).changes).join('\n'), `변경이력 ${curBook(p).changes.length}건`); };
+
+  /* ---------------------------------------------------------- 파일·가져오기 */
+
   async function exportBook() {
     const name = exportName(today());
     try {
-      await download(exportJson(st.book), name);
+      await download(exportJson(st.book), name, 'application/json');
       setStatus(`저장했습니다 — ${name}`);
       logEvent('rnd', true, `R&D 과제 JSON 저장: 과제 ${st.book.projects.length}개`, { name });
     } catch (err) {
@@ -595,6 +662,173 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     });
   }
 
+  /* ---------------------------------------------------------- 연구개발계획서 YAML 넣기 */
+
+  let yamlLib = null;
+  /** YAML 풀이(vendor/yaml — npm yaml 2.9.1 의 브라우저 빌드)는 처음 넣을 때만 읽어 들인다. */
+  const loadYaml = async () => (yamlLib ||= await import('./vendor/yaml/index.js'));
+  const isYamlFile = (f) => /\.ya?ml$/i.test(f?.name || '') || /yaml/i.test(f?.type || '');
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+
+  async function intakeFiles(files) {
+    const list = [...(files || [])].filter(isYamlFile);
+    if (!list.length) {
+      setStatus('YAML 파일(.yaml · .yml)만 넣을 수 있습니다 — RND 폴더의 KR_<과제>.yaml 이나 history/*.yaml.', 'error');
+      return;
+    }
+    const texts = [];
+    for (const f of list) {
+      try {
+        texts.push({ name: f.name, text: await readText(f) });
+      } catch (err) {
+        setStatus(`${f.name}: ${err.message}`, 'error');
+        return;
+      }
+    }
+    await intakeTexts(texts);
+  }
+
+  /**
+   * YAML 글들을 장부에 넣는다 — 풀어서 종류를 가리고(스냅샷 → 개정 레지스트리 → 예산 이력 → 참여연구원 이력 차례), 하나씩 넣는다.
+   * 이력 파일은 주석의 과제명으로 과제를 찾고 없으면 보고 있는 과제에 넣는다. 하나라도 들어갔으면 그린 뒤 저장한다.
+   */
+  async function intakeTexts(texts) {
+    el.intake.setAttribute('aria-busy', 'true');
+    const lines = [];
+    try {
+      const { parse } = await loadYaml();
+      const docs = [];
+      for (const { name, text } of texts) {
+        const what = name || '붙여 넣은 글';
+        let obj;
+        try {
+          obj = parse(text);
+        } catch (err) {
+          throw new Error(`${what}: YAML 을 읽지 못했습니다 — ${String(err.message || err).split('\n')[0]}`);
+        }
+        const kind = kindOf(obj);
+        if (!kind) throw new Error(`${what}: 아는 모양의 YAML 이 아닙니다 — 연구개발계획서 스냅샷(meta.과제명)이나 history 의 revisions·budget·researchers 파일을 넣으세요.`);
+        docs.push({ name, text, obj, kind });
+      }
+      docs.sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+      for (const d of docs) {
+        const p = cur();
+        const res = applyYaml(st.book, d.obj, { text: d.text, file: d.name, current: p, n: p ? curYear(p) : 0, today: today() });
+        lines.push(`${res.label}${d.name ? `(${d.name})` : ''}: ${res.summary}`);
+        logEvent('rnd', true, `R&D YAML 넣음 — ${res.label}: ${res.summary}`, { file: d.name });
+      }
+      setStatus(lines.join(' / '));
+    } catch (err) {
+      setStatus(`${lines.length ? `${lines.join(' / ')} / ` : ''}${err.message}`, 'error');
+      logEvent('rnd', false, `R&D YAML 넣기 실패: ${err.message}`);
+    } finally {
+      el.intake.removeAttribute('aria-busy');
+      if (lines.length) {
+        st.book = normalizeBook(st.book);
+        clearLogForm();
+        clearChangeForm();
+        paintAll();
+        save();
+      }
+    }
+  }
+
+  function onDrag(e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    if (e.type === 'dragleave') {
+      if (!el.root.contains(e.relatedTarget)) el.intake.classList.remove('over');
+      return;
+    }
+    el.intake.classList.add('over');
+  }
+
+  function onDrop(e) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.intake.classList.remove('over');
+    intakeFiles(e.dataTransfer.files);
+  }
+
+  /** 붙여 넣기 — 파일이면 그대로, 글이면 YAML 처럼 보일 때만(칸에 적는 중이면 가로채지 않는다). */
+  function onPaste(e) {
+    if (el.root.classList.contains('hidden')) return;
+    const files = [...(e.clipboardData?.files || [])].filter(isYamlFile);
+    if (files.length) {
+      e.preventDefault();
+      intakeFiles(files);
+      return;
+    }
+    const typing = e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]');
+    const text = typing ? '' : (e.clipboardData?.getData('text/plain') || '').trim();
+    if (!text || !/^(#|meta:|entity:|project:|revisions:)/m.test(text)) return;
+    e.preventDefault();
+    intakeTexts([{ name: '', text }]);
+  }
+
+  /* ---------------------------------------------------------- 차년도 YAML 뽑는 스킬 */
+
+  /** 스킬 목록(rnd/skills.json)을 읽어(한 번만) 그린다 — 칸을 펼 때나 버튼을 누를 때. 못 읽었으면 null. */
+  async function loadManifest() {
+    if (!st.manifest && !st.manifestError) {
+      try {
+        st.manifest = checkManifest(JSON.parse(await readAsset(MANIFEST_PATH)));
+      } catch (err) {
+        st.manifestError = err.message;
+      }
+    }
+    paintSkills();
+    return st.manifest;
+  }
+
+  function paintSkills() {
+    const m = st.manifest;
+    el.skillZip.disabled = !!st.manifestError;
+    el.skillGuide.disabled = !!st.manifestError;
+    if (!m) {
+      el.skills.innerHTML = st.manifestError ? `<li class="rd-skill-miss">스킬 목록을 읽지 못했습니다 — ${escapeHtml(st.manifestError)}</li>` : '';
+      el.skillState.textContent = st.manifestError ? '목록 없음' : 'Claude Code 스킬 묶음';
+      return;
+    }
+    el.skills.innerHTML = m.skills.map((s) => `<li title="${escapeHtml(s.hint ? `인자: ${s.hint}` : '')}"><strong>${escapeHtml(s.name)}</strong><small>파일 ${s.files.length}개 · ${kb(s.bytes)}</small><p>${escapeHtml(s.summary || '')}</p></li>`).join('');
+    el.skillState.textContent = `스킬 ${m.skills.length}개 · ${kb(m.skills.reduce((a, s) => a + s.bytes, 0))} · 복사 ${m.syncedAt || '?'}`;
+  }
+
+  /** 스킬 다섯 개를 zip 하나로 내려받는다 — 맨 앞에 쓰는 법(README.md). 받아서 과제 작업 프로젝트의 .claude/skills/ 에 푼다. */
+  async function saveSkillZip() {
+    const m = await loadManifest();
+    if (!m) {
+      setStatus(`스킬 목록을 읽지 못했습니다 — ${st.manifestError}`, 'error');
+      return;
+    }
+    el.skillZip.disabled = true;
+    try {
+      const bytes = await bundleSkills(m, (path) => readAsset(path, 'bytes'), { today: today() });
+      const name = zipName(today());
+      await download(bytes, name, 'application/zip');
+      flash(el.skillZip, '저장됨 ✓');
+      setStatus(`스킬 묶음을 저장했습니다 — ${name} (${kb(bytes.length)}). 과제 작업 프로젝트의 .claude/skills/ 에 푸세요.`);
+      logEvent('rnd', true, `R&D 스킬 묶음 저장: ${name}`, { bytes: bytes.length });
+    } catch (err) {
+      setStatus(`스킬 묶음을 만들지 못했습니다 — ${err.message}`, 'error');
+      logEvent('rnd', false, `R&D 스킬 묶음 실패: ${err.message}`);
+    } finally {
+      el.skillZip.disabled = !!st.manifestError;
+    }
+  }
+
+  async function copySkillGuide() {
+    const m = await loadManifest();
+    if (!m) {
+      setStatus(`스킬 목록을 읽지 못했습니다 — ${st.manifestError}`, 'error');
+      return;
+    }
+    copyWith(el.skillGuide, skillGuide(m, { today: today() }), '스킬 쓰는 법');
+  }
+
   /* ---------------------------------------------------------- 그리기·배선 */
 
   function paintAll() {
@@ -644,6 +878,9 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     el.changes.addEventListener('click', onChangesClick);
     el.changes.addEventListener('change', onReasonChange);
     el.copy.addEventListener('click', copySummary);
+    el.budgetCopy.addEventListener('click', copyBudget);
+    el.logsCopy.addEventListener('click', copyLogs);
+    el.changesCopy.addEventListener('click', copyChanges);
     el.export.addEventListener('click', exportBook);
     el.import.addEventListener('change', () => {
       const file = el.import.files?.[0];
@@ -651,6 +888,17 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
       importFile(file);
     });
     el.importGm.addEventListener('click', () => importGongmun());
+    el.skillBox.addEventListener('toggle', () => { if (el.skillBox.open) loadManifest(); });
+    el.skillZip.addEventListener('click', saveSkillZip);
+    el.skillGuide.addEventListener('click', copySkillGuide);
+    el.yaml.addEventListener('change', () => {
+      const files = [...(el.yaml.files || [])];
+      el.yaml.value = '';
+      intakeFiles(files);
+    });
+    for (const type of ['dragover', 'dragleave']) el.root.addEventListener(type, onDrag);
+    el.root.addEventListener('drop', onDrop);
+    document.addEventListener('paste', onPaste);
   }
 
   async function show() {
@@ -679,7 +927,7 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     el.root.classList.add('hidden');
   }
 
-  return { wire, show, hide, book: () => st.book };
+  return { wire, show, hide, book: () => st.book, skills: loadManifest };
 }
 
 async function defaultCopy(text) {
@@ -691,9 +939,16 @@ async function defaultCopy(text) {
   }
 }
 
-/** JSON 글을 파일로 내려받는다 — 확장의 downloads 권한으로, 없으면 링크를 눌러서. */
-async function defaultDownload(text, filename) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+/** 확장 안의 파일(rnd/skills.json · rnd/skills/…)을 읽는다 — 글로, 또는 바이트로. */
+async function defaultReadAsset(path, as = 'text') {
+  const res = await fetch(chrome.runtime.getURL(path));
+  if (!res.ok) throw new Error(`${path} (${res.status})`);
+  return as === 'bytes' ? new Uint8Array(await res.arrayBuffer()) : res.text();
+}
+
+/** 글이나 바이트를 파일로 내려받는다 — 확장의 downloads 권한으로, 없으면 링크를 눌러서. */
+async function defaultDownload(data, filename, type = 'application/json') {
+  const url = URL.createObjectURL(new Blob([data], { type }));
   try {
     if (chrome.downloads?.download) {
       await chrome.downloads.download({ url, filename, saveAs: true });

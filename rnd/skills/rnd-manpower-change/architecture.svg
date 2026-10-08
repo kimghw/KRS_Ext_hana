@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 1160" width="1040" height="1160" font-family="'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#37474f"/>
+    </marker>
+    <marker id="arrowDash" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7e57c2"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { font-size: 24px; font-weight: 700; fill: #1a237e; }
+    .subtitle { font-size: 13px; fill: #546e7a; }
+    .boxh     { font-size: 14px; font-weight: 700; }
+    .boxt     { font-size: 11.5px; }
+    .small    { font-size: 10.5px; fill: #455a64; }
+    .stage    { font-size: 12px; font-weight: 700; fill: #1565c0; }
+    .edge     { stroke: #37474f; stroke-width: 1.6; fill: none; }
+    .edgelbl  { font-size: 10.5px; fill: #37474f; }
+    .legtxt   { font-size: 11px; fill: #37474f; }
+  </style>
+
+  <!-- ===== Title ===== -->
+  <text x="40" y="44" class="title">rnd-manpower-change — 참여연구원 변경 인건비 재배분</text>
+  <text x="40" y="66" class="subtitle">KR 스냅샷 입력 → 3단계 파이프라인(현재추출 · 변경반영 · rerp 계산/문서) → 산출 정보 2종(①공문용 참여율 · ②rerp용 월별인건비) → pending 검토 큐 · 이력 핸드오프</text>
+
+  <!-- ===== Legend ===== -->
+  <g transform="translate(40, 80)">
+    <rect x="0"   y="0" width="16" height="12" rx="2" fill="#eceff1" stroke="#90a4ae"/>
+    <text x="22"  y="10" class="legtxt">입력(읽기전용)</text>
+    <rect x="140" y="0" width="16" height="12" rx="2" fill="#e3f2fd" stroke="#1976d2"/>
+    <text x="162" y="10" class="legtxt">처리</text>
+    <rect x="220" y="0" width="16" height="12" rx="2" fill="#e8f5e9" stroke="#388e3c"/>
+    <text x="242" y="10" class="legtxt">산출물</text>
+    <rect x="320" y="0" width="16" height="12" rx="2" fill="#f3e5f5" stroke="#7e57c2" stroke-dasharray="4 3"/>
+    <text x="342" y="10" class="legtxt">외부 스킬</text>
+    <rect x="420" y="0" width="16" height="12" rx="2" fill="#e0f2f1" stroke="#00897b"/>
+    <text x="442" y="10" class="legtxt">검토 큐(pending)</text>
+    <rect x="560" y="0" width="16" height="12" rx="2" fill="#fffde7" stroke="#f9a825"/>
+    <text x="582" y="10" class="legtxt">rerp 계산 규칙</text>
+  </g>
+
+  <!-- ===== Input snapshot ===== -->
+  <g>
+    <rect x="370" y="110" width="300" height="62" rx="8" fill="#eceff1" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="520" y="132" text-anchor="middle" class="boxh" fill="#37474f">입력A: KR 스냅샷  KR_*.yaml</text>
+    <text x="520" y="150" text-anchor="middle" class="boxt" fill="#455a64">정본(읽기 전용) · 현재 참여자 + 목표 인건비</text>
+    <text x="520" y="165" text-anchor="middle" class="small">RND_PROJECT\&lt;과제&gt;\&lt;연차&gt;\  — 절대 수정 안 함</text>
+  </g>
+  <path class="edge" d="M520,172 L520,210" marker-end="url(#arrow)"/>
+
+  <!-- second input path: previous rev comparison YAML -->
+  <g>
+    <rect x="690" y="110" width="250" height="62" rx="8" fill="#eceff1" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="815" y="132" text-anchor="middle" class="boxh" fill="#37474f">입력B: 직전 rev 변경비교 YAML</text>
+    <text x="815" y="150" text-anchor="middle" class="boxt" fill="#455a64">후 값·월별 실적 승계 · 회차 +1</text>
+    <text x="815" y="165" text-anchor="middle" class="small">→ 연쇄 구간 변경 입력</text>
+  </g>
+  <path class="edge" d="M815,172 L815,210" marker-end="url(#arrow)"/>
+  <text x="823" y="196" class="edgelbl">--extract-prev</text>
+
+  <!-- ===== Stage 1 ===== -->
+  <text x="40" y="252" class="stage">① 현재 추출</text>
+  <g>
+    <rect x="120" y="215" width="800" height="78" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="238" class="boxh" fill="#0d47a1">manpower_calc.py  --extract  →  manpower_input_&lt;연차&gt;_revNN.json (scaffold)</text>
+    <text x="135" y="258" class="boxt" fill="#1a237e">스냅샷에서 해당 연차 참여자(급여총액·참여기간_개월·계상률·계상인건비)·목표인건비 자동 추출 — 손으로 안 옮김</text>
+    <text x="135" y="275" class="boxt" fill="#1a237e">분류 전원 <tspan font-weight="700">고정</tspan> · 메타(과제·연차·목표_총인건비·회차·작성일) 자동 기입 · <tspan font-weight="700" fill="#bf360c">작성일 = 품의서 시행일 우선(있으면)</tspan></text>
+    <text x="135" y="289" class="small">history\ 부재 감지 시 → /rnd-kr-history init (r0) 먼저 안내·트리거 (변경 전 스냅샷 = r0 기준선)</text>
+  </g>
+  <path class="edge" d="M520,293 L520,328" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 2 ===== -->
+  <text x="40" y="380" class="stage">② 변경 반영</text>
+  <text x="40" y="396" class="small">AskUserQuestion</text>
+  <g>
+    <rect x="120" y="333" width="800" height="120" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="356" class="boxh" fill="#0d47a1">AskUserQuestion → input.json 의 목표_총인건비 · 분류 · 신규_* 편집</text>
+
+    <rect x="140" y="368" width="245" height="70" rx="6" fill="#ffffff" stroke="#64b5f6"/>
+    <text x="262" y="386" text-anchor="middle" class="boxt" font-weight="700" fill="#1565c0">2-1. 인건비 변경 여부</text>
+    <text x="262" y="404" text-anchor="middle" class="small">없음 → 현재 비목별 인건비 사용</text>
+    <text x="262" y="419" text-anchor="middle" class="small">있음 → 새 총액 입력 (목표 갱신)</text>
+    <text x="262" y="433" text-anchor="middle" class="small">※ 가장 먼저 가른다</text>
+
+    <rect x="397" y="368" width="245" height="70" rx="6" fill="#ffffff" stroke="#64b5f6"/>
+    <text x="519" y="386" text-anchor="middle" class="boxt" font-weight="700" fill="#1565c0">2-2. 참여연구원 변경</text>
+    <text x="519" y="404" text-anchor="middle" class="small">제외(하차) · 추가(신규투입)</text>
+    <text x="519" y="419" text-anchor="middle" class="small">변경(기간/참여율 · 변경적용월)</text>
+    <text x="519" y="433" text-anchor="middle" class="small">실제 급여총액 반영</text>
+
+    <rect x="654" y="368" width="248" height="70" rx="6" fill="#ffffff" stroke="#64b5f6"/>
+    <text x="778" y="386" text-anchor="middle" class="boxt" font-weight="700" fill="#1565c0">2-3. 조정 대상 선정</text>
+    <text x="778" y="404" text-anchor="middle" class="small">미변경 연구원 1~2명 = 조정</text>
+    <text x="778" y="419" text-anchor="middle" class="small">차액·끝수 흡수</text>
+    <text x="778" y="433" text-anchor="middle" class="small">나머지 미변경자 = 고정</text>
+  </g>
+  <path class="edge" d="M520,453 L520,488" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 3 ===== -->
+  <text x="40" y="540" class="stage">③ 계산·문서</text>
+  <text x="40" y="556" class="small">rerp 규칙 준수</text>
+  <g>
+    <rect x="120" y="493" width="800" height="170" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="516" class="boxh" fill="#0d47a1">manpower_calc.py  input.json  --yaml-out  --md-out   (결정론 계산 · 2-pass 재검산)</text>
+    <text x="135" y="535" class="boxt" fill="#1a237e">차액 흡수(비례/균등) · 끝수→조정연구원 가산 · 계상률 역산 → 전/후 비교 데이터 + 변경안 .md 동시 생성</text>
+
+    <rect x="135" y="544" width="770" height="85" rx="6" fill="#fffde7" stroke="#f9a825" stroke-width="1.4"/>
+    <text x="150" y="561" class="boxt" font-weight="700" fill="#e65100">rerp 계산 규칙 (회사 연구개발 관리 시스템)</text>
+    <text x="150" y="577" class="small">월급여 = 급여총액/12 <tspan font-weight="700">천원 절삭</tspan> · 월별 배분 = 앞월 천단위 올림 · 마지막 월 잔액(합=계상인건비)</text>
+    <text x="150" y="592" class="small"><tspan font-weight="700">월 참여율</tspan> = 월 인건비/월급여 소수3자리 올림(표시용) · <tspan font-weight="700">최종 계상률</tspan> = 계상인건비/총 지급한도(월급여×개월) 소수3자리 올림</text>
+    <text x="150" y="607" class="small">참여율→인건비 = 천원 절삭 + <tspan font-weight="700">최종 계상률(총 지급한도 대비 비율) 기준 요청 참여율 초과 금지 보정</tspan></text>
+    <text x="150" y="622" class="small">중도·구간 변경 = <tspan font-weight="700">변경적용월~변경종료월</tspan> <tspan font-weight="700">구간만 재계산</tspan> · 구간 밖 전 금액 유지 · 조정도 구간 가능(기지급 차감 후 잔액만 구간 배분)</text>
+
+    <text x="135" y="644" class="small" fill="#1a237e">검증: 총액_일치 · 조정목표≥0 · 계상률_하한(≥10%) · <tspan font-weight="700">요청참여율_이하</tspan> · <tspan font-weight="700">월별합_일치</tspan> · <tspan font-weight="700">재검산_일치=true</tspan> (하나라도 false면 ok=false → 재질의·재실행)</text>
+    <text x="135" y="659" class="small">md2pdf.py : 변경안 .md → PDF (pandoc → 헤드리스 Edge/Chrome, 제목 "참여연구원 변경 현황")</text>
+  </g>
+  <path class="edge" d="M520,663 L520,700" marker-end="url(#arrow)"/>
+
+  <!-- ===== Outputs — 산출 정보 2종 ===== -->
+  <text x="40" y="752" class="stage" fill="#2e7d32">산출물</text>
+  <text x="40" y="768" class="small">산출 정보 2종</text>
+  <text x="40" y="782" class="small">manpower_change\</text>
+  <text x="40" y="796" class="small">revNN_작성일\</text>
+
+  <!-- group ① 공문용 -->
+  <g>
+    <rect x="120" y="706" width="556" height="120" rx="8" fill="none" stroke="#66bb6a" stroke-width="1.4" stroke-dasharray="6 4"/>
+    <text x="132" y="726" class="boxt" font-weight="700" fill="#1b5e20">① 공문용 — 참여율 정보 (전→후 계상률 · 변경_적용기간)</text>
+
+    <rect x="132" y="736" width="166" height="80" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="215" y="758" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">변경안 문서</text>
+    <text x="215" y="776" text-anchor="middle" class="small">rev안_&lt;연차&gt;_revNN.md</text>
+    <text x="215" y="791" text-anchor="middle" class="small">3절(개요·요약·내역)</text>
+    <text x="215" y="805" text-anchor="middle" class="small">변경 적용기간 열 포함</text>
+
+    <rect x="306" y="736" width="166" height="80" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="389" y="758" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">변경안 PDF</text>
+    <text x="389" y="776" text-anchor="middle" class="small">rev안_&lt;연차&gt;_revNN.pdf</text>
+    <text x="389" y="791" text-anchor="middle" class="small">제출·회람용</text>
+    <text x="389" y="805" text-anchor="middle" class="small">(--no-pdf 생략)</text>
+
+    <rect x="480" y="736" width="184" height="80" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="572" y="758" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">비교 YAML — ① 블록</text>
+    <text x="572" y="776" text-anchor="middle" class="small">공문용_참여율</text>
+    <text x="572" y="791" text-anchor="middle" class="small">전→후 계상률·참여기간</text>
+    <text x="572" y="805" text-anchor="middle" class="small">참여자별 변경_적용기간</text>
+  </g>
+
+  <!-- group ② rerp용 -->
+  <g>
+    <rect x="688" y="706" width="232" height="120" rx="8" fill="none" stroke="#66bb6a" stroke-width="1.4" stroke-dasharray="6 4"/>
+    <text x="700" y="726" class="boxt" font-weight="700" fill="#1b5e20">② rerp용 — 월별인건비</text>
+
+    <rect x="700" y="736" width="208" height="80" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="804" y="758" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">비교 YAML — ② 블록</text>
+    <text x="804" y="776" text-anchor="middle" class="small">참여자별 월별인건비 (월 참여율 병기)</text>
+    <text x="804" y="791" text-anchor="middle" class="small">{월·계상·참여율} — 변경 후 기준·바뀐 월엔 # rev&lt;NN&gt; 변경 주석</text>
+    <text x="804" y="805" text-anchor="middle" class="small">월별_소계 {월·계상} · 합 = 계상인건비</text>
+  </g>
+
+  <text x="120" y="846" class="small">※ 비교 YAML(참여연구자인건비_&lt;연차&gt;_revNN.yaml)은 한 파일 — ①+② 블록 동시 수록</text>
+  <text x="120" y="861" class="small">계산 입력 JSON manpower_input_&lt;연차&gt;_revNN.json = 재현·재계산용(같은 회차 폴더)</text>
+
+  <!-- outputs → pending review queue -->
+  <path class="edge" d="M804,826 L804,874" marker-end="url(#arrow)"/>
+
+  <!-- ===== Pending review queue band ===== -->
+  <g>
+    <rect x="120" y="878" width="800" height="58" rx="8" fill="#e0f2f1" stroke="#00897b" stroke-width="1.6"/>
+    <text x="135" y="897" class="boxt" font-weight="700" fill="#00695c">pending 검토 큐 복사 (자동, --no-pending 로 끔)</text>
+    <text x="135" y="914" class="small" fill="#00695c">to_pending.py → RND_PROJECT\_pending\&lt;과제&gt;\&lt;연차&gt;_인건비_revNN_작성일\ — 회차 폴더 통째 복사(원본 out_dir 보존)</text>
+    <text x="135" y="929" class="small" fill="#00796b">과제 무관 미확정 변경안 집결 · _export 관례와 짝</text>
+  </g>
+
+  <!-- ===== Key rules band ===== -->
+  <g>
+    <rect x="120" y="958" width="800" height="54" rx="8" fill="#fff8e1" stroke="#f9a825" stroke-width="1.4"/>
+    <text x="135" y="975" class="boxt" font-weight="700" fill="#e65100">핵심 규칙</text>
+    <text x="135" y="991" class="small">총 인건비 고정(또는 명시 변경) · 끝수는 조정연구원 가산 · 계상률 ≥ 10% · 계상인건비 천원 단위 정수 · 산술은 manpower_calc.py 전담(LLM 암산 금지)</text>
+    <text x="135" y="1006" class="small">rerp 규칙 준수: 천원 절삭 · ceil2 올림 · 요청 참여율 초과 금지 · 월별 배분 합 = 계상인건비 · 중도 변경은 나머지 개월만 재계산</text>
+  </g>
+
+  <!-- arrow to handoff -->
+  <path class="edge" d="M620,936 L620,1042" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="630" y="1032" class="edgelbl">확정 시</text>
+
+  <!-- ===== Handoff (external skills) ===== -->
+  <text x="40" y="1070" class="stage" fill="#5e35b1">이력 핸드오프</text>
+  <g>
+    <!-- snapshot reflect -->
+    <rect x="120" y="1046" width="240" height="64" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="240" y="1068" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-kr-extract</text>
+    <text x="240" y="1086" text-anchor="middle" class="small">'후' 값을 스냅샷 예산에 반영</text>
+    <text x="240" y="1101" text-anchor="middle" class="small">→ 재구조화 (정본 갱신)</text>
+
+    <!-- history -->
+    <rect x="400" y="1046" width="240" height="64" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="520" y="1068" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-kr-history</text>
+    <text x="520" y="1086" text-anchor="middle" class="small">rev 적재 (추가=신규 · 제외=삭제</text>
+    <text x="520" y="1101" text-anchor="middle" class="small">조정=참여율/인건비 변경)</text>
+
+    <!-- init note -->
+    <rect x="680" y="1046" width="240" height="64" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="800" y="1068" text-anchor="middle" class="boxt" font-weight="700" fill="#4527a0">/rnd-kr-history init (r0)</text>
+    <text x="800" y="1086" text-anchor="middle" class="small">history 없으면 먼저 실행</text>
+    <text x="800" y="1101" text-anchor="middle" class="small">변경 전 스냅샷 = r0 기준선</text>
+  </g>
+  <path d="M360,1078 L398,1078" class="edge" stroke="#7e57c2" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+  <path d="M680,1078 L642,1078" class="edge" stroke="#7e57c2" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+
+  <text x="120" y="1140" class="small" fill="#7e57c2">분리 구도:  /rnd-kr-extract (스냅샷) → rnd-manpower-change (변경안) → /rnd-kr-history (이력).  이 스킬은 변경안만 만들고 스냅샷·이력은 직접 수정하지 않는다.</text>
+</svg>

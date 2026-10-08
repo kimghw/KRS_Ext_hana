@@ -1,0 +1,77 @@
+# rnd-kr-extract 추출 프로파일 — 한국선급(KR) 기본값
+# ---------------------------------------------------------------------------
+# 사용법: 그대로 쓰거나 복사·수정해 /rnd-kr-extract --profile <이 파일 경로> 로 지정.
+# 항목 키(extract.*)의 의미·소속 장은 SKILL.md "표준 장 ↔ KR 항목 매핑" 표 참조.
+# 본 스킬은 한국선급(KR) 전용이라 target 은 보통 손대지 않는다(검색어만 조정 가능).
+# 입력은 사업계획서 PDF·공문(PDF/HWP/DOCX)·엑셀(.xlsx) 모두 가능 — 변환만 포맷별, 발췌·결합 규약은 동일.
+# ---------------------------------------------------------------------------
+
+target:                          # KR 식별자 (고정값 — 검색어만 조정)
+  name: "한국선급"
+  abbr: "KR"
+  aliases:                       # 본문에서 KR 을 가리키는 표현 전부
+    - "사단법인 한국선급"
+    - "공동연구개발기관2"
+    - "KR"
+    - "Korean Register"
+    - "선급"                     # 약식 통칭(맥락 확인 필요 — 별첨 대비표 등)
+  block_markers:                 # KR 블록을 여는 헤딩/표지 마커
+    - "[공동연구개발기관2(한국선급)]"
+    - "[한국선급]"
+
+# KR 업무 범위 중 "추출할 부분" — 항목(item) 단위 on/off (계층의 하위)
+extract:
+  org_status:      false         # 00·07  기관 지위·일반현황·협약 등재 (00 표지는 context_full 로 유지)
+  objectives:      true          # 02     연차별 개발목표·개발내용(R&R)
+  perf_targets:    true          # 02     성능·정량 목표 지표표
+  outcome_kpi:     true          # 02     성과지표(논문 등)
+  schedule:        true          # 02     수행일정(연차별 간트)
+  deliverables:    true          # 02     주요 결과물 목록
+  org_chart:       false         # 03     추진체계·편성도·역할
+  utilization:     false         # 04     활용방안·기대효과(단순언급 위주)
+  certification:   false         # 05     사업화·보유 인증기준
+  safety_security: false         # 06     안전·보안조치 블록
+  researchers:     false         # 07     책임자·참여연구원 명단
+  facilities:      false         # 07     시설·장비(KR 보유분 0이면 생략)
+  budget:          true          # 08     연구개발비 표
+  outsourcing:     false         # 별첨   외주용역 발주
+  eval_response:   false         # 별첨   평가의견 수정·보완 대비표
+
+# 장 단위 필터 (계층의 상위)
+chapters:
+  include: "auto"                # auto = 위 extract 가 가리키는 장만 자동 선택
+  exclude: []                    # 강제 제외할 표준 장 번호 (예: ["04"])
+  context_full: ["00"]           # 발췌본 대신 "전체본"으로 둘 장(맥락 보존). 빈 리스트 가능
+
+output:
+  per_chapter: true              # 장별 발췌 파일 생성
+  combined: true                 # 단일 결합본 생성
+  base_dir: "RND_PROJECT"        # 공통 작업 루트(cwd 기준). 모든 과제 산출물의 루트 — 과제마다 바꾸지 않음
+  source_dir: "_source"          # base_dir 하위 — 원본 입력 파일을 이동 보관(예: RND_PROJECT/_source/)
+  work_subdir: "{project_name}"  # base_dir 하위 과제별 작업 폴더(변환본·이력의 부모). 공통 루트 내 과제 격리
+  project_abbr: ""               # 과제 약어(빈 값=과제명/파일명 stem 에서 유도; 예: SSCB)
+  project_name: ""               # 과제 이름(빈 값=문서 표지 과제명에서 추출·확인) — 작업 폴더·결합본명에 사용
+  stage: ""                      # 차수/연차 라벨(선택; 공문·엑셀 등 차수 없으면 비워 둠; 예: 1차년도)
+  combined_name: "KR_{project_name}.md"   # 결합본명 → 과제 폴더(work_subdir) 안에 둠(RND_PROJECT/<과제이름>/KR_{과제이름}.md)
+  format: "markdown"             # markdown(무손실 발췌·결합) | structured(YAML/JSON 데이터)
+  # 구조화(YAML/JSON) 추출을 원하면 --format structured 또는 profiles/kr_structured.yaml 사용.
+  # 무엇을 넣고 뺄지는 references/extract_fields.yaml, 값 모양은 references/structured_output.md.
+
+# 변경 이력(rev 추적)은 별도 스킬 /rnd-kr-history 가 담당(완전 분리).
+#   - 이력은 구조화 스냅샷(KR_{과제}.yaml)을 입력으로 한다 → markdown 모드만으론 이력 불가.
+#   - 이력을 쓰려면: /rnd-kr-extract <입력> --format structured  (또는 profiles/kr_structured.yaml)
+#     으로 스냅샷을 만든 뒤  /rnd-kr-history --project <과제이름>  실행.
+
+options:
+  lossless: true                 # 무손실 — 요약·의역·수치변경 금지
+  reuse_md_cache: true           # 이미 변환된 장별 md 있으면 재사용(재변환 생략)
+  read_max_pages: 4              # 변환 시 Read 1회 페이지 상한(20p 소켓 끊김 방지)
+  emit_analysis_memo: true       # 매핑 단계 분석 메모를 interactive/ 에 저장
+  move_source: true              # 원본 입력을 base_dir/source_dir 로 이동(복사 아님; --no-move 로 끔)
+  cleanup_intermediate: true     # 추출·검증 완료 후 변환 중간산출물 삭제(--keep-intermediate 로 끔)
+  intermediate_globs:            # 삭제 대상 중간산출물 패턴(cwd 및 base_dir 기준). 변환본·발췌본·원본은 제외
+    - "_toc_dump.txt"
+    - "_pagecheck.txt"
+    - "_img_manifest.json"
+    - "_extract_imgs.py"
+    - "*_md/.markdownlint.jsonc"  # 변환 폴더에 떨궈진 임시 lint 설정

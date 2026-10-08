@@ -857,10 +857,8 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-send-add { display: block; position: relative; margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); background: var(--surface); cursor: pointer; }
 .attend .at-send-add input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .attend .at-send-add:hover { border-color: var(--pick); }
-/* 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸) 바로 아래의 웹페이지 캡처 단추 — 공문 탭과 같은 칸(webpick.js, .wp-*)이다.
-   펴 둔 탭 목록의 줄은 출장 카드의 줄(.at-list li — 테두리·둥근 모서리) 모양을 받지 않는다. */
+/* 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸) 바로 아래의 웹페이지 캡처 단추 둘 — 공문 탭과 같은 단추(webpick.js, .wp-*)다. */
 .attend .at-cap { display: flex; justify-content: center; margin-top: 4px; }
-.attend .at-list .wp-list li { margin: 0; border: 0; border-radius: 0; font-size: inherit; }
 .attend .at-send-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .attend .at-send-row .at-label { flex-basis: 100%; font-size: 12px; }
 .attend .at-send-row .at-chip { min-height: 28px; padding: 3px 10px; font-size: 12px; }
@@ -979,31 +977,18 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-intake[aria-busy="true"] .gm-drop { opacity: .65; cursor: progress; }
 .gongmun .gm-intake.off .gm-drop { border-color: var(--line); background: var(--surface-soft); }
 .gongmun .gm-intake.off .gm-drop-lead { color: var(--muted); }
-/* 문서 넣는 곳 아래의 두 단추 — 웹페이지 통째로 캡처, 문서 없이 쓰기. */
+/* 문서 넣는 곳 아래의 단추들 — 웹페이지 캡처(보고 있는 탭 · 부분 골라 캡처), 문서 없이 쓰기. */
 .gongmun .gm-intake-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; margin-top: 6px; }
 .gongmun .gm-intake-actions button { font-size: 12px; }
-/* 웹페이지 골라 통째로 캡처(webpick.js) — 공문 탭의 문서 넣는 곳과 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸)이 같은 칸을 쓴다.
-   단추를 누르면 이 창의 웹페이지 탭을 줄마다 체크박스로, 맨 위에 전체. 긴 목록은 안에서 스크롤한다. */
+/* 웹페이지 캡처 단추 둘(webpick.js) — 공문 탭의 문서 넣는 곳과 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸)이 같은 단추를 쓴다.
+   보고 있는 탭은 아이콘만(이름은 낭독기와 마우스를 올렸을 때), 부분 골라 캡처는 고르는 동안 "고르기 취소"로 바뀌고 파랗게 켜진다. */
+.wp-btns { display: inline-flex; align-items: center; gap: 2px; }
 .wp-open { display: inline-flex; align-items: center; gap: 5px; color: var(--pick); font-size: 12px; font-weight: 600; }
 .wp-open svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .wp-open:disabled { opacity: .6; cursor: progress; }
-.wp-tabs { margin-top: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--pick) 25%, var(--line)); border-radius: 12px; background: var(--surface); text-align: left; }
-.wp-tabs input[type="checkbox"] { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--pick); cursor: pointer; }
-.wp-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-.wp-all { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; cursor: pointer; }
-.wp-all small { color: var(--muted); font-weight: 400; }
-.wp-hint { color: var(--muted); font-size: 12px; }
-.wp-list { max-height: 230px; margin: 0; padding: 2px 0; overflow-y: auto; list-style: none; }
-.wp-list > li { margin: 0; padding: 0; border: 0; background: none; }
-.wp-tab { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px; border-radius: 8px; cursor: pointer; }
-.wp-tab:hover { background: var(--surface-soft); }
-.wp-tab:has(input:checked) { background: var(--pick-soft); }
-.wp-tab input[type="checkbox"] { margin-top: 2px; }
-.wp-tab-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.wp-tab-title { display: -webkit-box; overflow: hidden; color: var(--fg); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.wp-tab-host { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.wp-go { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
-.wp-go .primary { flex: 1 1 auto; }
+.wp-front { min-width: 30px; padding-inline: 6px; }
+.wp-front svg { width: 17px; height: 17px; }
+.wp-part.on { background: var(--pick-soft); }
 .gongmun .gm-intake .cli-help { margin: 8px 2px 0; }
 .gongmun .statusline { margin-bottom: 10px; }
 
@@ -1012,6 +997,12 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-draft { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
 .gongmun .gm-source { display: flex; flex-direction: column; gap: 3px; margin: -4px 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .gongmun .gm-note { display: block; color: color-mix(in srgb, var(--mine) 70%, var(--fg)); font-size: 12px; line-height: 1.5; }
+/* 오린 견적서 — 가격과 그 둘레. 그림은 패널 폭에 맞추고 너무 길면 줄여 보인다. */
+.gongmun .gm-cut { margin: 0 0 10px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.gongmun .gm-cut-head { display: flex; align-items: baseline; gap: 8px; margin: 0 2px 6px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.gongmun .gm-cut-head strong { flex: none; color: var(--fg); font-size: 13px; }
+.gongmun .gm-cut img { display: block; max-width: 100%; max-height: 260px; margin: 0 auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; object-fit: contain; }
+.gongmun .gm-cut-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
 .gongmun .gm-items { list-style: none; margin: 0 0 10px; padding: 0; border-top: 1px solid var(--line); }
 .gongmun .gm-items:empty { display: none; }
 .gongmun .gm-items li { display: flex; flex-direction: column; padding: 6px 2px; border-bottom: 1px solid var(--line); }
@@ -1129,6 +1120,21 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-empty p { margin: 0 0 8px; }
 .rnd .rd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
+/* 연구개발계획서 YAML 넣는 곳 — 공문 탭의 문서 넣는 곳과 같은 점선 상자, 조금 낮다. 탭 어디에 놓아도 여기로 온다. */
+.rnd .rd-intake { position: relative; margin-bottom: 12px; padding: 8px; }
+.rnd .rd-intake input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.rnd .rd-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 56px; padding: 8px 12px; border: 1.5px dashed color-mix(in srgb, var(--pick) 55%, var(--line)); border-radius: 12px;
+  background: var(--pick-soft); text-align: center; cursor: pointer;
+}
+.rnd .rd-drop:hover, .rnd .rd-intake.over .rd-drop { border-color: var(--pick); background: color-mix(in srgb, var(--pick) 16%, var(--surface)); }
+.rnd .rd-drop:has(input[type="file"]:focus-visible) { outline: 2px solid var(--pick); outline-offset: 2px; }
+.rnd .rd-drop-lead { display: inline-flex; align-items: center; gap: 6px; color: var(--pick); font-size: 13px; font-weight: 650; }
+.rnd .rd-drop-lead svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rnd .rd-drop-how { color: var(--muted); font-size: 11px; word-break: keep-all; }
+.rnd .rd-intake[aria-busy="true"] .rd-drop { opacity: .65; cursor: progress; }
+
 /* 고른 과제의 머리 — 과제명 · 과제번호·책임자·연구기간 · 차년도 칩. 오늘이 든 차년도에 "올해". */
 .rnd .rd-head, .rnd .rd-form { margin-bottom: 12px; padding: 14px 16px; }
 .rnd .rd-head { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
@@ -1151,6 +1157,9 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-field.wide { grid-column: 1 / -1; }
 .rnd .rd-field > span { color: var(--muted); font-size: 12px; }
 .rnd .rd-field .req { margin-left: 3px; color: var(--danger); font-size: 10px; font-weight: 700; }
+.rnd .rd-check { flex-direction: row; align-items: flex-start; gap: 8px; padding: 2px 0; font-size: 12px; line-height: 1.5; color: var(--muted); cursor: pointer; }
+.rnd .rd-check input { flex: none; width: auto; min-height: 0; margin-top: 2px; }
+.rnd .rd-check strong { color: var(--fg); }
 .rnd input[type="text"], .rnd input[type="date"], .rnd select, .rnd textarea {
   width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid transparent; border-radius: 10px;
   background: var(--surface-soft); font: inherit; font-size: 13px; color: inherit;
@@ -1191,6 +1200,11 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-bsum:empty { display: none; }
 .rnd .rd-bsum span:nth-child(n+2) { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rnd .rd-box-body .rd-actions { margin-top: 6px; }
+/* 칸마다 복사 — 예산은 표(탭으로 나눈 글), 연구내역·변경이력은 전부. 줄마다는 줄 안의 복사. */
+.rnd .rd-box-tools { display: flex; justify-content: flex-end; margin: -2px 0 4px; }
+.rnd .rd-box-tools button { min-height: 24px; padding: 2px 8px; color: var(--pick); font-size: 12px; }
+.rnd .rd-box-tools button:hover { background: var(--pick-soft); }
+.rnd .rd-list:empty + .rd-box-tools, .rnd .rd-box-tools:has(+ .rd-list:empty) { display: none; }
 
 /* 연구내역·변경이력 — 적는 칸과 목록(늦은 것부터). */
 .rnd .rd-new { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--pick) 5%, var(--surface)); }
@@ -1212,12 +1226,48 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-row-btns { flex: none; margin-left: auto; display: inline-flex; gap: 2px; }
 .rnd .rd-row-btns button { min-height: 24px; padding: 2px 6px; font-size: 12px; }
 .rnd .rd-text { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+/* 계획서에서 온 연구내역 — 참여연구자는 표, 연구개발 계획은 절 제목(■ 대신 파란 띠)과 번호·점 목록. 글은 그대로고 보일 때만 이 꼴이다. */
+.rnd .rd-list li.rd-file { border-left: 3px solid color-mix(in srgb, var(--pick) 55%, var(--line)); }
+.rnd .rd-list li.rd-file .rd-kind { color: var(--pick); background: var(--pick-soft); }
+.rnd .rd-table { width: 100%; margin: 6px 0 2px; border-collapse: collapse; font-size: 12px; line-height: 1.4; }
+.rnd .rd-table th { padding: 3px 6px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; text-align: left; white-space: nowrap; }
+.rnd .rd-table td { padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); vertical-align: top; }
+.rnd .rd-table tr:last-child td { border-bottom: 0; }
+.rnd .rd-table .rd-td-name { font-weight: 600; white-space: nowrap; }
+.rnd .rd-table .rd-td-role { color: var(--muted); white-space: nowrap; }
+.rnd .rd-table th:nth-child(n+3), .rnd .rd-table td.rd-td-rate, .rnd .rd-table td.rd-td-months, .rnd .rd-table td.rd-td-pay { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rnd .rd-secs { margin-top: 4px; font-size: 13px; line-height: 1.5; }
+.rnd .rd-sec + .rd-sec { margin-top: 8px; }
+.rnd .rd-sec h4 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 3px; padding-left: 8px; border-left: 3px solid var(--pick); color: var(--pick); font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+.rnd .rd-sec h4 small { padding: 0 6px; border-radius: 6px; background: var(--surface-soft); color: var(--muted); font-size: 11px; font-weight: 600; }
+.rnd .rd-sec ol, .rnd .rd-sec ul { margin: 0; padding-left: 20px; }
+.rnd .rd-sec ol { list-style: decimal; }
+.rnd .rd-sec ol li::marker { color: var(--pick); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rnd .rd-sec ul { list-style: none; padding-left: 4px; }
+.rnd .rd-sec ul > li { position: relative; padding-left: 12px; }
+.rnd .rd-sec ul > li::before { content: ""; position: absolute; left: 0; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--pick); opacity: .7; }
+.rnd .rd-sec li { overflow-wrap: anywhere; }
+.rnd .rd-sec li + li { margin-top: 2px; }
+.rnd .rd-sec li > ul { margin-top: 2px; padding-left: 2px; color: var(--muted); font-size: 12px; }
+.rnd .rd-sec li > ul > li::before { width: 4px; height: 4px; background: var(--faint); opacity: 1; }
+.rnd .rd-sec b { font-weight: 600; }
 .rnd .rd-diff { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
 .rnd .rd-diff s { color: var(--muted); }
 .rnd .rd-diff b { font-weight: 600; }
 .rnd .rd-reason { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .rnd .rd-reason::before { content: "사유 "; color: var(--faint); font-weight: 600; }
 .rnd .rd-reason-in { margin-top: 5px; min-height: 30px; font-size: 12px; }
+
+/* 차년도 YAML 뽑는 스킬 — 스킬 다섯 개의 이름·요약·파일 수. 묶음 저장(zip)·쓰는 법 복사. */
+.rnd .rd-skill-lead { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.rnd .rd-skill-lead code { padding: 0 4px; border-radius: 4px; background: var(--surface-soft); font-family: ui-monospace, monospace; font-size: 11px; color: var(--fg); }
+.rnd .rd-skills { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.5; }
+.rnd .rd-skills li { margin-bottom: 5px; overflow-wrap: anywhere; }
+.rnd .rd-skills li::marker { color: var(--pick); font-weight: 700; }
+.rnd .rd-skills strong { font-family: ui-monospace, "D2Coding", monospace; font-size: 12.5px; color: var(--fg); }
+.rnd .rd-skills small { margin-left: 4px; color: var(--faint); font-size: 11px; white-space: nowrap; }
+.rnd .rd-skills p { margin: 1px 0 0; color: var(--muted); font-size: 12px; }
+.rnd .rd-skills .rd-skill-miss { color: var(--danger); }
 
 /* 요약 복사 · JSON 저장·불러오기 · 공문 탭의 과제 가져오기 */
 .rnd .rd-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }

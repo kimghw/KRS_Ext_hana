@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1304" width="1320" height="1304" font-family="'Malgun Gothic', sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#37474f"/>
+    </marker>
+    <marker id="arrowDash" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7e57c2"/>
+    </marker>
+    <marker id="arrowRef" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#00897b"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { font-size: 24px; font-weight: 700; fill: #1a237e; }
+    .subtitle { font-size: 13px; fill: #546e7a; }
+    .boxh     { font-size: 14px; font-weight: 700; }
+    .boxt     { font-size: 11.5px; }
+    .small    { font-size: 10.5px; fill: #455a64; }
+    .stage    { font-size: 12px; font-weight: 700; fill: #1565c0; }
+    .edge     { stroke: #37474f; stroke-width: 1.6; fill: none; }
+    .edgeRef  { stroke: #00897b; stroke-width: 1.4; fill: none; }
+    .edgelbl  { font-size: 10.5px; fill: #37474f; }
+    .edgelblR { font-size: 10.5px; fill: #00897b; }
+    .legtxt   { font-size: 11px; fill: #37474f; }
+  </style>
+
+  <!-- ===== Title ===== -->
+  <text x="40" y="44" class="title">rnd-kr-extract — 입력문서에서 한국선급(KR) 업무 범위 추출</text>
+  <text x="40" y="66" class="subtitle">입력 판별 → 수집(_source) → 과제명 → 전체 변환 → KR 매핑 → KR 발췌 → [markdown 결합 | structured → 차년도 슬라이스 → r0 init] → 정리·검증.  공통 루트 RND_PROJECT\.</text>
+
+  <!-- ===== Legend ===== -->
+  <g transform="translate(40, 80)">
+    <rect x="0"   y="0" width="16" height="12" rx="2" fill="#eceff1" stroke="#90a4ae"/>
+    <text x="22"  y="10" class="legtxt">입력 문서</text>
+    <rect x="110" y="0" width="16" height="12" rx="2" fill="#e3f2fd" stroke="#1976d2"/>
+    <text x="132" y="10" class="legtxt">처리(단계)</text>
+    <rect x="220" y="0" width="16" height="12" rx="2" fill="#e8f5e9" stroke="#388e3c"/>
+    <text x="242" y="10" class="legtxt">산출물</text>
+    <rect x="310" y="0" width="16" height="12" rx="2" fill="#e0f2f1" stroke="#00897b"/>
+    <text x="332" y="10" class="legtxt">정책·스키마(references)</text>
+    <rect x="490" y="0" width="16" height="12" rx="2" fill="#f3e5f5" stroke="#7e57c2" stroke-dasharray="4 3"/>
+    <text x="512" y="10" class="legtxt">외부 스킬(핸드오프)</text>
+  </g>
+
+  <!-- ===== Input documents ===== -->
+  <g>
+    <rect x="120" y="110" width="720" height="64" rx="8" fill="#eceff1" stroke="#90a4ae" stroke-width="1.5"/>
+    <text x="480" y="132" text-anchor="middle" class="boxh" fill="#37474f">입력 문서  사업계획서·연구계획서(PDF·HWP) · 공문 · 엑셀(.xlsx/.xls)</text>
+    <text x="480" y="151" text-anchor="middle" class="small">장 구조 없는 입력(공문·엑셀)은 "장" 단위가 "문서/시트" 단위로 대체 — 매핑·발췌·결합 규약은 동일</text>
+    <text x="480" y="167" text-anchor="middle" class="small" fill="#1565c0">$ARGUMENTS: --format markdown|structured · --json · --name · --profile · --stage · --no-move · --keep-intermediate · --no-history</text>
+  </g>
+  <path class="edge" d="M480,174 L480,206" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 0: 입력 판별 ===== -->
+  <text x="40" y="240" class="stage">① 입력 판별 (포맷)</text>
+  <g>
+    <rect x="120" y="210" width="720" height="52" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="232" class="boxh" fill="#0d47a1">확장자로 포맷 판별 + 프로파일·출력 모드 확정 (부족 입력은 AskUserQuestion)</text>
+    <text x="135" y="252" class="small">.pdf→pdf2md · .hwp/.hwpx→한컴 COM PDF/pyhwp · .xlsx/.xls→시트 변환 · 공문(PDF/DOCX).  모드: markdown(기본) | structured(--format)</text>
+  </g>
+  <path class="edge" d="M480,262 L480,294" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage: 수집 ===== -->
+  <text x="40" y="328" class="stage">② 수집 (원본 이동)</text>
+  <g>
+    <rect x="120" y="298" width="720" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="320" class="boxh" fill="#0d47a1">원본 → RND_PROJECT\_source\ 로 이동 + 과제명으로 개명 (move+rename)</text>
+    <text x="135" y="338" class="small">options.move_source 기본 on (--no-move 로 끔) · 동명 충돌 시 덮어쓰기 전 확인 · 결과: _source\&lt;과제이름&gt;.&lt;확장자&gt;</text>
+  </g>
+  <path class="edge" d="M480,348 L480,380" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage: 과제명 확정 ===== -->
+  <text x="40" y="414" class="stage">③ 과제명 확정</text>
+  <g>
+    <rect x="120" y="384" width="720" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="406" class="boxh" fill="#0d47a1">표지 과제명 추출·확인 + 차년도(stage) 산출 (현재 날짜 기준 우선·협약일 교차확인)</text>
+    <text x="135" y="424" class="small">작업 루트 RND_PROJECT\&lt;과제이름&gt;\&lt;차년도&gt;\ 결정 (지저분한 파일명 stem 대신 표지 과제명을 우선)</text>
+  </g>
+  <path class="edge" d="M480,434 L480,466" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 1: 전체 변환 ===== -->
+  <text x="40" y="502" class="stage">④ 전체 변환</text>
+  <text x="40" y="518" class="small">멀티에이전트</text>
+  <g>
+    <rect x="120" y="470" width="720" height="68" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="492" class="boxh" fill="#0d47a1">문서의 모든 장/문서/시트 → 장별 md 로 무손실 변환  →  …\&lt;차년도&gt;\original\</text>
+    <text x="135" y="512" class="boxt" fill="#1a237e">변환=전체(KR 장만 부분 변환 금지 — 06장 안전관리비 등 교차 장 누락 방지) · 장 1개=에이전트 1개(20p 청크) 병렬</text>
+    <text x="135" y="528" class="small">PDF→/pdf2md_by_read · HWP→한컴 COM PDF/hwp5html · 엑셀→시트별 표 · 임베디드 이미지만 추출 → original\images\</text>
+  </g>
+  <path class="edge" d="M480,538 L480,570" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 2: KR 매핑 ===== -->
+  <text x="40" y="604" class="stage">⑤ KR 매핑</text>
+  <g>
+    <rect x="120" y="574" width="720" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="596" class="boxh" fill="#0d47a1">어느 장에 무엇이 — 전체 변환본을 멀티에이전트로 스캔 (KR 위치·유형·핵심 수치)</text>
+    <text x="135" y="614" class="small">결과 → interactive\&lt;target.name&gt;_챕터별_내용_분석.md (있으면 재사용) · 0단계 추출 계획 검증(누락·오배치 보정)</text>
+  </g>
+  <path class="edge" d="M480,624 L480,656" marker-end="url(#arrow)"/>
+
+  <!-- ===== Stage 3: KR 발췌 ===== -->
+  <text x="40" y="690" class="stage">⑥ KR 발췌</text>
+  <text x="40" y="706" class="small">장 1개=</text>
+  <text x="40" y="720" class="small">에이전트 1개</text>
+  <g>
+    <rect x="120" y="660" width="720" height="64" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="682" class="boxh" fill="#0d47a1">YAML 이 가리키는 장·KR 만 무손실 발췌  →  …\&lt;차년도&gt;\&lt;과제이름&gt;_KR\</text>
+    <text x="135" y="702" class="boxt" fill="#1a237e">멀티에이전트 병렬 · Grep 으로 위치 → 구간만 Read(≤250행) → 작은 Write (전체 읽기 금지) · 표 밀집 장은 part 분할 후 병합</text>
+    <text x="135" y="718" class="small">검색어 = target.aliases / block_markers · 발췌본 = 무손실 정본(추적성)</text>
+  </g>
+
+  <!-- ===== references side box (정책·스키마·프로파일) ===== -->
+  <g>
+    <rect x="880" y="470" width="400" height="254" rx="8" fill="#e0f2f1" stroke="#00897b" stroke-width="1.6"/>
+    <text x="1080" y="492" text-anchor="middle" class="boxh" fill="#00695c">참조 (스킬 내부 SSOT)</text>
+
+    <rect x="900" y="504" width="360" height="58" rx="6" fill="#ffffff" stroke="#26a69a"/>
+    <text x="912" y="523" class="boxt" font-weight="700" fill="#00695c">정책 SSOT — references/extract_fields.yaml</text>
+    <text x="912" y="540" class="small">무엇을 넣고 뺄지(섹션·필드 on/off · include/exclude)</text>
+    <text x="912" y="555" class="small">이력 매칭 필드: 비목별·외주용역·참여연구자인건비·성능목표</text>
+
+    <rect x="900" y="570" width="360" height="50" rx="6" fill="#ffffff" stroke="#26a69a"/>
+    <text x="912" y="589" class="boxt" font-weight="700" fill="#00695c">스키마 — references/structured_output.md</text>
+    <text x="912" y="606" class="small">값의 모양(키 구조·예시) · 연차=키 · 금액=수치 타입</text>
+
+    <rect x="900" y="628" width="360" height="50" rx="6" fill="#ffffff" stroke="#26a69a"/>
+    <text x="912" y="647" class="boxt" font-weight="700" fill="#00695c">프로파일 — profiles/*.yaml</text>
+    <text x="912" y="664" class="small">kr_default(markdown) · kr_structured(structured)</text>
+    <text x="912" y="664" class="small"></text>
+
+    <text x="900" y="700" class="small" fill="#00695c">extract.&lt;키&gt;(15개 KR 항목) · chapters.include/exclude/context_full</text>
+    <text x="900" y="715" class="small" fill="#00695c">structured 모드는 02·08장(+06 안전관리비) 발췌본을 입력으로 정규화</text>
+  </g>
+  <!-- references → 발췌/구조화 점선 -->
+  <path class="edgeRef" d="M880,694 L844,694" marker-end="url(#arrowRef)" stroke-dasharray="5 3"/>
+  <text x="852" y="686" text-anchor="end" class="edgelblR">정책·장 지정</text>
+
+  <path class="edge" d="M480,724 L480,758" marker-end="url(#arrow)"/>
+
+  <!-- ===== 출력 모드 분기 ===== -->
+  <text x="40" y="792" class="stage" fill="#5e35b1">⑦ 출력 모드 분기 (output.format)</text>
+  <g>
+    <rect x="120" y="762" width="720" height="34" rx="8" fill="#ede7f6" stroke="#7e57c2" stroke-width="1.6"/>
+    <text x="480" y="784" text-anchor="middle" class="boxh" fill="#4527a0">발췌본(extract_dir) 을 입력으로 — markdown ↔ structured 갈림</text>
+  </g>
+  <!-- split arrows -->
+  <path class="edge" d="M340,796 L300,832" marker-end="url(#arrow)"/>
+  <path class="edge" d="M620,796 L660,832" marker-end="url(#arrow)"/>
+
+  <!-- markdown branch -->
+  <g>
+    <rect x="120" y="836" width="360" height="86" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="300" y="858" text-anchor="middle" class="boxh" fill="#0d47a1">markdown (기본)</text>
+    <text x="300" y="877" text-anchor="middle" class="boxt" fill="#1a237e">선별(전체본/발췌 혼합) → 결합</text>
+    <text x="300" y="893" text-anchor="middle" class="small">context_full 장은 전체본으로 교체 · 번호순 --- 결합</text>
+    <text x="300" y="910" text-anchor="middle" class="small" fill="#1565c0">→ KR_&lt;과제이름&gt;.md</text>
+  </g>
+
+  <!-- structured branch -->
+  <g>
+    <rect x="500" y="836" width="340" height="102" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2.2"/>
+    <text x="670" y="858" text-anchor="middle" class="boxh" fill="#0d47a1">structured (--format structured)</text>
+    <text x="670" y="877" text-anchor="middle" class="boxt" fill="#1a237e">02·08장 발췌본 → 정책대로 정규화</text>
+    <text x="670" y="893" text-anchor="middle" class="small">섹션 1개=에이전트 1개 · 추적성·매칭 검증 · 2-pass</text>
+    <text x="670" y="910" text-anchor="middle" class="small" fill="#1565c0">→ KR_&lt;과제이름&gt;.yaml (+옵션 .json)</text>
+    <text x="670" y="926" text-anchor="middle" class="small" font-weight="700" fill="#1565c0">당해 차년도 전용(그 연차 행만) · meta 는 유지</text>
+  </g>
+  <!-- references feed structured (정책·스키마) -->
+  <path class="edgeRef" d="M1080,724 L1080,879 L840,879" marker-end="url(#arrowRef)" stroke-dasharray="5 3"/>
+  <text x="1075" y="744" text-anchor="end" class="edgelblR">정규화 정책·스키마</text>
+
+  <!-- structured → 5′-b 차년도 슬라이스 -->
+  <path class="edge" d="M670,938 L670,960" marker-end="url(#arrow)"/>
+  <text x="678" y="953" class="edgelbl">저장 직후 (자동)</text>
+
+  <!-- ===== 5′-b 차년도 슬라이스·검증 (scripts/year_slice.py) ===== -->
+  <g>
+    <rect x="500" y="964" width="340" height="74" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="670" y="984" text-anchor="middle" class="boxh" fill="#0d47a1">5′-b 차년도 슬라이스·검증</text>
+    <text x="670" y="1001" text-anchor="middle" class="boxt" fill="#1a237e">scripts/year_slice.py · 저장 직후 · r0 init 전 실행</text>
+    <text x="670" y="1017" text-anchor="middle" class="small">당해 차년도 행만 남김(주석 보존) · 데이터 필터와 교차검증</text>
+    <text x="670" y="1031" text-anchor="middle" class="small">--check 로 타 연차 잔존 차단(exit 2) · meta 유지</text>
+  </g>
+
+  <!-- 5′-b → r0 init -->
+  <path class="edge" d="M670,1038 L670,1068" marker-end="url(#arrow)"/>
+  <text x="678" y="1057" class="edgelbl">검증 통과 시 (자동)</text>
+
+  <!-- ===== r0 history init (handoff) ===== -->
+  <g>
+    <rect x="500" y="1072" width="340" height="70" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.6" stroke-dasharray="5 3"/>
+    <text x="670" y="1094" text-anchor="middle" class="boxh" fill="#4527a0">r0 이력 init 자동 → /rnd-kr-history</text>
+    <text x="670" y="1113" text-anchor="middle" class="small">/rnd-kr-history init --project &lt;과제&gt; --year &lt;차년도&gt;</text>
+    <text x="670" y="1129" text-anchor="middle" class="small">…\&lt;차년도&gt;\history\ 에 budget·researchers·objectives r0 시드</text>
+  </g>
+  <text x="848" y="1098" class="small" fill="#7e57c2">--no-history 로 끔</text>
+  <text x="848" y="1112" class="small" fill="#7e57c2">idempotent (이미</text>
+  <text x="848" y="1126" class="small" fill="#7e57c2">있으면 스킵)</text>
+
+  <!-- markdown branch → 정리 (좌측 합류) -->
+  <path class="edge" d="M300,922 L300,1178 L460,1178" marker-end="url(#arrow)"/>
+  <!-- r0 init → 정리 합류 -->
+  <path class="edge" d="M670,1142 L670,1174 L500,1174" marker-end="url(#arrow)"/>
+
+  <!-- ===== 정리 ===== -->
+  <text x="40" y="1196" class="stage">⑧ 정리</text>
+  <g>
+    <rect x="120" y="1162" width="380" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="1184" class="boxh" fill="#0d47a1">중간산출물 삭제 (cleanup_intermediate 기본 on)</text>
+    <text x="135" y="1202" class="small">_toc_dump.txt·_img_manifest.json 등 · 성공 후에만 · 보존 대상 제외 (--keep-intermediate 로 끔)</text>
+  </g>
+  <path class="edge" d="M500,1187 L538,1187" marker-end="url(#arrow)"/>
+
+  <!-- ===== 검증·보고 ===== -->
+  <text x="540" y="1154" class="stage">⑨ 검증·보고</text>
+  <g>
+    <rect x="540" y="1162" width="300" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="555" y="1184" class="boxh" fill="#0d47a1">검증·보고</text>
+    <text x="555" y="1202" class="small">markdownlint / YAML·JSON 파싱 · 발췌 누락·추적성 · r0 init 결과</text>
+  </g>
+
+  <!-- ===== Outputs band ===== -->
+  <text x="40" y="1240" class="stage" fill="#2e7d32">산출물</text>
+  <text x="40" y="1256" class="small">RND_PROJECT\</text>
+  <text x="40" y="1270" class="small">&lt;과제&gt;\&lt;차년도&gt;\</text>
+  <g>
+    <rect x="120" y="1226" width="230" height="58" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="235" y="1247" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">전체 변환본 + 발췌본</text>
+    <text x="235" y="1264" text-anchor="middle" class="small">original\NN_*.md · &lt;과제&gt;_KR\</text>
+    <text x="235" y="1279" text-anchor="middle" class="small">(+ images\)</text>
+
+    <rect x="360" y="1226" width="230" height="58" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="475" y="1247" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">결합본 / 구조화본</text>
+    <text x="475" y="1264" text-anchor="middle" class="small">KR_&lt;과제&gt;.md (markdown)</text>
+    <text x="475" y="1279" text-anchor="middle" class="small">KR_&lt;과제&gt;.yaml/.json (당해 차년도 전용)</text>
+
+    <rect x="600" y="1226" width="240" height="58" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.6"/>
+    <text x="720" y="1247" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">이력 r0 기준선</text>
+    <text x="720" y="1264" text-anchor="middle" class="small">history\ (budget·researchers·objectives)</text>
+    <text x="720" y="1279" text-anchor="middle" class="small">슬라이스 검증 후 자동 시드</text>
+  </g>
+
+  <!-- ===== Handoff band (이후 rev) ===== -->
+  <g>
+    <rect x="880" y="1162" width="400" height="122" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="1080" y="1184" text-anchor="middle" class="boxh" fill="#4527a0">이후 rev(변경) 적재 → /rnd-kr-history</text>
+    <text x="900" y="1206" class="small" fill="#4527a0">· r0 init 만 본 스킬이 자동 트리거 (위 5′-b 슬라이스 직후)</text>
+    <text x="900" y="1223" class="small" fill="#4527a0">· 이후 변경비교 YAML(참여연구자인건비_변경비교) 등으로</text>
+    <text x="900" y="1238" class="small" fill="#4527a0">  r1+ 누적은 /rnd-kr-history 소관 (diff·changelog·뷰)</text>
+    <text x="900" y="1258" class="small" fill="#4527a0">· 변경비교 YAML 생성: /rnd-manpower-change</text>
+    <text x="900" y="1275" class="small" fill="#7e57c2">재추출(스냅샷 갱신)만으로 rev 가 자동 적재되진 않는다.</text>
+  </g>
+  <!-- history outputs → rev handoff (점선) -->
+  <path d="M840,1255 L878,1236" class="edge" stroke="#7e57c2" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+
+  <text x="120" y="1298" class="small" fill="#7e57c2">파이프라인: 입력 판별 → 수집 → 과제명 → 전체 변환 → KR 매핑 → KR 발췌 → [markdown 결합 | structured 정규화 → 차년도 슬라이스 → r0 init] → 정리 → 검증.  값의 정본 = 발췌본 · 이후 변경 이력은 /rnd-kr-history.</text>
+</svg>

@@ -88,8 +88,6 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** 증빙 넣는 곳의 풍선말 — 칸을 낮추느라 칸 안에서 뺀 자세한 말이다. */
 const DROP_TITLE = '이미지·PDF, 여러 장도 됩니다 — 붙여넣기(Ctrl+V)는 이 카드를 편 채 패널 어디서든 됩니다';
-const CAP_TITLE = '이 창에 열어 둔 웹페이지(탭)를 전체 또는 하나 이상 골라 위에서 아래까지 캡처하고 화면의 글자와 함께 증빙으로 읽습니다 — '
-  + '예약 확인·결제 완료 화면을 조각조각 캡처하지 않아도 됩니다. 페이지 하나가 PDF 하나(증빙 한 장)가 됩니다. 처음 찍을 때 한 번 사이트 접근 권한을 묻습니다.';
 const md = (s) => `${+s.slice(5, 7)}/${+s.slice(8)}`;
 /** 기간을 "9/6 ~ 10/13" 으로. 올해 밖에 걸치면 해를 붙인다("25/10/4 ~ 26/10/4") — 한 해를 조회하면 양쪽이 같은 날로 보인다. */
 const spanText = (from, to, today) => {
@@ -127,12 +125,13 @@ const CAR_STATE = { free: '비어 있음', unknown: '확인 불가' };
  *   cars.scan 은 날짜들의 차량 이용 현황을 읽어 오는 길(src/rentcar.js 의 scanCarDays) — 테스트가 가짜를 준다.
  *   onCar 는 차량 조회에서 빈 차량을 눌렀을 때 그 차량을 신청하는 길이다(src/carfind.js 의 carPick 모양을 받아
  *   {ok, submitted, message} 를 돌려준다 — 패널(sidepanel.js)이 차량 탭의 예약하기와 같은 길로 보낸다).
+ *   webcap 은 웹페이지를 찍는 길(src/pagecap.js — 보고 있는 탭 통째로·페이지 위의 부분 고르기·고른 부분 찍기, webpick.js 에 넘긴다) — 테스트가 갈아 끼운다.
  */
 export function createAttendPanel({
   $, escapeHtml, logEvent, ai, onChanged = () => {}, evidence = createEvidenceStore(),
   cars = { scan: (dates) => scanCarDays(dates) },
   onCar = async () => ({ ok: false, submitted: false, message: '차량 신청이 연결되지 않았습니다.' }),
-  listTabs, capture,
+  webcap = {},
 }) {
   const el = {
     root: $('attend'), kinds: $('atKinds'), chatLog: $('atChatLog'), chatInput: $('atChatInput'), chatGo: $('atChatGo'),
@@ -239,15 +238,11 @@ export function createAttendPanel({
     escapeHtml, logEvent, repaint: () => paintList(),
     setStatus: (...args) => setStatus(...args), setError: (...args) => setError(...args),
   });
-  // 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸) 아래의 웹페이지 캡처 — 공문 탭의 것과 같은 탭 고르기 칸이다(webpick.js,
-  // 2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로"). listTabs·capture 는 테스트가 갈아 끼운다.
-  const webPick = createWebPick({ escapeHtml, listTabs, capture });
-  /** 웹페이지 캡처 단추와 펴 둔 탭 목록. where 는 'after'(사후정산 칸)·'send'(여비증빙 송부 칸) — 한 카드에 둘이 같이 서도 목록은 누른 곳에만 편다. */
-  const capHtml = (docNo, where, locked) => {
-    const key = `${docNo}:${where}`;
-    return `<div class="at-cap" data-cap="${where}">${pickButton({ open: webPick.isOpen(key), disabled: locked, title: CAP_TITLE }, escapeHtml)}</div>`
-      + webPick.html(key, { busy: locked });
-  };
+  // 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸) 아래의 웹페이지 캡처 단추 둘(보고 있는 탭 · 부분 골라 캡처) — 공문 탭의 것과
+  // 같은 단추다(webpick.js, 2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로"). webcap 은 테스트가 갈아 끼운다.
+  const webPick = createWebPick(webcap);
+  /** 웹페이지 캡처 단추 둘. where 는 'after'(사후정산 칸)·'send'(여비증빙 송부 칸) — 한 카드에 둘이 같이 서도 "고르기 취소"는 누른 곳에만 선다. */
+  const capHtml = (docNo, where, locked) => `<div class="at-cap" data-cap="${where}">${pickButton({ picking: webPick.picking(`${docNo}:${where}`), disabled: locked })}</div>`;
 
   /* ---------------------------------------------------------------- 상태 줄 */
 
@@ -1278,8 +1273,6 @@ export function createAttendPanel({
         + `<div id="atMore_${i}" class="at-more-box">${note}`
         + `<div class="at-acts">${acts}</div>${cancelBox}${tripLine}${afterBox}</div></li>`;
     }).join('');
-    // 펴 둔 웹페이지 목록의 "전체"가 반쯤 골라진 표시는 글로 그릴 수 없다 — 그린 뒤에 맞춘다.
-    webPick.sync(el.list);
     ensureAfterDetail();
     ensureLodges();
     settleKnown();
@@ -2229,47 +2222,36 @@ export function createAttendPanel({
     runAfter(t.seq, [...e.dataTransfer.files]);
   }
 
-  /**
-   * 증빙 넣는 곳 아래의 웹페이지 캡처 단추와 탭 목록을 눌렀을 때(webpick.js) — 단추는 그 칸의 목록을 펴고 접고, 목록의 캡처는 고른
-   * 탭들을 찍어 증빙으로 넣는다(captureFor). 공문 탭과 같은 칸이다.
-   */
-  async function onPick(r, it, target) {
+  /** 증빙 넣는 곳 아래의 웹페이지 캡처 단추를 눌렀을 때(webpick.js) — 보고 있는 탭이든 부분 고르기든 그 칸의 증빙으로 넣는다(captureFor). */
+  function onPick(r, it, target) {
     const trip = isTrip(it) ? tripOf(it) : null;
     if (!trip) return undefined;
     disarm();
-    if (r.act === 'open') {
-      if (st.after[trip.seq]?.busy) return undefined;
-      const where = target.closest('[data-cap]')?.dataset.cap || 'after';
-      try {
-        if (await webPick.toggle(`${it.docNo}:${where}`)) setStatus('');
-      } catch (err) {
-        setStatus(err.message, 'error');
-      }
-      return paintList();
-    }
-    if (r.act === 'close') return paintList();
-    if (r.act === 'go') return captureFor(it, r.key.slice(it.docNo.length + 1), r.tabs);
-    return undefined;
+    return captureFor(it, target.closest('[data-cap]')?.dataset.cap || 'after', r.act);
   }
 
   /**
-   * 고른 웹페이지들을 통째로 캡처해 증빙으로 넣는다(2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로").
-   * 찍는 것은 공문 탭과 같다(webpick.js → src/pagecap.js: 권한 묻기 → 고른 탭을 차례로 앞에 두고 한 화면씩 → A4 장 → 화면 글자 → 보던
-   * 탭으로). 페이지 하나를 PDF 하나로 묶어(pagePdfs — 예약 확인 화면이 석 장이어도 증빙은 하나) 그 칸에 파일을 넣은 것과 같은 길로 보낸다:
-   * 사후정산 칸이면 읽어서 사후정산을 올리고(runAfter), 여비증빙 송부 칸이면 그 칸의 증빙 넣기와 같다(읽을 길이 있으면 읽어서 반영,
-   * 없으면 그대로 담기). 화면 글자는 그 PDF 를 읽을 때 같이 준다 — 웹페이지의 글자는 OCR 보다 정확하다.
+   * 웹페이지를 캡처해 증빙으로 넣는다(2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로").
+   * act 는 단추다 — 'tab' 은 보고 있는 탭을 통째로, 'part' 는 페이지 위에서 프레임(틀·상자)을 하나 이상 골라 그것만(고르는 중에 다시 누르면
+   * 그만둔다). 찍는 것은 공문 탭과 같다(webpick.js → src/pagecap.js). 페이지(고른 부분) 하나를 PDF 하나로 묶어(pagePdfs — 예약 확인 화면이
+   * 석 장이어도 증빙은 하나) 그 칸에 파일을 넣은 것과 같은 길로 보낸다: 사후정산 칸이면 읽어서 사후정산을 올리고(runAfter), 여비증빙 송부
+   * 칸이면 그 칸의 증빙 넣기와 같다(읽을 길이 있으면 읽어서 반영, 없으면 그대로 담기). 화면 글자는 그 PDF 를 읽을 때 같이 준다.
+   * 고르는 동안은 카드를 잠그지 않는다 — 찍기 시작할 때(onStart) 잠근다.
    */
-  async function captureFor(it, where, tabs) {
+  async function captureFor(it, where, act) {
     const trip = tripOf(it);
     if (!trip) return undefined;
     const a = st.after[trip.seq] || (st.after[trip.seq] = {});
     if (a.busy) return undefined;
-    Object.assign(a, { busy: true, error: '', stage: '' });
     const step = (text) => { a.stage = text; setStatus(text); paintList(); };
     let got = null;
     let docs = [];
     try {
-      got = await webPick.shoot(tabs, { today: attendToday(), onStatus: step });
+      got = await webPick.shoot(act, {
+        key: `${it.docNo}:${where}`, today: attendToday(), onStatus: step,
+        onStart: () => Object.assign(a, { busy: true, error: '', stage: '' }),
+      });
+      if (!got) return undefined;
       step('캡처한 페이지를 PDF 로 묶는 중…');
       const taken = (await evidence.list(it.docNo).catch(() => a.kept || [])).map((k) => k.name);
       docs = await pagePdfs(got.pages, { today: attendToday(), taken });
@@ -3071,7 +3053,7 @@ export function createAttendPanel({
     if (!it || st.busy) return undefined;
     // 목록을 손수 누르기 시작했으면 홈 카드의 부탁(보내기)은 잊는다 — 뒤늦게 다른 카드가 펴지거나 팝업이 뜨지 않게.
     st.seek = null;
-    // 증빙 넣는 곳 아래의 웹페이지 캡처 단추와 탭 목록(webpick.js).
+    // 증빙 넣는 곳 아래의 웹페이지 캡처 단추 둘(webpick.js).
     const pick = webPick.click(e);
     if (pick) return onPick(pick, it, target);
     const btn = target.closest('button[data-act]');
@@ -3403,8 +3385,6 @@ export function createAttendPanel({
       e.preventDefault();
       input.parentElement.querySelector('button[data-act="ask-krw"]')?.click();
     });
-    // 증빙 넣는 곳 아래에 펴 둔 웹페이지 목록의 체크박스(webpick.js) — 카드를 다시 그리지 않고 고른 것만 맞춘다.
-    el.list.addEventListener('change', (e) => webPick.change(e));
     // 여비증빙 송부 칸의 글 칸(과제·계정, 받는 사람 찾기)과 파일 칸.
     for (const type of ['input', 'change']) {
       el.list.addEventListener(type, (e) => {

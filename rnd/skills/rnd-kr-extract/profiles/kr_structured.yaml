@@ -1,0 +1,108 @@
+# rnd-kr-extract 추출 프로파일 — 한국선급(KR) 구조화(YAML/JSON) 모드
+# ---------------------------------------------------------------------------
+# 용도: KR "연구개발 내용(02장) + 예산(08장)" 만 YAML/JSON 데이터로 구조화 추출.
+#   /rnd-kr-extract <입력> --profile <이 파일>   (또는 --format structured)
+# 무엇을 넣고 뺄지(섹션·필드 포함/제외)는 references/extract_fields.yaml 단일 출처.
+# 값의 모양(스키마)·예시는 references/structured_output.md 참조.
+# 무손실 마크다운 발췌가 필요하면 kr_default.yaml(--format markdown) 을 쓴다.
+# 변환은 항상 전체 문서(모든 장)를 먼저 하고(SKILL.md §1 "전체 변환 먼저"), 발췌만 아래 설정대로 좁힌다.
+# ---------------------------------------------------------------------------
+
+target:                          # KR 식별자 (kr_default 와 동일 — 검색어만 조정)
+  name: "한국선급"
+  abbr: "KR"
+  aliases:
+    - "사단법인 한국선급"
+    - "공동연구개발기관2"
+    - "KR"
+    - "Korean Register"
+    - "선급"
+  block_markers:
+    - "[공동연구개발기관2(한국선급)]"
+    - "[한국선급]"
+
+# 구조화 발췌 입력: 02장(연구개발 내용)·08장(예산) + (예산.연구실안전관리비 켜짐 시) 06장(안전관리비 계상근거).
+# ※ 변환 자체는 전체 문서(모든 장)를 먼저 한다 — 아래 extract/chapters 는 "발췌" 범위만 정한다.
+# 아래 extract 는 "어느 장을 (개발)발췌 입력으로 쓸지" 결정(구조화 섹션과 1:1).
+extract:
+  org_status:      false
+  objectives:      true          # 02 → 연구개발내용.목표
+  perf_targets:    true          # 02 → 연구개발내용.성능목표
+  outcome_kpi:     true          # 02 → 연구개발내용.성과지표
+  schedule:        true          # 02 → 연구개발내용.수행일정
+  deliverables:    true          # 02 → 연구개발내용.주요결과물
+  org_chart:       false
+  utilization:     false
+  certification:   false
+  safety_security: false
+  researchers:     false         # 예산.참여연구자인건비 로 08장에서 함께 처리
+  facilities:      false
+  budget:          true          # 08 → 예산.*
+  outsourcing:     false         # 예산.외주용역 으로 08장(8-3)에서 함께 처리
+  eval_response:   false
+
+chapters:
+  include: "auto"                # 발췌 대상: auto = 위 extract 가 가리키는 장(02·08). 변환은 전체 장(SKILL.md §1)
+  safety_cost_chapter: "06"      # 예산.연구실안전관리비(extract_fields) 켜지면 06장(안전관리비 계상)도 발췌 입력에 자동 합류
+  exclude: []
+  context_full: []               # 구조화 모드는 전체본 장 없음
+
+# 장별 페이지 범위(문서마다 다름 — 전체 변환 시 채운다). 아래는 최근 처리 문서
+#   "MW급 10kV 고전압 직류 시스템용 반도체 차단기 개발"(협약용 R1, 2026.05.20, PDF 254p)의 PDF 절대 페이지.
+# 용도: 전체 변환(SKILL.md §1) 시 장 경계·발췌 입력 장 식별·재현. 새 문서면 그 문서 기준으로 갱신한다.
+chapter_page_ranges:
+  unit: "PDF 절대 페이지(1-base)"
+  document: "MW급 10kV 고전압 직류 시스템용 반도체 차단기 개발 (협약용 R1, 254p)"
+  ranges:
+    "00_표지_요약문_목차": [1, 8]
+    "01_필요성": [9, 19]
+    "02_목표및내용": [20, 95]          # 발췌(연구개발내용): 2-1 성능목표·성과지표 / 2-2 개발목표·개발내용 / 2-3 수행일정·주요결과물
+    "03_추진전략_추진체계": [96, 104]
+    "04_활용방안_기대효과": [105, 108]
+    "05_사업화전략": [109, 137]
+    "06_안전보안조치": [138, 172]      # 발췌(연구실안전관리비 계상): 한국선급 블록 144~146, '안전관리비 계상' 용도 = 145
+    "07_연구개발기관현황": [173, 198]
+    "08_연구개발비": [199, 226]        # 발췌(예산): 8-1 = 199~200, 8-2 KR 총괄표+인건비현황 = 206, 8-3 세부 = 211~226
+    "별첨": [227, 254]                 # 별첨2 시약재료 228~244, 별첨3 외주용역(KR 발주) 245~246, 별첨4 TRL 247~248, 별첨6 249, 별첨7 250, 별첨9 251~254
+
+output:
+  per_chapter: true              # 장별 KR 발췌본(무손실 정본·추적성)은 유지
+  combined: false                # 마크다운 결합본은 만들지 않음(구조화본이 결합본 역할)
+  base_dir: "RND_PROJECT"
+  source_dir: "_source"
+  work_subdir: "{project_name}"
+  project_abbr: ""
+  project_name: ""
+  stage: ""
+  combined_name: "KR_{project_name}.md"   # (markdown 모드용 — 여기선 미사용)
+  format: "structured"           # markdown | structured  ★구조화 모드
+  structured:
+    format: "yaml"               # yaml(기본) | json | both
+    fields_policy: "references/extract_fields.yaml"  # 포함/제외 SSOT(스킬 폴더 기준)
+    schema_doc: "references/structured_output.md"    # 값 모양·예시
+    sections: ["연구개발내용", "예산"]                # 추출 섹션
+    out_name: "KR_{project_name}.yaml"               # 구조화 결합본명(.json 은 확장자만 교체)
+
+# 이력(rev 추적)은 별도 스킬 /rnd-kr-history 가 담당(완전 분리).
+#   이 프로파일은 "이력 추적을 충족하는 스냅샷"을 만드는 데까지만 책임진다.
+#   /rnd-kr-history 의 track=[budget, researchers, objectives] 가 충족되려면
+#   extract_fields.yaml 에서 아래 필드가 켜져 있어야 한다(매칭):
+#     budget       ← 예산.비목별 (+ 예산.외주용역)
+#     researchers  ← 예산.참여연구자인건비   (위 extract.researchers:false 는 07장 명단 얘기;
+#                     인건비 계상 데이터는 08장 8-2 현황표 → 예산.참여연구자인건비 로 들어옴)
+#     objectives   ← 연구개발내용.성능목표
+#   스냅샷 생성 후:  /rnd-kr-history --project <과제이름>
+
+options:
+  lossless: true                 # 발췌본은 무손실. 구조화는 그 발췌본을 값으로 정규화(수치화)
+  reuse_md_cache: true
+  read_max_pages: 4
+  emit_analysis_memo: true
+  move_source: true
+  cleanup_intermediate: true
+  intermediate_globs:
+    - "_toc_dump.txt"
+    - "_pagecheck.txt"
+    - "_img_manifest.json"
+    - "_extract_imgs.py"
+    - "*_md/.markdownlint.jsonc"

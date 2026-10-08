@@ -4,7 +4,7 @@
 // 전자결재에는 올리지 않는다(2026-10-07) — 제목·본문을 만들어 복사하게 하고 새 공문 창을 열어 줄 뿐이다. 본문 편집기(DEXT5)는
 // 스크립트로 넣은 글을 저장하지 않아, 사람이 붙여 넣는 것이 지금은 가장 확실한 길이다(src/gongmun.js 머리말).
 //
-//   갈래(구매·교육·출장) → 문서 넣기(캡처 붙여넣기·끌어다 놓기·고르기·열어 둔 웹페이지 골라 통째로 캡처) → 읽은 칸 고치기·과제 고르기 → 제목·본문 복사 → 새 공문 열기
+//   갈래(구매·교육·출장) → 문서 넣기(캡처 붙여넣기·끌어다 놓기·고르기·보고 있는 탭 통째로 캡처·웹페이지의 부분 골라 캡처) → 읽은 칸 고치기·과제 고르기 → 제목·본문 복사 → 새 공문 열기
 //
 // 양식(eclass 양식·제목 틀·본문 틀)과 사전 설정(부서·부서장·참조자·과제 다섯 개)은 이 탭 아래의 접힌 칸에서 고친다.
 
@@ -13,11 +13,12 @@ import {
   KIND_KEY, PRESET_KEY, PROJECTS_KEY, TEMPLATES_KEY, DRAFT_KEY,
   templateOf, templateEdited, templatePatch, normalizePreset, normalizeProjects, fromRecord, blankDraft, summaryOf,
   overLimit, approvalLine, lineText, compose, needs, bodyHtml, draftUrl, attachName, won, moneyOf, mergeSetup, ROLE_LABEL,
-  mergeDraft, applyReason, REASON_KEYS, EMPTY_ROW, eduModeOf, spreadParts,
+  mergeDraft, applyReason, REASON_KEYS, EMPTY_ROW, eduModeOf, spreadParts, attachWithCut,
 } from './src/gongmun.js';
 import { gongmunSmart, gongmunSetupSmart, gongmunReasonSmart } from './src/llm.js';
 import { readSlots } from './src/pagecap.js';
-import { createWebPick } from './webpick.js';
+import { cutBoxes, cutDrop, cutName, cutQuote, CUT_PAD, PAD_STEP, MAX_PAD } from './src/quotecut.js';
+import { createWebPick, pickButton } from './webpick.js';
 
 const FILE_LIMIT = 10 * 1024 * 1024;
 /** 한 번에 읽는 장 수. 로컬 CLI 다리는 여섯 장까지 받는다(native/host.mjs). 웹페이지 캡처의 그 밖의 장은 첨부에만 넣는다. */
@@ -37,15 +38,15 @@ const formLabel = (id) => FORMS.find((f) => f.id === id)?.label || id;
 /**
  * @param {{$:Function, escapeHtml:Function, logEvent:Function, ai:() => {apiKey:string, cli:boolean}, me?:() => string,
  *   copyText?:(text:string) => Promise<boolean>, flash?:(btn:HTMLElement, text:string, ms?:number) => void,
- *   listTabs?:() => Promise<object[]>, capture?:(tabs: object[], opts: {today: string, onProgress: Function}) => Promise<object>}} deps
- *   listTabs 는 이 창에 열어 둔 웹페이지 탭들, capture 는 고른 탭들을 통째로 찍는 길(src/pagecap.js) — 탭 고르기 칸(webpick.js)에 넘긴다
+ *   webcap?:{front?:Function, start?:Function, parts?:Function}}} deps
+ *   webcap 은 웹페이지를 찍는 길(src/pagecap.js — 보고 있는 탭 통째로·페이지 위의 부분 고르기·고른 부분 찍기) — 캡처 단추(webpick.js)에 넘긴다
  */
-export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '', copyText = defaultCopy, flash = () => {}, listTabs, capture }) {
+export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '', copyText = defaultCopy, flash = () => {}, webcap = {} }) {
   const el = {
     root: $('gongmun'), kinds: $('gmKinds'), chat: $('gmChat'), chatInput: $('gmChatInput'), chatGo: $('gmChatGo'), chatLog: $('gmChatLog'),
-    intake: $('gmIntake'), file: $('gmFile'), dropLead: $('gmDropLead'), capture: $('gmCapture'), tabs: $('gmTabs'),
+    intake: $('gmIntake'), file: $('gmFile'), dropLead: $('gmDropLead'), capture: $('gmCapture'),
     fileName: $('gmFileName'), manual: $('gmManual'), soon: $('gmSoon'), status: $('gmStatus'),
-    draft: $('gmDraft'), source: $('gmSource'), items: $('gmItems'), limit: $('gmLimit'), projects: $('gmProjects'), projInfo: $('gmProjInfo'),
+    draft: $('gmDraft'), source: $('gmSource'), cut: $('gmCut'), items: $('gmItems'), limit: $('gmLimit'), projects: $('gmProjects'), projInfo: $('gmProjInfo'),
     fields: $('gmFields'), line: $('gmLine'), need: $('gmNeed'), reset: $('gmReset'),
     doc: $('gmDoc'), formName: $('gmFormName'), title: $('gmTitle'), body: $('gmBody'), edited: $('gmEdited'), regen: $('gmRegen'),
     copyTitle: $('gmCopyTitle'), copyBody: $('gmCopyBody'), open: $('gmOpen'), savePdf: $('gmSavePdf'), steps: $('gmSteps'),
@@ -54,8 +55,8 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     presetBox: $('gmPresetBox'), presetState: $('gmPresetState'), dept: $('gmDept'), head: $('gmHead'), refs: $('gmRefs'),
     projList: $('gmProjList'), projAdd: $('gmProjAdd'), projCount: $('gmProjCount'),
   };
-  // 웹페이지 골라 통째로 캡처 — 탭 고르기 칸은 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js, 2026-10-08 사용자 지정).
-  const pick = createWebPick({ escapeHtml, listTabs, capture });
+  // 웹페이지 캡처 단추 둘(보고 있는 탭 · 부분 골라 캡처) — 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js, 2026-10-08 사용자 지정).
+  const pick = createWebPick(webcap);
   const PICK_KEY = 'gongmun';
   const st = {
     kind: 'purchase', loaded: false, busy: false, capturing: false, ready: true, chatBusy: false, chat: [], reasonBusy: false,
@@ -64,7 +65,8 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     projects: [], rows: [],
     // 갈래마다 고친 양식만 담는다(src/gongmun.js 의 templatePatch).
     templates: {},
-    // 갈래마다 쓰고 있는 것 — { draft, source, notes, project(과제명), title·body(직접 고쳤으면 그 글, 아니면 null), files(읽은 파일 — 저장하지 않는다) }
+    // 갈래마다 쓰고 있는 것 — { draft, source, notes, project(과제명), title·body(직접 고쳤으면 그 글, 아니면 null), files(읽은 파일 — 저장하지 않는다),
+    //   parts(읽기가 가린 파일마다의 종류), cut(구매 — 가격과 그 둘레를 오린 견적서, src/quotecut.js — 저장하지 않는다) }
     work: {},
     lastProject: '',
   };
@@ -84,13 +86,13 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   const timers = {};
   const later = (key, fn) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, SAVE_WAIT_MS); };
 
-  /** 쓰고 있는 초안을 남긴다 — 패널을 닫았다 열어도 이어 쓴다. 읽은 파일(그림)은 크니 남기지 않는다. */
+  /** 쓰고 있는 초안을 남긴다 — 패널을 닫았다 열어도 이어 쓴다. 읽은 파일(그림)과 오린 견적서는 크니 남기지 않는다. */
   function saveWork() {
     later('work', () => {
       const out = { lastProject: st.lastProject };
       for (const k of KIND_ORDER) {
         if (!st.work[k]) continue;
-        const { files, ...rest } = st.work[k];
+        const { files, cut, ...rest } = st.work[k];
         out[k] = rest;
       }
       chrome.storage.local.set({ [DRAFT_KEY]: out });
@@ -135,8 +137,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     const had = w?.files?.length || 0;
     el.dropLead.textContent = st.capturing ? '캡처하는 중…' : st.busy ? '읽는 중…' : w ? k.more : k.ask;
     el.file.disabled = st.busy || st.capturing;
-    el.capture.disabled = st.busy || st.capturing;
-    pick.sync(el.tabs, { busy: st.busy || st.capturing });
+    el.capture.innerHTML = pickButton({ picking: pick.picking(PICK_KEY), disabled: st.busy || st.capturing });
     el.manual.disabled = st.busy;
     el.manual.hidden = !!w;
     el.fileName.textContent = !st.ready ? 'Claude 가 연결되지 않아 문서를 읽을 수 없습니다 — 문서 없이 쓰기는 됩니다'
@@ -248,7 +249,13 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       const got = await gongmunSmart({ files: toRead, text: allText }, { kind, today: today() }, { apiKey, useNative: cli });
       const rec = { ...got.record, parts: spreadParts(got.record.parts, all) };
       if (rec.docType === 'unknown') throw new Error(`품의에 넣을 문서로 보이지 않습니다 — ${rec.summary}`);
-      const { draft: fresh, notes } = fromRecord(kind, rec, { me: me(), files: all.map((f) => f.name) });
+      // 구매 — 쇼핑몰 화면이면 읽기가 짚은 가격과 그 둘레(quoteArea)를 오려 견적서 한 장으로 첨부한다(src/quotecut.js, 2026-10-08 사용자 지정).
+      // 앞서 원래 장으로 되돌려 두었으면 더 넣어 다시 읽어도 그대로 둔다.
+      const cutNotes = [];
+      const cut = kind === 'purchase'
+        ? await makeCut(all, cutBoxes(rec.quoteArea, all, rec.parts), { on: prev?.cut?.on ?? true, notes: cutNotes }) : null;
+      const { draft: fresh, notes } = fromRecord(kind, rec, { me: me(), files: all.map((f) => f.name), cut });
+      notes.push(...cutNotes);
       if (kind === 'purchase' && rec.docType === 'course') notes.push('교육 안내문으로 보입니다 — 교육 품의라면 교육 갈래에 다시 넣어 주세요');
       if (capture?.notes) notes.push(...capture.notes);
       if (held) notes.push(`캡처 ${picked.length}장 가운데 ${front}${picked.length - held}장만 읽었습니다 — 나머지 ${held}장은 첨부 PDF 에만 들어갑니다`);
@@ -257,7 +264,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       const touched = prev?.touched || [];
       st.work[kind] = {
         draft: prev ? mergeDraft(prev.draft, fresh, touched) : fresh, notes, touched, project: defaultProject(prev),
-        title: prev?.title ?? null, body: prev?.body ?? null, files: all, text: allText,
+        title: prev?.title ?? null, body: prev?.body ?? null, files: all, text: allText, parts: rec.parts, cut,
         source: { label: what, from: all.length ? filesLine(all) : '붙여 넣은 글', via: got.via, summary: rec.summary },
       };
       saveWork();
@@ -281,59 +288,46 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   }
 
   /**
-   * 캡처할 웹페이지 고르기를 펼친다(2026-10-08 사용자 지정) — 활성 탭만 찍으면 옆에 띄워 둔 메일함 같은 엉뚱한 화면이 찍혀서,
-   * 이 창에 열어 둔 웹페이지 탭을 늘어놓고 전체 또는 하나 이상 눌러 고르게 한다. 아무것도 미리 고르지 않는다(탭이 하나뿐이면 그것) —
-   * 받은 편지함 같은 화면이 모르는 새 첨부에 들어가지 않게. 다시 누르면 접는다.
+   * 견적서를 오린다(구매 — src/quotecut.js) — 칸(cutBoxes 가 고른 것)이 없으면 null. 못 오리면 notes 에 까닭을 적고 null 이다(넣은 장 그대로 첨부).
+   * name 은 첨부 목록에 쓰는 오린 그림의 이름, drop 은 첨부에서 빠지는 장(오려 낸 화면과 같은 묶음), on 은 오린 것을 첨부하는가(원래 장으로면 false).
+   * @returns {Promise<{name: string, file: object, boxes: object[], drop: string[], pad: number, on: boolean}|null>}
    */
-  async function openPicker() {
-    const k = KINDS[st.kind];
-    if (!k.reads || st.busy || st.capturing) return;
+  async function makeCut(files, boxes, { pad = CUT_PAD, on = true, notes = [] } = {}) {
+    if (!boxes.length) return null;
     try {
-      if (await pick.toggle(PICK_KEY)) setStatus('');
+      const blob = await cutQuote(files, boxes, { pad });
+      const name = cutName(today(), files.map((f) => f.name));
+      return { name, file: { name, type: 'image/png', size: blob.size, dataUrl: await readFile(blob) }, boxes, drop: cutDrop(boxes, files), pad, on };
     } catch (err) {
-      return setStatus(err.message, 'error');
+      notes.push(`견적서 부분을 오리지 못했습니다 — 넣은 장 그대로 첨부합니다(${err.message})`);
+      return null;
     }
-    paintPicker();
   }
 
-  function closePicker() {
-    pick.close();
-    paintPicker();
-  }
-
-  /** 탭 목록을 그린다 — 줄마다 체크박스·제목·사이트, 맨 위에 전체(webpick.js). */
-  function paintPicker() {
-    const open = pick.isOpen(PICK_KEY);
-    el.capture.setAttribute('aria-expanded', String(open));
-    el.tabs.classList.toggle('hidden', !open);
-    el.tabs.innerHTML = open ? pick.inner({ busy: st.busy || st.capturing }) : '';
-    pick.sync(el.tabs, { busy: st.busy || st.capturing });
-  }
-
-  const onPickerChange = (e) => pick.change(e, { busy: st.busy || st.capturing });
-
-  function onPickerClick(e) {
+  /** 캡처 단추를 눌렀을 때(webpick.js) — 보고 있는 탭이면 통째로, 부분이면 페이지 위에서 고르게 한다(고르는 중에 다시 누르면 그만둔다). */
+  function onCaptureClick(e) {
     const r = pick.click(e);
-    if (r?.act === 'close') paintPicker();
-    else if (r?.act === 'go') captureTab(r.tabs);
+    if (r) captureTab(r.act);
   }
 
   /**
-   * 고른 웹페이지들을 통째로 캡처해 읽는다(2026-10-08 사용자 지정) — 교육 안내 페이지를 조각조각 캡처해 붙여 넣지 않아도 된다.
-   * 찍는 일은 src/pagecap.js 가 한다(사이트 접근 권한 묻기 → 고른 탭을 차례로 앞에 두고 한 화면씩 찍기 → A4 장으로 자르기 → 화면 글자 →
-   * 보던 탭으로 돌아오기). 여기서는 그 장들과 글자를 문서 넣기와 같은 길(intake)로 읽힌다 — 탭마다 한 묶음이고, 읽은 뒤 첨부 PDF 저장을
-   * 누르면 그 장들이 문서(교육 내용 등)마다 PDF 하나가 된다.
+   * 웹페이지를 캡처해 읽는다(2026-10-08 사용자 지정) — 교육 안내 페이지를 조각조각 캡처해 붙여 넣지 않아도 된다. act 는 단추다:
+   * 'tab' 은 보고 있는 탭을 통째로, 'part' 는 페이지 위에서 프레임(틀·상자)을 하나 이상 골라 그것만("탭이 아니라 프레임으로 선택").
+   * 찍는 일은 src/pagecap.js 가 한다(사이트 접근 권한 묻기 → 한 화면씩 찍기 → A4 장으로 자르기 → 화면 글자). 여기서는 그 장들과 글자를
+   * 문서 넣기와 같은 길(intake)로 읽힌다 — 페이지(고른 부분)마다 한 묶음이고, 읽은 뒤 첨부 PDF 저장을 누르면 그 장들이 문서(교육 내용 등)마다
+   * PDF 하나가 된다. 고르는 동안은 잠그지 않는다 — 찍기 시작할 때(onStart) 잠근다.
    */
-  async function captureTab(tabs) {
+  async function captureTab(act) {
     const k = KINDS[st.kind];
     if (!k.reads || st.busy || st.capturing) return;
-    st.capturing = true;
-    closePicker();
-    paintIntake();
     let got = null;
     try {
-      got = await pick.shoot(tabs, { today: today(), onStatus: (text) => setStatus(text) });
-      logEvent('gongmun', true, `웹페이지 캡처 · ${got.what}`);
+      got = await pick.shoot(act, {
+        key: PICK_KEY, today: today(),
+        onStatus: (text) => { setStatus(text); paintIntake(); },
+        onStart: () => { st.capturing = true; paintIntake(); },
+      });
+      if (got) logEvent('gongmun', true, `웹페이지 캡처 · ${got.what}`);
     } catch (err) {
       setStatus(err.message, 'error');
       logEvent('gongmun', false, `웹페이지 캡처 실패 · ${err.message}`);
@@ -478,6 +472,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     el.draft.classList.toggle('hidden', !show);
     if (!show) {
       el.doc.classList.add('hidden');
+      paintCut();
       return;
     }
     const src = w.source || {};
@@ -488,6 +483,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       .map((a) => `${a.label}${a.files.length > 1 ? ` ${a.files.length}장` : ''}`).join(' · ');
     el.source.innerHTML = `<span>${head}</span>${attach ? `<span class="gm-attach">첨부 · ${escapeHtml(attach)}</span>` : ''}`
       + (w.notes || []).map((n) => `<span class="gm-note">${escapeHtml(n)}</span>`).join('');
+    paintCut();
     const items = st.kind === 'purchase' ? w.draft.items || [] : [];
     el.items.innerHTML = items.map((it) => {
       const meta = [it.spec, it.qty != null ? `${it.qty.toLocaleString('ko-KR')}${it.unit || ''}` : '', won(it.amount)].filter(Boolean).join(' · ');
@@ -495,6 +491,53 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     }).join('');
     paintProjects();
     paintLive();
+  }
+
+  /**
+   * 오린 견적서(구매) — 오린 그림과 어디서 오렸는지. 가격·상품명이 잘렸으면 더 넓게(둘레를 더 넣어 다시 오린다), 마땅치 않으면 원래 장으로
+   * (넣은 장 그대로 첨부 — 그러면 가격 부분만으로 돌아가는 단추가 선다).
+   */
+  function paintCut() {
+    const c = st.kind === 'purchase' ? cur()?.cut : null;
+    el.cut.classList.toggle('hidden', !c);
+    if (!c) {
+      el.cut.innerHTML = '';
+      return;
+    }
+    const from = [...new Set(c.boxes.map((b) => b.file))].join(', ');
+    el.cut.innerHTML = c.on
+      ? `<div class="gm-cut-head"><strong>견적서</strong><span>가격과 그 둘레를 오렸습니다 — ${escapeHtml(from)}</span></div>`
+        + `<img src="${escapeHtml(c.file.dataUrl)}" alt="오린 견적서 — 가격과 그 둘레" />`
+        + '<div class="gm-cut-acts">'
+        + `<button type="button" class="ghost small" data-cut="wide" title="가격이나 상품명이 잘렸으면 둘레를 더 넣어 다시 오립니다"${c.pad >= MAX_PAD ? ' disabled' : ''}>더 넓게</button>`
+        + '<button type="button" class="ghost small" data-cut="off" title="오리지 않고 넣은 장 그대로 첨부합니다">원래 장으로</button></div>'
+      : '<div class="gm-cut-head"><strong>견적서</strong><span>넣은 장 그대로 첨부합니다</span></div>'
+        + '<div class="gm-cut-acts"><button type="button" class="ghost small" data-cut="on" title="가격과 그 둘레만 오린 그림을 견적서로 첨부합니다">가격 부분만 첨부</button></div>';
+  }
+
+  /** 오린 견적서의 단추 — 더 넓게·원래 장으로·가격 부분만 첨부. 첨부 목록(본문 ※ 첨부·PDF)이 따라 바뀐다. */
+  async function onCutClick(e) {
+    const btn = e.target instanceof Element ? e.target.closest('[data-cut]') : null;
+    const kind = st.kind;
+    const w = cur();
+    if (!btn || btn.disabled || !w?.cut) return;
+    if (btn.dataset.cut === 'wide') {
+      btn.disabled = true;
+      const notes = [];
+      const next = await makeCut(w.files || [], w.cut.boxes, { pad: Math.min(w.cut.pad + PAD_STEP, MAX_PAD), notes });
+      if (st.work[kind] !== w) return;   // 그 사이 비웠거나 다시 읽었다
+      if (!next) {
+        btn.disabled = false;
+        setStatus(notes[0], 'error');
+        return;
+      }
+      w.cut = next;
+    } else {
+      w.cut.on = btn.dataset.cut === 'on';
+    }
+    w.draft.attach = attachWithCut(kind, w.parts, (w.files || []).map((f) => f.name), w.cut);
+    saveWork();
+    if (st.kind === kind) paintDraft();
   }
 
   function paintProjects() {
@@ -725,9 +768,16 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   }
 
   /** 읽은 문서를 PDF 하나로 묶어 내려받는다 — 전자결재 첨부로 쓴다(원본 ea_approval 도 견적서를 PDF 로 바꿔 붙인다). */
+  /** 첨부할 파일 — 견적서를 오렸으면(cut) 오린 그림이 앞에 오고, 오려 낸 화면의 장(cut.drop)은 빠진다. */
+  function attachFiles(w) {
+    const files = w?.files || [];
+    const c = w?.cut;
+    return c?.on ? [c.file, ...files.filter((f) => !c.drop.includes(f.name))] : files;
+  }
+
   /** 첨부 목록의 문서마다 묶을 파일. 어느 묶음에도 없는 파일은 갈래의 기본 문서로 묶는다. */
   function pdfGroups(w) {
-    const files = w?.files || [];
+    const files = attachFiles(w);
     if (!files.length) return [];
     const groups = (w.draft.attach || []).map((a) => ({ label: a.label, files: files.filter((f) => a.files?.includes(f.name)) })).filter((g) => g.files.length);
     const rest = files.filter((f) => !groups.some((g) => g.files.includes(f)));
@@ -985,11 +1035,10 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     el.chatGo.addEventListener('click', runChat);
     el.chatInput.addEventListener('keydown', onChatKey);
     el.chatInput.addEventListener('input', growChat);
-    el.capture.addEventListener('click', openPicker);
-    el.tabs.addEventListener('change', onPickerChange);
-    el.tabs.addEventListener('click', onPickerClick);
+    el.capture.addEventListener('click', onCaptureClick);
     el.manual.addEventListener('click', startManual);
     el.reset.addEventListener('click', resetWork);
+    el.cut.addEventListener('click', onCutClick);
     el.projects.addEventListener('click', onProjectClick);
     el.projInfo.addEventListener('click', onProjectClick);
     el.fields.addEventListener('input', onFieldInput);

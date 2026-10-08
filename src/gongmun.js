@@ -441,6 +441,17 @@ export function attachList(kind, parts = [], files = []) {
 }
 
 /**
+ * 견적서를 오렸으면(구매 — 쇼핑몰 화면에서 가격과 그 둘레만, src/quotecut.js) 첨부는 오린 그림이 견적서로 앞에 오고, 오려 낸 화면(같은 묶음의
+ * 장들 — cut.drop)은 빠진다(2026-10-08 사용자 지정). 오린 것을 껐으면(on: false — 원래 장으로) 넣은 파일 그대로다.
+ * @param {{name: string, drop?: string[], on?: boolean}|null} cut
+ */
+export function attachWithCut(kind, parts = [], files = [], cut = null) {
+  if (!cut?.on || !cut.name) return attachList(kind, parts, files);
+  const drop = new Set(cut.drop || []);
+  return attachList(kind, [{ file: cut.name, kind: 'quote' }, ...(parts || [])], [cut.name, ...(files || []).filter((n) => !drop.has(n))]);
+}
+
+/**
  * 읽기가 가린 파일 종류(parts)를 같은 묶음의 나머지 파일에도 편다 — 웹페이지를 통째로 캡처한 장들(src/pagecap.js)은 한 묶음(group)인데,
  * 읽기에는 앞의 몇 장만 보내고 나머지는 첨부에만 넣으니(gongmunpanel.js 의 MAX_FILES) 그 장들은 parts 에 없다. 묶음 안에서 앞서 가린
  * 종류를 이어 받는다(앞 장이 교육 내용이면 뒤 장도 교육 내용). 묶음에 가린 것이 하나도 없으면 그대로 둔다 — 갈래의 기본 문서가 된다.
@@ -472,15 +483,15 @@ export function attachBlock(attach) {
  * 읽은 문서(input.yaml 의 gongmun 기록)로 갈래의 초안을 만든다. 화면의 칸이 이것을 들고, 사용자가 고친다.
  * @param {'purchase'|'edu'|'trip'} kind
  * @param {object} rec 관문(src/input.js structure)을 지난 기록
- * @param {{me?: string, files?: string[]}} [ctx] files 는 읽은 파일 이름 — 첨부 목록이 된다
+ * @param {{me?: string, files?: string[], cut?: object|null}} [ctx] files 는 읽은 파일 이름 — 첨부 목록이 된다. cut 은 오린 견적서(attachWithCut)
  * @returns {{draft: object, notes: string[]}}
  */
-export function fromRecord(kind, rec, { me = '', files = [] } = {}) {
+export function fromRecord(kind, rec, { me = '', files = [], cut = null } = {}) {
   const r = rec && typeof rec === 'object' ? rec : {};
   const notes = [];
   const krw = !r.currency || r.currency === 'KRW';
   if (!krw) notes.push(`${r.currency} 문서입니다 — 합계를 원화로 고쳐 주세요`);
-  const attach = attachList(kind, r.parts, files);
+  const attach = attachWithCut(kind, r.parts, files, cut);
   if (kind === 'edu') {
     const fee = Number.isFinite(r.total) ? r.total : Number.isFinite(r.supply) && Number.isFinite(r.vat) ? r.supply + r.vat : null;
     if (fee == null) notes.push('교육비를 읽지 못했습니다 — 직접 적어 주세요');

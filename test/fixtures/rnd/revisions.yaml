@@ -1,0 +1,25 @@
+# 개정 레지스트리 — 검사용 가짜
+project: TEST                     # 시험용 직류 차단기 개발
+연차: 1차년도
+revisions:
+  - rev: r0
+    date: "2026-05-22"
+    type: 최초협약
+    reason: 최초 기준선
+    source: rev안_1차년도_rev01.pdf
+    status: 확정
+    적재: [researchers, budget]
+  - rev: r1
+    date: "2026-06-29"
+    type: 연차변경
+    reason: 이몽룡 수석 하차·잔여 인건비를 홍길동·성춘향이 흡수
+    source: rev안_1차년도_rev01.pdf
+    status: 확정
+    적재: [researchers]
+  - rev: r2
+    date: "2026-07-15"
+    type: 계획수정
+    reason: 연구활동비→연구시설·장비비 10,000 재배분(총액 불변)
+    source: rev안_1차년도_rev01.pdf
+    status: 검토중
+    적재: [budget]

@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 1650" width="960" height="1650" font-family="-apple-system, 'Segoe UI', 'Malgun Gothic', Roboto, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#37474f"/>
+    </marker>
+    <marker id="arrowScript" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#00838f"/>
+    </marker>
+    <marker id="arrowKeep" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { font-size: 22px; font-weight: 700; fill: #1a237e; }
+    .subtitle { font-size: 12.5px; fill: #546e7a; }
+    .boxh     { font-size: 14px; font-weight: 700; }
+    .boxt     { font-size: 11.5px; }
+    .small    { font-size: 10.5px; fill: #455a64; }
+    .stage    { font-size: 12px; font-weight: 700; fill: #1565c0; }
+    .edge     { stroke: #37474f; stroke-width: 1.6; fill: none; }
+    .edgeScript { stroke: #00838f; stroke-width: 1.6; fill: none; stroke-dasharray: 6 3; }
+    .edgeKeep { stroke: #2e7d32; stroke-width: 1.6; fill: none; stroke-dasharray: 6 3; }
+    .edgelbl  { font-size: 10.5px; fill: #37474f; }
+    .edgelblS { font-size: 10.5px; fill: #00838f; }
+    .legtxt   { font-size: 11px; fill: #37474f; }
+    .mono     { font-family: 'Consolas', 'Courier New', monospace; }
+  </style>
+
+  <!-- ===== Title ===== -->
+  <text x="40" y="42" class="title">rnd-export-latest — 과제별 최신 구조화 스냅샷 복사</text>
+  <text x="40" y="63" class="subtitle">대상 확정·가드 → 소스 스캔 → 최신 차년도 → 최고 rev → 이름 정규화 → 복사(copy2) → 요약 → ⑧ ea_meta 동반 유지.  선택·복사·메타는 export_latest.py 로 위임 · 원본은 이동·삭제 없이 복사만.</text>
+
+  <!-- ===== Legend ===== -->
+  <g transform="translate(40, 78)">
+    <rect x="0"   y="0" width="16" height="12" rx="2" fill="#fff8e1" stroke="#f9a825"/>
+    <text x="22"  y="10" class="legtxt">입력(인자·플래그)</text>
+    <rect x="160" y="0" width="16" height="12" rx="2" fill="#e3f2fd" stroke="#1976d2"/>
+    <text x="182" y="10" class="legtxt">처리 단계</text>
+    <rect x="270" y="0" width="16" height="12" rx="2" fill="#e0f7fa" stroke="#00838f"/>
+    <text x="292" y="10" class="legtxt">스크립트(위임)</text>
+    <rect x="400" y="0" width="16" height="12" rx="2" fill="#e8f5e9" stroke="#388e3c"/>
+    <text x="422" y="10" class="legtxt">산출물(복사본)</text>
+    <line x1="530" y1="6" x2="560" y2="6" stroke="#2e7d32" stroke-width="1.6" stroke-dasharray="6 3"/>
+    <text x="566" y="10" class="legtxt" fill="#2e7d32">원본 보존(읽기)</text>
+    <rect x="670" y="0" width="16" height="12" rx="2" fill="#fff3e0" stroke="#ef6c00"/>
+    <text x="692" y="10" class="legtxt">설정파일(export.config.yaml)</text>
+  </g>
+
+  <!-- ===== ① 입력값(인자·설정파일) — 두 갈래 소스 → 우선순위 병합 ===== -->
+  <text x="40" y="128" class="stage">① 입력값</text>
+  <text x="40" y="144" class="small">인자·설정파일</text>
+
+  <!-- (좌) CLI 인자 -->
+  <g>
+    <rect x="120" y="102" width="345" height="144" rx="8" fill="#fff8e1" stroke="#f9a825" stroke-width="1.6"/>
+    <text x="292" y="124" text-anchor="middle" class="boxh" fill="#e65100">CLI 인자(그때그때)</text>
+    <text x="292" y="143" text-anchor="middle" class="small mono">[대상폴더] --source &lt;경로&gt; --dry-run</text>
+    <text x="292" y="160" text-anchor="middle" class="small mono">--no-overwrite | --overwrite</text>
+    <text x="292" y="177" text-anchor="middle" class="small mono">--with-json | --no-json</text>
+    <text x="292" y="194" text-anchor="middle" class="small"><tspan class="mono" font-weight="700">--overwrite·--no-json</tspan> = 설정 true 일회성 반전</text>
+    <text x="292" y="211" text-anchor="middle" class="small"><tspan class="mono" font-weight="700">--dry-run</tspan> 은 CLI 전용(설정에 없음)</text>
+    <text x="292" y="228" text-anchor="middle" class="small">--source 미지정 → 스킬 기준 RND_PROJECT</text>
+  </g>
+
+  <!-- (우) 설정파일 export.config.yaml -->
+  <g>
+    <rect x="495" y="102" width="345" height="144" rx="8" fill="#fff3e0" stroke="#ef6c00" stroke-width="1.6"/>
+    <text x="667" y="124" text-anchor="middle" class="boxh" fill="#e65100">설정파일 <tspan class="mono">export.config.yaml</tspan>(고정·스킬 안)</text>
+    <text x="667" y="143" text-anchor="middle" class="small mono">dest · source · with_json · no_overwrite</text>
+    <text x="667" y="160" text-anchor="middle" class="small">탐색: <tspan class="mono">--config</tspan> &gt; 스킬폴더 &gt; 루트(구) &gt; cwd</text>
+    <text x="667" y="177" text-anchor="middle" class="small">값 타입 검증(문자열/불리언, 오류 키만 무시)</text>
+    <text x="667" y="194" text-anchor="middle" class="small">상대경로 <tspan class="mono">dest·source</tspan> = 설정파일 위치 기준</text>
+    <text x="667" y="211" text-anchor="middle" class="small">양식 <tspan class="mono">export.config.tpl.yaml</tspan>(③, 스킬·커밋)</text>
+    <text x="667" y="228" text-anchor="middle" class="small" fill="#c62828">→ 실값 <tspan class="mono">.yaml</tspan> = 스킬 안·머신별 → <tspan font-weight="700">.gitignore·.toolignore</tspan></text>
+  </g>
+
+  <!-- 두 소스 → 우선순위 병합 노드로 -->
+  <path class="edge" d="M292,246 L292,258 L470,258 L470,268" marker-end="url(#arrow)"/>
+  <path class="edge" d="M667,246 L667,258 L490,258 L490,268" marker-end="url(#arrow)"/>
+
+  <!-- 우선순위 병합 → 대상·옵션 확정 -->
+  <g>
+    <rect x="180" y="270" width="600" height="60" rx="8" fill="#fff8e1" stroke="#f9a825" stroke-width="1.8"/>
+    <text x="480" y="291" text-anchor="middle" class="boxh" fill="#e65100">우선순위 병합 → 대상·옵션 확정</text>
+    <text x="480" y="312" text-anchor="middle" class="small"><tspan class="mono" font-weight="700" fill="#c62828">CLI 인자</tspan> &gt; <tspan class="mono" font-weight="700" fill="#ef6c00">export.config.yaml</tspan> &gt; <tspan class="mono" font-weight="700">내장 기본 _export</tspan> · 설정 없어도 현행 동작(하위호환)</text>
+  </g>
+  <path class="edge" d="M480,330 L480,338" marker-end="url(#arrow)"/>
+
+  <!-- ===== 가드: 소스 트리 내부 대상 거부 (대상 확정 직후) ===== -->
+  <text x="40" y="370" class="stage" fill="#c62828">가드</text>
+  <text x="40" y="386" class="small" fill="#c62828">원본 보호</text>
+  <g>
+    <rect x="120" y="342" width="720" height="52" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="364" class="boxh" fill="#c62828">소스 트리 가드 — 대상이 소스 과제 트리 내부면 실행 거부 (exit 2)</text>
+    <text x="135" y="383" class="small">과제/차년도 폴더 하위·소스 루트 직속 = 거부(정규화 사본의 r0 원본 덮어쓰기 차단) · <tspan class="mono">_</tspan> 접두 예약폴더(<tspan class="mono">_export</tspan> 등)만 허용</text>
+  </g>
+  <path class="edge" d="M480,394 L480,402" marker-end="url(#arrow)"/>
+
+  <!-- ===== ② 소스 스캔 ===== -->
+  <text x="40" y="434" class="stage">② 소스 스캔</text>
+  <g>
+    <rect x="120" y="406" width="720" height="56" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="428" class="boxh" fill="#0d47a1">RND_PROJECT\ 아래 과제 폴더를 이름순 순회 (iter_projects)</text>
+    <text x="135" y="448" class="small"><tspan class="mono">_</tspan> 접두 예약 폴더(<tspan class="mono">_source</tspan>·<tspan class="mono">_export</tspan> 등)는 건너뜀 · 각 과제 폴더마다 아래 ③~⑥ 반복</text>
+  </g>
+  <path class="edge" d="M480,462 L480,494" marker-end="url(#arrow)"/>
+
+  <!-- ===== ③ 최신 차년도 선택 ===== -->
+  <text x="40" y="526" class="stage">③ 최신 차년도 선택</text>
+  <g>
+    <rect x="120" y="498" width="720" height="56" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="520" class="boxh" fill="#0d47a1">과제 안의 <tspan class="mono">N차년도</tspan> 하위폴더 중 N 최대 선택 (latest_year_dir)</text>
+    <text x="135" y="540" class="small">예: <tspan class="mono">1차년도·2차년도·3차년도</tspan> → <tspan font-weight="700" fill="#1565c0">3차년도</tspan> · 차년도 폴더가 없으면 과제 폴더 직속 <tspan class="mono">KR_*.yaml</tspan> 사용</text>
+  </g>
+  <path class="edge" d="M480,554 L480,586" marker-end="url(#arrow)"/>
+
+  <!-- ===== ④ 최고 rev 선택 ===== -->
+  <text x="40" y="618" class="stage">④ 최고 rev 선택</text>
+  <g>
+    <rect x="120" y="590" width="720" height="82" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="612" class="boxh" fill="#0d47a1">그 차년도의 <tspan class="mono">KR_*.yaml</tspan> 중 rev 가 가장 높은 1개 (pick_latest_yaml)</text>
+    <text x="135" y="632" class="small"><tspan class="mono">KR_{과제}_r{N}.yaml</tspan> = rev N · 접미사 없는 <tspan class="mono">KR_{과제}.yaml</tspan> = r0 (base)</text>
+    <text x="135" y="649" class="small">rev 우선 정렬, 동률이면 파일명순(안정) → 최댓값 채택.  <tspan font-weight="700" fill="#1565c0">최고 rev 가 이김.</tspan></text>
+    <text x="135" y="666" class="small"><tspan class="mono">_r{N}</tspan> 은 뗀 스템 = <tspan class="mono">KR_{과제폴더명}</tspan> 일 때만 rev 인정 (<tspan class="mono">_rev_match</tspan> — 과제명이 <tspan class="mono">_rN</tspan> 으로 끝나는 오인 방지)</text>
+  </g>
+  <path class="edge" d="M480,672 L480,704" marker-end="url(#arrow)"/>
+
+  <!-- ===== ⑤ 이름 정규화 ===== -->
+  <text x="40" y="736" class="stage">⑤ 이름 정규화</text>
+  <g>
+    <rect x="120" y="708" width="720" height="68" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="730" class="boxh" fill="#0d47a1"><tspan class="mono">_r{N}</tspan> 접미사 제거 → 출력명 <tspan class="mono">KR_{과제}.yaml</tspan> (normalized_name)</text>
+    <text x="135" y="749" class="small">예: <tspan class="mono">KR_..._차단기_개발_r1.yaml</tspan> → 출력명 <tspan class="mono">KR_..._차단기_개발.yaml</tspan> (내용은 그대로, 이름만 정규화)</text>
+    <text x="135" y="766" class="small">뗀 스템 = <tspan class="mono">KR_{과제폴더명}</tspan> 일 때만 접미사 제거 — rev 미인정 파일은 이름 그대로 복사</text>
+  </g>
+  <path class="edge" d="M480,776 L480,808" marker-end="url(#arrow)"/>
+
+  <!-- ===== ⑥ 복사(copy2) ===== -->
+  <text x="40" y="840" class="stage">⑥ 복사(copy2)</text>
+  <text x="40" y="856" class="small" fill="#2e7d32">원본 보존</text>
+  <g>
+    <rect x="120" y="812" width="720" height="74" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="834" class="boxh" fill="#0d47a1">선택 파일을 대상 폴더로 <tspan class="mono">shutil.copy2</tspan> — 기본 덮어쓰기</text>
+    <text x="135" y="853" class="small"><tspan class="mono">--no-overwrite</tspan>: 동일명 있으면 스킵 · <tspan class="mono">--with-json</tspan>: 짝 <tspan class="mono">.json</tspan> 도 함께 복사 · <tspan class="mono">--dry-run</tspan>: 실제 복사 없이 선택만</text>
+    <text x="135" y="873" class="small" fill="#c62828" font-weight="700">★ 원본은 절대 이동·삭제하지 않음 — copy 만 · 소스 트리 내부 대상은 시작 시 거부(가드) · 사본 이름 충돌 시 경고</text>
+  </g>
+  <path class="edge" d="M480,886 L480,918" marker-end="url(#arrow)"/>
+
+  <!-- ===== ⑦ 요약 보고 ===== -->
+  <text x="40" y="950" class="stage">⑦ 요약 보고</text>
+  <g>
+    <rect x="120" y="922" width="720" height="52" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="944" class="boxh" fill="#0d47a1">과제별 선택 파일(차년도·rev) + 복사/스킵/없음 건수 출력</text>
+    <text x="135" y="963" class="small">각 줄: <tspan class="mono">[복사|덮어씀|스킵|없음] 과제 [차년도·r{N}] KR_..._r{N}.yaml → KR_....yaml</tspan> · 끝에 합계</text>
+  </g>
+
+  <!-- ===== Script node (위임) ===== -->
+  <g>
+    <rect x="120" y="998" width="720" height="88" rx="8" fill="#e0f7fa" stroke="#00838f" stroke-width="1.8"/>
+    <text x="480" y="1021" text-anchor="middle" class="boxh" fill="#006064">결정론적 선택 + 복사 위임 → <tspan class="mono">export_latest.py</tspan></text>
+    <text x="480" y="1040" text-anchor="middle" class="small">load_config(PyYAML/파싱실패/--config 미존재면 경고 후 무시) · _validate_config(값 타입·상대경로 검증)</text>
+    <text x="480" y="1056" text-anchor="middle" class="small">latest_year_dir · pick_latest_yaml · _rev_match · rev_of · normalized_name · iter_projects · 소스 트리 가드(main)</text>
+    <text x="480" y="1072" text-anchor="middle" class="small mono">python export_latest.py [대상] [--source …] [--config …] [--dry-run] [--no-overwrite|--overwrite] [--with-json|--no-json]</text>
+  </g>
+  <!-- script delegation braces (dashed cyan) to guard + stages ③~⑥ -->
+  <path class="edgeScript" d="M120,368 C70,368 70,1034 118,1034" marker-end="url(#arrowScript)"/>
+  <text x="52" y="701" text-anchor="middle" class="edgelblS" transform="rotate(-90 52 701)">가드·③~⑥ 결정론 로직 위임</text>
+
+  <!-- ===== Example (concrete) ===== -->
+  <text x="40" y="1130" class="stage" fill="#5e35b1">예시</text>
+  <g>
+    <rect x="120" y="1114" width="350" height="86" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5"/>
+    <text x="135" y="1136" class="boxt" font-weight="700" fill="#4527a0">MW급…차단기_개발 (rev 있음)</text>
+    <text x="135" y="1155" class="small mono">…\1차년도\KR_..._차단기_개발_r1.yaml</text>
+    <text x="135" y="1171" class="small" fill="#7e57c2">최고 rev = r1 채택 → rev 접미사 제거</text>
+    <text x="135" y="1189" class="small mono" fill="#2e7d32">→ _export\KR_..._차단기_개발.yaml</text>
+
+    <rect x="490" y="1114" width="350" height="86" rx="8" fill="#f3e5f5" stroke="#7e57c2" stroke-width="1.5"/>
+    <text x="505" y="1136" class="boxt" font-weight="700" fill="#4527a0">나머지 3개 과제 (base 만)</text>
+    <text x="505" y="1155" class="small mono">…\N차년도\KR_{과제}.yaml (r0)</text>
+    <text x="505" y="1171" class="small" fill="#7e57c2">rev 접미사 없음 → r0 그대로 채택</text>
+    <text x="505" y="1189" class="small mono" fill="#2e7d32">→ _export\KR_{과제}.yaml</text>
+  </g>
+
+  <!-- ===== Output node ===== -->
+  <text x="40" y="1242" class="stage" fill="#2e7d32">산출물</text>
+  <g>
+    <rect x="120" y="1216" width="720" height="72" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.8"/>
+    <text x="480" y="1238" text-anchor="middle" class="boxh" fill="#1b5e20">대상 폴더(기본 <tspan class="mono">RND_PROJECT\_export\</tspan>) — 과제별 최신 스냅샷 복사본</text>
+    <text x="480" y="1257" text-anchor="middle" class="small mono">_export\KR_{과제}.yaml  (+ 옵션 KR_{과제}.json)</text>
+    <text x="480" y="1276" text-anchor="middle" class="small" fill="#2e7d32">이름 정규화된 사본 모음 · 소스의 원본 KR_*.yaml 은 그대로 남는다(복사이므로)</text>
+  </g>
+  <path class="edge" d="M480,974 L480,996" marker-end="url(#arrow)"/>
+  <path class="edgeKeep" d="M480,1086 L480,1114" marker-end="url(#arrowKeep)"/>
+  <path class="edge" d="M480,1200 L480,1214" marker-end="url(#arrow)"/>
+
+  <!-- ===== ⑧ ea_meta 동반 유지 (with_meta) — 복사 완료 후 실행 ===== -->
+  <!-- 복사(⑥)로 만든 exported 목록을 받아 main() 끝에서 maintain_ea_meta() 실행 -->
+  <path class="edge" d="M480,1288 L480,1322" marker-end="url(#arrow)"/>
+  <text x="492" y="1309" class="edgelbl">복사 완료 후 · <tspan class="mono" font-weight="700">with_meta</tspan> on 이면(기본)</text>
+
+  <text x="40" y="1352" class="stage" fill="#2e7d32">⑧ ea_meta</text>
+  <text x="40" y="1368" class="small"><tspan class="mono">with_meta</tspan> 기본 on</text>
+
+  <!-- 헤더: with_meta 개요 -->
+  <g>
+    <rect x="120" y="1324" width="720" height="66" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.8"/>
+    <text x="135" y="1346" class="boxh" fill="#1b5e20"><tspan class="mono">with_meta</tspan>(기본 on) — KR_*.yaml 복사와 함께 <tspan class="mono">_export\ea_meta.yaml</tspan>(과제 운영메타·①입력값) 동반 유지</text>
+    <text x="135" y="1365" class="small">수출 과제 중 ea_meta 미등록분만 <tspan font-weight="700">빈칸 stub append</tspan> · <tspan font-weight="700">append-only 비파괴</tspan>(채워진 값·주석 불변) · <tspan font-weight="700">재실행 멱등</tspan>(<tspan class="mono">source:</tspan> 매칭 dedup)</text>
+    <text x="135" y="1382" class="small"><tspan class="mono" font-weight="700">--no-meta</tspan> / 설정 <tspan class="mono">with_meta: false</tspan> 로 끔 · <tspan class="mono">PyYAML</tspan> 없으면 중복 판별 불가 → <tspan fill="#c62828">유지 생략(경고만, 스크립트 안 죽음)</tspan> · KR_eclass 이관은 <tspan class="mono">rnd-import-latest</tspan> 담당</text>
+  </g>
+  <!-- 헤더 → 마스터 -->
+  <path class="edge" d="M480,1390 L480,1398 L680,1398 L680,1406" marker-end="url(#arrow)"/>
+
+  <!-- (좌) dest 기존 ea_meta = seed(읽기전용) -->
+  <g>
+    <rect x="120" y="1406" width="300" height="106" rx="8" fill="#f1f8e9" stroke="#2e7d32" stroke-width="1.6" stroke-dasharray="6 3"/>
+    <text x="270" y="1428" text-anchor="middle" class="boxt" font-weight="700" fill="#1b5e20">dest 의 기존 <tspan class="mono">ea_meta.yaml</tspan></text>
+    <text x="135" y="1447" class="small">예: KR_eclass 쪽 기존본(손입력)</text>
+    <text x="135" y="1464" class="small">마스터(<tspan class="mono">_export</tspan>)가 <tspan font-weight="700">없을 때만</tspan> seed</text>
+    <text x="135" y="1481" class="small">SSCB / RND-20-2026 블록·주석 그대로 상속</text>
+    <text x="135" y="1499" class="small" fill="#c62828" font-weight="700">★ 읽기전용 — 이 스킬은 안 덮어씀</text>
+  </g>
+
+  <!-- (우/중) _export 마스터 -->
+  <g>
+    <rect x="520" y="1406" width="320" height="106" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.8"/>
+    <text x="680" y="1428" text-anchor="middle" class="boxh" fill="#1b5e20"><tspan class="mono">&lt;source&gt;\_export\ea_meta.yaml</tspan></text>
+    <text x="535" y="1447" class="small" font-weight="700" fill="#1b5e20">마스터 — 항상 <tspan class="mono">_export</tspan> 아래에 유지</text>
+    <text x="535" y="1464" class="small">있으면 base · 없으면 dest seed · 둘 다 없으면 최소 헤더 신규</text>
+    <text x="535" y="1481" class="small">미등록 수출 과제 → 빈칸 stub <tspan font-weight="700">텍스트 append</tspan>(YAML 라운드트립 X)</text>
+    <text x="535" y="1499" class="small" fill="#2e7d32" font-weight="700">★ 채워진 블록·주석 불변(비파괴) · 재실행 멱등</text>
+  </g>
+  <!-- seed 화살표: dest 기존본 → 마스터 (읽기·최초 1회) -->
+  <path class="edgeKeep" d="M420,1459 L518,1459" marker-end="url(#arrowKeep)"/>
+  <text x="469" y="1451" text-anchor="middle" class="edgelbl" fill="#2e7d32">seed(최초·읽기)</text>
+  <!-- 마스터 → stub 상세 -->
+  <path class="edge" d="M680,1512 L680,1528" marker-end="url(#arrow)"/>
+  <text x="690" y="1524" class="edgelbl">append</text>
+
+  <!-- stub 필드 상세 -->
+  <g>
+    <rect x="120" y="1530" width="720" height="88" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="1.6"/>
+    <text x="135" y="1552" class="boxh" fill="#0d47a1">빈칸 stub = <tspan fill="#c62828">행정정보 필드만</tspan> (사람이 나중에 채움) · 최상위 키 = <tspan class="mono">과제명(폴더명 _→공백)</tspan></text>
+    <text x="135" y="1571" class="small"><tspan class="mono" font-weight="700">alias</tspan> · <tspan class="mono" font-weight="700">io_code</tspan> · <tspan class="mono" font-weight="700">io_name</tspan> = 빈칸 · <tspan class="mono" font-weight="700">source</tspan> = 자동(정규화 KR 파일명 — 조인·dedup 키) · 별도 id 필드 없음(키가 곧 id)</text>
+    <text x="135" y="1588" class="small" fill="#c62828">⚠️ <tspan class="mono">io_code/io_name</tspan> 은 회계값 — 임의생성 금지(받은 값만) · PMS 번호 정해지면 키를 <tspan class="mono">RND-NN-YYYY</tspan> 로 교체</text>
+    <text x="135" y="1605" class="small">과제정보(<tspan class="mono">ministry / agency / role / agreement</tspan>)는 <tspan font-weight="700">제외</tspan> — <tspan class="mono">KR_*.yaml</tspan>(SSOT)에 이미 있음(소비처 <tspan class="mono">kreclass-rnd-approval</tspan> 이 조인)</text>
+  </g>
+</svg>

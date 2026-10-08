@@ -1,0 +1,171 @@
+{
+  "source": "E:/dev/RND/.claude/skills",
+  "syncedAt": "2026-10-08",
+  "skills": [
+    {
+      "name": "rnd-kr-extract",
+      "summary": "연구개발 과제 입력문서(사업계획서·연구계획서 PDF·HWP(한글)·공문·엑셀)를 공통 작업 루트 RND_PROJECT 로 모아(원본은 _source 로 이동) 포맷별로 장/문서/시트별 md 로 변환한 뒤, 한국선급(KR) 업무 범위만 추출한다.",
+      "when": "사업계획서·연구계획서 PDF·HWP·공문·엑셀에서 한국선급(KR) 업무범위 추출·발췌, KR 연구개발 내용·예산만 YAML/JSON 구조화, YAML 로 발췌 항목·장 설정, 포함/제외 정책을 references 로 관리, 기관 발췌 파이프라인 실행",
+      "hint": "[<입력파일: pdf|hwp|공문|xlsx>] [--format markdown|structured] [--json] [--name <과제이름>] [--profile <yaml>] [--md <장별md폴더>] [--stage <차수>] [--no-move] [--keep-intermediate] [--no-history] | items | help",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 65373
+        },
+        {
+          "path": "architecture.svg",
+          "bytes": 18875
+        },
+        {
+          "path": "profiles/kr_default.yaml",
+          "bytes": 5652
+        },
+        {
+          "path": "profiles/kr_structured.yaml",
+          "bytes": 6451
+        },
+        {
+          "path": "references/extract_fields.yaml",
+          "bytes": 10761
+        },
+        {
+          "path": "references/structured_output.md",
+          "bytes": 18343
+        },
+        {
+          "path": "scripts/year_slice.py",
+          "bytes": 22928
+        }
+      ],
+      "bytes": 148383
+    },
+    {
+      "name": "rnd-kr-history",
+      "summary": "한국선급(KR) 연구개발 과제의 예산·참여연구원·과제목표 변경이력을 개정(rev) 단위로 관리한다.",
+      "when": "KR 과제의 예산·참여연구원·과제목표 변경이력(rev) 적재·갱신, 구조화 스냅샷(KR_{과제이름}.yaml) 기반 diff·changelog 생성, 이력에서 최신 스냅샷 재생성(KR_{과제}_r{N}.yaml), 협약변경/연차변경 추적",
+      "hint": "[<KR_과제.yaml 스냅샷 | 참여연구자인건비_…변경.yaml | 연구개발비비목_…변경.yaml> | --project <과제이름>] [--rev <id>] [--type 최초협약|협약변경|연차변경|계획수정] [--source <근거문서>] [--품의서 <경로>] [--no-views] [--no-snapshot] | <과제이름|폴더경로>(→최신 스냅샷 KR_{과제}_r{N}.yaml 재생성) | init | undo | show | help",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 68833
+        },
+        {
+          "path": "architecture.svg",
+          "bytes": 21818
+        },
+        {
+          "path": "references/history_schema.md",
+          "bytes": 14486
+        },
+        {
+          "path": "templates/history/budget_history.yaml",
+          "bytes": 984
+        },
+        {
+          "path": "templates/history/objectives_history.yaml",
+          "bytes": 879
+        },
+        {
+          "path": "templates/history/researchers_history.yaml",
+          "bytes": 4360
+        },
+        {
+          "path": "templates/history/revisions.yaml",
+          "bytes": 697
+        }
+      ],
+      "bytes": 112057
+    },
+    {
+      "name": "rnd-manpower-change",
+      "summary": "한국선급(KR) R&D 과제의 참여연구원 교체(추가·삭제)·참여기간·참여율 변경 시, 해당 연차의 '총 인건비'를 고정한 채 변경되지 않은 참여연구원(조정 대상 1~2명)의 계상률·계상인건비를 12개월 환산 기준으로 재배분해 총액을 정확히 일치시키는…",
+      "when": "KR 과제 참여연구원 교체(추가/삭제)·참여기간·참여율 변경 시 총 인건비 고정 재배분안 산출, 변경되지 않은 연구원으로 끝수 흡수해 총액 정확 일치(소수점 회피·계상률 ≥10%), 변경 전/후 비교 변경안 문서·PDF·새 인건비표 YAML 생성(이력은 /rnd-kr-history 로 핸드오프)",
+      "hint": "[<KR_과제.yaml 스냅샷 경로> | --project <과제이름>] [--year <연차>] [--seq <NN>] [--품의서 <경로> | --date <YYYY-MM-DD>] [--adjust <성명[,성명]>] [--distribute 비례|균등] [--floor <%>] [--no-pdf] [--no-pending] | show | help",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 38153
+        },
+        {
+          "path": "architecture.svg",
+          "bytes": 16655
+        },
+        {
+          "path": "references/algorithm.md",
+          "bytes": 10532
+        },
+        {
+          "path": "scripts/manpower_calc.py",
+          "bytes": 49054
+        },
+        {
+          "path": "scripts/md2pdf.py",
+          "bytes": 7210
+        },
+        {
+          "path": "scripts/to_pending.py",
+          "bytes": 3791
+        }
+      ],
+      "bytes": 125395
+    },
+    {
+      "name": "rnd-budget-change",
+      "summary": "한국선급(KR) R&D 과제의 한 연차 안에서 직접비 '비목(費目)' 간에 금액을 옮기는 결정론 계산기.",
+      "when": "",
+      "hint": "[<KR_과제.yaml 스냅샷 경로> | --project <과제이름>] [--year <연차>] [--from <비목>] [--to <비목>] [--amount <천원>] [--seq <NN>] [--품의서 <경로> | --date <YYYY-MM-DD>] [--no-pdf] [--no-pending] | show | help",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 13048
+        },
+        {
+          "path": "architecture.svg",
+          "bytes": 12683
+        },
+        {
+          "path": "references/algorithm.md",
+          "bytes": 2864
+        },
+        {
+          "path": "scripts/budget_calc.py",
+          "bytes": 17949
+        },
+        {
+          "path": "scripts/md2pdf.py",
+          "bytes": 9480
+        },
+        {
+          "path": "scripts/to_pending.py",
+          "bytes": 3791
+        }
+      ],
+      "bytes": 59815
+    },
+    {
+      "name": "rnd-export-latest",
+      "summary": "RND_PROJECT 아래 각 과제 폴더에서 '최신 차년도 + 최고 rev' 구조화 스냅샷(KR_{과제}.yaml)을 과제별로 1개씩 골라 대상 폴더로 복사한다(원본 보존 — 이동/삭제 아님).",
+      "when": "과제별 최신 구조화 스냅샷(KR_{과제}.yaml)을 한 폴더로 복사해 모으기(배포·공유·백업), 대상 폴더 지정 또는 설정 export.config.yaml:dest, 기본 RND_PROJECT\\_export\\ 로 export",
+      "hint": "[<대상폴더>] [--source <RND_PROJECT경로>] [--config <경로>] [--dry-run] [--no-overwrite|--overwrite] [--with-json|--no-json] [--with-meta|--no-meta] | help",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "bytes": 23558
+        },
+        {
+          "path": "architecture.svg",
+          "bytes": 21446
+        },
+        {
+          "path": "export.config.tpl.yaml",
+          "bytes": 2930
+        },
+        {
+          "path": "export_latest.py",
+          "bytes": 24343
+        }
+      ],
+      "bytes": 72277
+    }
+  ]
+}
