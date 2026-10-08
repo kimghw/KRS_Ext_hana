@@ -976,6 +976,59 @@ console.log('공문 탭');
   });
 }
 
+console.log('R&D 탭');
+{
+  const { wired, window } = await boot({ mode: 'room' });
+  const doc = window.document;
+  t('R&D 탭 클릭과 R&D 화면의 리스너', () => {
+    assert.ok(wired.get('tabRnd')?.has('click'));
+    const want = [['rdProjects', 'click'], ['rdEmptyAdd', 'click'], ['rdEmptyImport', 'click'], ['rdEdit', 'click'], ['rdYears', 'click'],
+      ['rdFSave', 'click'], ['rdFCancel', 'click'], ['rdFDel', 'click'], ['rdForm', 'keydown'],
+      ['rdBudget', 'input'], ['rdBudget', 'change'], ['rdBudget', 'click'], ['rdBudgetAdd', 'click'],
+      ['rdLogAdd', 'click'], ['rdLogCancel', 'click'], ['rdLogTitle', 'keydown'], ['rdLogs', 'click'],
+      ['rdChAdd', 'click'], ['rdChCancel', 'click'], ['rdChanges', 'click'], ['rdChanges', 'change'],
+      ['rdCopy', 'click'], ['rdExport', 'click'], ['rdImport', 'change'], ['rdImportGm', 'click']];
+    for (const [id, type] of want) assert.ok(wired.get(id)?.has(type), `${id} 에 ${type}`);
+  });
+  t('회의실 탭에서는 R&D 화면이 숨어 있다', () => assert.ok(doc.getElementById('rnd').classList.contains('hidden')));
+}
+{
+  const { window, store } = await boot({
+    mode: 'rnd',
+    gongmunProjects: [{ name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', period: '2026.04.01 ~ 2029.12.31', about: '', content: '', account: '' }],
+  });
+  const doc = window.document;
+  const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+  await settle();
+  t('저장된 모드가 R&D 면 R&D 탭으로 열리고 날짜 격자·예약 현황·말로 찾기·근태·공문은 숨는다', () => {
+    assert.ok(doc.getElementById('tabRnd').classList.contains('active'));
+    assert.match(doc.getElementById('appTitle').textContent, /R&D 과제/);
+    assert.ok(!doc.getElementById('rnd').classList.contains('hidden'));
+    for (const id of ['attend', 'gongmun']) assert.ok(doc.getElementById(id).classList.contains('hidden'), id);
+    for (const sel of ['.controls', '.schedule', '.ask']) assert.ok(doc.querySelector(sel).hasAttribute('hidden'), sel);
+  });
+  t('처음 열면 공문 탭의 과제를 가져와 칩이 서고, 오늘이 든 차년도가 켜져 있다', () => {
+    assert.deepEqual([...doc.querySelectorAll('#rdProjects [data-proj]')].map((b) => b.textContent), ['차단기 과제']);
+    assert.ok(doc.querySelector('#rdYears .rd-year.active.now'));
+    assert.deepEqual([...doc.querySelectorAll('#rdBudget .rd-brow [data-k="item"]')].map((i) => i.value), ['인건비', '연구시설·장비비', '연구재료비', '연구활동비', '연구수당', '간접비']);
+  });
+  await ta('장부가 저장소(rndBook)에 남고 모드도 남는다', async () => {
+    await settle(500);
+    assert.equal(store.mode, 'rnd');
+    assert.equal(store.rndBook.projects[0].code, 'RND-20-2026');
+    assert.equal(store.rndBook.projects[0].start, '2026-04-01');
+  });
+  t('공문 탭으로 가면 R&D 화면이 숨고, 돌아오면 다시 보인다', () => {
+    doc.getElementById('tabGongmun').click();
+    assert.ok(doc.getElementById('rnd').classList.contains('hidden'));
+    assert.ok(!doc.getElementById('gongmun').classList.contains('hidden'));
+    doc.getElementById('tabRnd').click();
+    assert.ok(!doc.getElementById('rnd').classList.contains('hidden'));
+    assert.ok(doc.getElementById('gongmun').classList.contains('hidden'));
+    assert.ok(doc.querySelector('.schedule').hasAttribute('hidden'));
+  });
+}
+
 console.log('공문 탭 — 교육: 견적서에 교육 내용 캡처를 더 넣으면 함께 읽고 둘 다 첨부, 과제 내용으로 교육사유');
 {
   // 1×1 PNG — PDF 로 묶을 수 있는 진짜 그림이어야 한다.
@@ -1104,7 +1157,7 @@ console.log('공문 탭 — 교육: 견적서에 교육 내용 캡처를 더 넣
   });
 }
 
-console.log('공문 탭 — 보고 있는 웹페이지 통째로 캡처해 읽기(2026-10-08): 권한 → 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 교육 내용 PDF');
+console.log('공문 탭 — 웹페이지 골라 통째로 캡처해 읽기(2026-10-08): 탭 고르기 → 권한 → 그 탭을 앞에 두고 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 보던 탭으로 → 교육 내용 PDF');
 {
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
   const asked = [];
@@ -1139,15 +1192,26 @@ console.log('공문 탭 — 보고 있는 웹페이지 통째로 캡처해 읽�
   };
   const { window, calls } = await boot(saved, { fetchImpl });
   const doc = window.document;
-  // 가짜 크롬 — 이 창(7)의 활성 탭(11)은 인프런 강의 화면: 높이 6000, 뷰포트 600×1000(폭이 좁아 A4 장이 일곱 장 나온다 — 읽기 다섯 장 + 첨부만 두 장).
+  // 가짜 크롬 — 이 창(7)에서 보고 있는 탭(12)은 Outlook 받은 편지함이고(사용자가 겪은 일), 인프런 강의 화면(11)은 뒤에 있다:
+  // 높이 6000, 뷰포트 600×1000(폭이 좁아 A4 장이 일곱 장 나온다 — 읽기 다섯 장 + 첨부만 두 장). 확장 화면 탭(13)은 찍지 못해 목록에서 빠진다.
   const page = { scrollY: 0, steps: [], done: null };
   const perms = { asked: 0, has: false };
+  const tabs = [
+    { id: 11, url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의 - 인프런', status: 'complete' },
+    { id: 12, url: 'https://outlook.office.com/mail/', title: '메일 - 받은 편지함 - Outlook', status: 'complete' },
+    { id: 13, url: 'chrome://extensions/', title: '확장 프로그램', status: 'complete' },
+  ];
+  const front = { id: 12 };
+  const fronted = [];
   Object.assign(window.chrome, {
     windows: { getCurrent: async () => ({ id: 7 }) },
     permissions: { contains: async () => perms.has, request: async (p) => { perms.asked++; calls.permissions = p; perms.has = true; return true; } },
   });
-  window.chrome.tabs.query = async (q) => (q.active && q.windowId === 7 ? [{ id: 11, url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의' }] : []);
+  window.chrome.tabs.query = async (q) => (q.windowId !== 7 ? [] : tabs.filter((t) => !q.active || t.id === front.id).map((t) => ({ ...t, active: t.id === front.id })));
+  window.chrome.tabs.update = async (id, props) => { if (props.active) { front.id = id; fronted.push(id); } return { id }; };
+  window.chrome.tabs.get = async (id) => ({ ...tabs.find((t) => t.id === id), active: id === front.id });
   window.chrome.tabs.captureVisibleTab = async (windowId, opts) => {
+    assert.equal(front.id, 11, '찍을 때는 고른 탭이 앞에 있어야 한다');
     calls.shots = (calls.shots || 0) + 1;
     calls.shotOpts = [windowId, opts];
     return `data:image/png;base64,${PNG.toString('base64')}`;
@@ -1178,15 +1242,48 @@ console.log('공문 탭 — 보고 있는 웹페이지 통째로 캡처해 읽�
   const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
   const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
   await settle();
-  t('문서 넣는 곳 아래에 "보고 있는 웹페이지 통째로 캡처해 읽기" 단추가 있다', () => {
+  t('문서 넣는 곳 아래에 "웹페이지 골라 통째로 캡처해 읽기" 단추가 있다', () => {
     const btn = doc.getElementById('gmCapture');
-    assert.match(btn.textContent, /보고 있는 웹페이지 통째로 캡처해 읽기/);
+    assert.match(btn.textContent, /웹페이지 골라 통째로 캡처해 읽기/);
     assert.ok(btn.closest('#gmIntake'), '문서 넣는 곳 안에 있어야 한다');
     assert.ok(!btn.disabled);
+    assert.ok(doc.getElementById('gmTabs').classList.contains('hidden'));
   });
   doc.getElementById('gmCapture').click();
+  await settle(20);
+  const pickBox = (id) => doc.querySelector(`#gmTabs [data-tab="${id}"]`);
+  const goBtn = () => doc.querySelector('#gmTabs [data-pick="go"]');
+  t('누르면 바로 찍지 않고 이 창의 웹페이지 탭을 늘어놓는다 — 확장 화면은 빼고, 보고 있는 탭을 적고, 아무것도 미리 고르지 않는다', () => {
+    assert.ok(!doc.getElementById('gmTabs').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmCapture').getAttribute('aria-expanded'), 'true');
+    const rows = [...doc.querySelectorAll('#gmTabs .wp-tab')].map((r) => r.textContent);
+    assert.deepEqual(rows, ['Hermes Bot 강의 - 인프런inflearn.com', '메일 - 받은 편지함 - Outlookoutlook.office.com · 보고 있는 탭']);
+    assert.ok(!pickBox(11).checked && !pickBox(12).checked);
+    assert.ok(goBtn().disabled);
+    assert.equal(perms.asked, 0, '권한은 찍을 때 묻는다');
+    assert.equal(calls.shots, undefined);
+  });
+  const all = doc.querySelector('#gmTabs [data-pick="all"]');
+  all.click();
+  t('전체를 누르면 다 골라지고, 다시 누르면 다 풀린다', () => {
+    assert.ok(pickBox(11).checked && pickBox(12).checked);
+    assert.equal(goBtn().textContent, '고른 2개 캡처해 읽기');
+    all.click();
+    assert.ok(!pickBox(11).checked && !pickBox(12).checked);
+    assert.ok(goBtn().disabled);
+  });
+  pickBox(11).click();
+  t('하나만 눌러 고르면 전체는 반쯤 표시되고 캡처 단추가 열린다', () => {
+    assert.ok(pickBox(11).checked);
+    assert.ok(all.indeterminate && !all.checked);
+    assert.ok(!goBtn().disabled);
+    assert.equal(goBtn().textContent, '고른 1개 캡처해 읽기');
+  });
+  goBtn().click();
   await settle(40);
-  t('누르면 먼저 사이트 접근 권한(<all_urls>)을 묻고, 찍는 동안 단추와 파일 고르기가 잠긴다', () => {
+  t('캡처를 누르면 먼저 사이트 접근 권한(<all_urls>)을 묻고, 고른 탭을 앞에 두며, 찍는 동안 단추와 파일 고르기가 잠긴다', () => {
+    assert.ok(doc.getElementById('gmTabs').classList.contains('hidden'), '고르기는 접힌다');
+    assert.deepEqual(fronted, [11]);
     assert.equal(perms.asked, 1);
     assert.deepEqual(calls.permissions, { origins: ['<all_urls>'] });
     assert.ok(doc.getElementById('gmCapture').disabled);
@@ -1204,6 +1301,10 @@ console.log('공문 탭 — 보고 있는 웹페이지 통째로 캡처해 읽�
     assert.equal(canvases.length, 7);
     assert.deepEqual(canvases[0], [600, 849]);
     assert.ok(!doc.getElementById('gmCapture').disabled);
+  });
+  t('다 찍으면 누르기 전에 보던 탭(Outlook)을 다시 앞에 둔다', () => {
+    assert.deepEqual(fronted, [11, 12]);
+    assert.equal(front.id, 12);
   });
   t('읽기에는 앞 다섯 장과 화면 글자(머리말 달림)가 가고, 두 장은 첨부에만 들어간다', () => {
     const read = asked.find((a) => a.props.includes('parts'));
@@ -1241,13 +1342,139 @@ console.log('공문 탭 — 보고 있는 웹페이지 통째로 캡처해 읽�
   Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
 }
 
+console.log('공문 탭 — 웹페이지 여러 개를 골라 한 번에(2026-10-08): 전체 → 메일함 빼기 → 탭마다 차례로 찍기 → 읽기 자리는 탭마다 앞쪽부터 → 탭마다 PDF');
+{
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const asked = [];
+  const fetchImpl = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) throw new Error('offline');
+    const body = JSON.parse(init.body);
+    const props = Object.keys(body.output_config.format.schema.properties);
+    const content = body.messages[0].content;
+    const input = JSON.stringify(content);
+    asked.push({ props, input, images: Array.isArray(content) ? content.filter((c) => c.type === 'image').length : 0 });
+    let record;
+    if (props.includes('parts')) {
+      // 읽기는 첫 탭의 첫 장을 교육 안내문, 둘째 탭의 첫 장을 교육 내용으로 가렸다 — 나머지 장은 제 탭의 종류를 이어 받는다.
+      const names = [...new Set([...input.matchAll(/화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_\d+\.png/g)].map((m) => m[0]))];
+      record = {
+        docType: 'course', vendor: '인프런', courseName: '[단테랩스] Hermes Bot × OpenAI Dots', total: 84700, gist: 'Hermes Bot 강의', summary: '인프런 온라인 강의 안내 84,700원',
+        place: '온라인', courseHours: '7분(수업 19개)', topics: '두 봇 지도', use: 'AI 봇 활용 역량 강화',
+        parts: [{ file: names.find((n) => n.endsWith('_1.png')), kind: 'course' }, { file: names.find((n) => n.endsWith('_5.png')), kind: 'content' }],
+      };
+    } else if (props.includes('reason')) {
+      record = { reason: '과제의 AI 봇 플랫폼 활용 역량 확보에 필요함', use: null };
+    } else {
+      throw new Error(`모르는 작업: ${props}`);
+    }
+    return { ok: true, status: 200, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(record) }] }) };
+  };
+  const saved = {
+    mode: 'gongmun', gongmunKind: 'edu', apiKey: 'sk-ant-test', myName: '김거화',
+    gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
+    gongmunProjects: [{ name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', about: '', content: 'AI 도구를 설계 검토에 활용', account: '' }],
+  };
+  const { window, calls } = await boot(saved, { fetchImpl });
+  const doc = window.document;
+  // 강의 소개(21, 높이 3000 → 세 화면 → A4 네 장)와 커리큘럼(22, 높이 2000 → 두 화면 → A4 세 장)은 같은 사이트, 보고 있는 탭(12)은 메일함.
+  const tabs = [
+    { id: 21, url: 'https://www.inflearn.com/course/hermes-bot', title: 'Hermes Bot 강의 - 인프런', status: 'complete', height: 3000, text: '강의 소개\n교육비 84,700원' },
+    { id: 22, url: 'https://www.inflearn.com/course/hermes-bot/curriculum', title: '커리큘럼 - 인프런', status: 'complete', height: 2000, text: '섹션 1. 두 봇 지도' },
+    { id: 12, url: 'https://outlook.office.com/mail/', title: '메일 - 받은 편지함 - Outlook', status: 'complete', height: 1000, text: '받은 편지함' },
+  ];
+  const front = { id: 12 };
+  const fronted = [];
+  const ran = [];
+  const perms = { has: false };
+  Object.assign(window.chrome, {
+    windows: { getCurrent: async () => ({ id: 7 }) },
+    permissions: { contains: async () => perms.has, request: async () => { perms.has = true; return true; } },
+  });
+  window.chrome.tabs.query = async (q) => (q.windowId !== 7 ? [] : tabs.filter((t) => !q.active || t.id === front.id).map((t) => ({ ...t, active: t.id === front.id })));
+  window.chrome.tabs.update = async (id, props) => { if (props.active) { front.id = id; fronted.push(id); } return { id }; };
+  window.chrome.tabs.get = async (id) => ({ ...tabs.find((t) => t.id === id), active: id === front.id });
+  window.chrome.tabs.captureVisibleTab = async () => {
+    calls.shots = [...(calls.shots || []), front.id];
+    return `data:image/png;base64,${PNG.toString('base64')}`;
+  };
+  window.chrome.scripting.executeScript = async ({ target, func, args }) => {
+    const tab = tabs.find((x) => x.id === target.tabId);
+    ran.push([target.tabId, func.name]);
+    if (func.name === 'pageInfo') return [{ result: { url: tab.url, title: tab.title, scrollHeight: tab.height, viewportHeight: 1000, viewportWidth: 600, dpr: 1, scrollY: 0, text: tab.text } }];
+    if (func.name === 'pageStep') return [{ result: Math.min(args[0], tab.height - 1000) }];
+    if (func.name === 'pageDone') return [{ result: null }];
+    throw new Error(`모르는 함수 ${func.name}`);
+  };
+  const kept = { canvas: globalThis.OffscreenCanvas, bitmap: globalThis.createImageBitmap, file: globalThis.File };
+  globalThis.OffscreenCanvas = class {
+    constructor(w, h) { this.width = w; this.height = h; }
+    getContext() { return { fillRect() {}, drawImage() {} }; }
+    async convertToBlob({ type }) { return new window.Blob([PNG], { type }); }
+  };
+  globalThis.createImageBitmap = async () => ({ width: 600, height: 1000, close() {} });
+  globalThis.File = window.File;
+  const blobs = [];
+  globalThis.URL.createObjectURL = (b) => { blobs.push(b); return 'blob:gongmun-cap'; };
+  globalThis.URL.revokeObjectURL = () => {};
+  const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  await settle();
+  doc.getElementById('gmCapture').click();
+  await settle(20);
+  const pickBox = (id) => doc.querySelector(`#gmTabs [data-tab="${id}"]`);
+  const goBtn = () => doc.querySelector('#gmTabs [data-pick="go"]');
+  doc.querySelector('#gmTabs [data-pick="all"]').click();
+  pickBox(12).click();
+  t('전체를 고른 뒤 메일함을 빼면 두 개가 골라진다', () => {
+    assert.deepEqual([pickBox(21).checked, pickBox(22).checked, pickBox(12).checked], [true, true, false]);
+    assert.equal(goBtn().textContent, '고른 2개 캡처해 읽기');
+  });
+  const seen = new Set();
+  const watch = setInterval(() => seen.add(doc.getElementById('gmStatus').textContent), 40);
+  goBtn().click();
+  // 다섯 화면 × 0.6초 틈 — 실제 시간으로 기다린다.
+  await settle(5 * 650 + 1200);
+  clearInterval(watch);
+  t('고른 탭을 차례로 앞에 두고 찍은 뒤 보던 탭(메일함)으로 돌아온다 — 메일함은 찍지 않는다', () => {
+    assert.deepEqual(fronted, [21, 22, 12]);
+    assert.deepEqual(calls.shots, [21, 21, 21, 22, 22]);
+    assert.ok(!ran.some(([id]) => id === 12), '메일함 탭에는 스크립트도 넣지 않는다');
+    assert.ok([...seen].some((s) => /1\/2번째 페이지/.test(s)) && [...seen].some((s) => /2\/2번째 페이지/.test(s)), [...seen].join(' | '));
+  });
+  t('읽기 자리 다섯은 탭마다 앞쪽부터 나눈다 — 첫 탭 1·2·3쪽, 둘째 탭 1·2쪽(장 번호는 같은 사이트라 5부터 잇는다), 두 화면의 글자도 함께', () => {
+    const read = asked.find((a) => a.props.includes('parts'));
+    assert.ok(read, `읽기를 부르지 않았다 — ${doc.getElementById('gmStatus').textContent}`);
+    assert.equal(read.images, 5);
+    const names = [...new Set([...read.input.matchAll(/화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_(\d+)\.png/g)].map((m) => m[1]))];
+    assert.deepEqual(names, ['1', '2', '3', '5', '6']);
+    assert.match(read.input, /\[웹페이지 글자 — Hermes Bot 강의 - 인프런\][^"]*강의 소개/);
+    assert.match(read.input, /\[웹페이지 글자 — 커리큘럼 - 인프런\][^"]*섹션 1\. 두 봇 지도/);
+    assert.doesNotMatch(read.input, /받은 편지함/);
+    const src = doc.getElementById('gmSource').textContent;
+    assert.match(src, /화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2} 4장, 화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2} 3장/);
+    assert.match(src, /캡처 7장 가운데 페이지마다 앞쪽부터 5장만 읽었습니다 — 나머지 2장은 첨부 PDF 에만 들어갑니다/);
+  });
+  t('탭마다 한 묶음 — 첫 탭은 교육 안내문 4장, 둘째 탭은 교육 내용 3장', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 안내문 4장 · 교육 내용 3장/);
+  });
+  doc.getElementById('gmSavePdf').click();
+  await settle(800);
+  await ta('첨부 PDF — 교육 안내문 네 쪽, 교육 내용 세 쪽', async () => {
+    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['교육안내문_인프런.pdf', '교육내용_인프런.pdf']);
+    const { PDFDocument } = await import('../vendor/pdf-lib.esm.min.js');
+    const pages = [];
+    for (const b of blobs) pages.push((await PDFDocument.load(new Uint8Array(await b.arrayBuffer()))).getPageCount());
+    assert.deepEqual(pages, [4, 3]);
+  });
+  Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
+}
+
 console.log('근태 탭');
 {
   const { wired, window } = await boot({ mode: 'room' });
   const doc = window.document;
-  t('근태가 탭 가운데 맨 앞에 있고 공문이 그 옆이다', () => {
+  t('근태가 탭 가운데 맨 앞에 있고 공문·R&D 가 그 옆이다', () => {
     const tabs = [...doc.querySelectorAll('nav.tabs .tab')].map((b) => b.textContent);
-    assert.deepEqual(tabs, ['근태', '공문', '회의실', '차량', '현황']);
+    assert.deepEqual(tabs, ['근태', '공문', 'R&D', '회의실', '차량', '현황']);
   });
   t('근태 탭 클릭', () => assert.ok(wired.get('tabAttend')?.has('click')));
   t('회의실 탭에서는 근태 화면이 숨어 있다', () => {

@@ -29,6 +29,7 @@ import { READ_POOL, mapPool } from './src/pool.js';
 import { ROUTES_KEY, routeOfPlan, routeOfRows, keepRoute, recallRoute, withRoute } from './src/routes.js';
 import { createSendBox } from './sendbox.js';
 import { createLodgeBox, lodgeAmount } from './lodgebox.js';
+import { createWebPick, pickButton, pagePdfs } from './webpick.js';
 import { wantsCar, carWindow, windowDays, windowLabel, carsInWindow, carPick, carPlaceKey, carPlaceOf, regionOf, MAX_CAR_DAYS } from './src/carfind.js';
 import { scanCarDays } from './src/rentcar.js';
 import {
@@ -87,6 +88,8 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** 증빙 넣는 곳의 풍선말 — 칸을 낮추느라 칸 안에서 뺀 자세한 말이다. */
 const DROP_TITLE = '이미지·PDF, 여러 장도 됩니다 — 붙여넣기(Ctrl+V)는 이 카드를 편 채 패널 어디서든 됩니다';
+const CAP_TITLE = '이 창에 열어 둔 웹페이지(탭)를 전체 또는 하나 이상 골라 위에서 아래까지 캡처하고 화면의 글자와 함께 증빙으로 읽습니다 — '
+  + '예약 확인·결제 완료 화면을 조각조각 캡처하지 않아도 됩니다. 페이지 하나가 PDF 하나(증빙 한 장)가 됩니다. 처음 찍을 때 한 번 사이트 접근 권한을 묻습니다.';
 const md = (s) => `${+s.slice(5, 7)}/${+s.slice(8)}`;
 /** 기간을 "9/6 ~ 10/13" 으로. 올해 밖에 걸치면 해를 붙인다("25/10/4 ~ 26/10/4") — 한 해를 조회하면 양쪽이 같은 날로 보인다. */
 const spanText = (from, to, today) => {
@@ -129,6 +132,7 @@ export function createAttendPanel({
   $, escapeHtml, logEvent, ai, onChanged = () => {}, evidence = createEvidenceStore(),
   cars = { scan: (dates) => scanCarDays(dates) },
   onCar = async () => ({ ok: false, submitted: false, message: '차량 신청이 연결되지 않았습니다.' }),
+  listTabs, capture,
 }) {
   const el = {
     root: $('attend'), kinds: $('atKinds'), chatLog: $('atChatLog'), chatInput: $('atChatInput'), chatGo: $('atChatGo'),
@@ -235,6 +239,15 @@ export function createAttendPanel({
     escapeHtml, logEvent, repaint: () => paintList(),
     setStatus: (...args) => setStatus(...args), setError: (...args) => setError(...args),
   });
+  // 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸) 아래의 웹페이지 캡처 — 공문 탭의 것과 같은 탭 고르기 칸이다(webpick.js,
+  // 2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로"). listTabs·capture 는 테스트가 갈아 끼운다.
+  const webPick = createWebPick({ escapeHtml, listTabs, capture });
+  /** 웹페이지 캡처 단추와 펴 둔 탭 목록. where 는 'after'(사후정산 칸)·'send'(여비증빙 송부 칸) — 한 카드에 둘이 같이 서도 목록은 누른 곳에만 편다. */
+  const capHtml = (docNo, where, locked) => {
+    const key = `${docNo}:${where}`;
+    return `<div class="at-cap" data-cap="${where}">${pickButton({ open: webPick.isOpen(key), disabled: locked, title: CAP_TITLE }, escapeHtml)}</div>`
+      + webPick.html(key, { busy: locked });
+  };
 
   /* ---------------------------------------------------------------- 상태 줄 */
 
@@ -1265,6 +1278,8 @@ export function createAttendPanel({
         + `<div id="atMore_${i}" class="at-more-box">${note}`
         + `<div class="at-acts">${acts}</div>${cancelBox}${tripLine}${afterBox}</div></li>`;
     }).join('');
+    // 펴 둔 웹페이지 목록의 "전체"가 반쯤 골라진 표시는 글로 그릴 수 없다 — 그린 뒤에 맞춘다.
+    webPick.sync(el.list);
     ensureAfterDetail();
     ensureLodges();
     settleKnown();
@@ -1738,6 +1753,7 @@ export function createAttendPanel({
       + `<span class="at-drop"><span class="at-drop-top"><span class="at-drop-lead">${DROP_ICON}증빙 넣는 곳</span>`
       + '<span class="at-drop-how">끌어다 놓기 · 눌러 고르기 · Ctrl+V</span></span>'
       + `<span class="at-file">${escapeHtml(ask)}</span></span></label>`
+      + capHtml(it.docNo, 'after', locked)
       + askHtml(a)
       + (a.busy ? `<p class="at-after-note">${escapeHtml(a.stage || '증빙을 읽는 중...')}</p>` : '')
       + (a.error ? `<p class="at-after-note error">${escapeHtml(a.error)}</p>` : '')
@@ -1996,7 +2012,9 @@ export function createAttendPanel({
         post: settled ? { on: !!a.reopen, title: a.reopen ? REOPEN_STOP : REOPEN_TITLE } : null,
       } : null,
       // 사후정산을 완료한 출장에 넣은 증빙은 읽어서 사후정산에 반영한다(runAfter 의 amend) — Claude 가 연결돼 있을 때만이다.
-      read: trip && settled && !a.reopen && (apiKey || cli) ? (files) => runAfter(trip.seq, files) : null,
+      read: trip && settled && !a.reopen && (apiKey || cli) ? (files, opts) => runAfter(trip.seq, files, opts) : null,
+      // 증빙 넣기 아래의 웹페이지 캡처(webpick.js) — 공문 탭과 같은 칸이다.
+      cap: () => capHtml(it.docNo, 'send', st.busy || !!a.busy),
       refresh: () => loadKept(it.docNo, a).then(paintList),
       save: (onStage) => saveAfter(it, onStage), confirm: (onStage) => confirmPost(it, onStage), again: () => sendCtx(it),
       hold: a.ask ? '사후정산 칸에서 정산금액을 먼저 정해 주세요'
@@ -2212,6 +2230,74 @@ export function createAttendPanel({
   }
 
   /**
+   * 증빙 넣는 곳 아래의 웹페이지 캡처 단추와 탭 목록을 눌렀을 때(webpick.js) — 단추는 그 칸의 목록을 펴고 접고, 목록의 캡처는 고른
+   * 탭들을 찍어 증빙으로 넣는다(captureFor). 공문 탭과 같은 칸이다.
+   */
+  async function onPick(r, it, target) {
+    const trip = isTrip(it) ? tripOf(it) : null;
+    if (!trip) return undefined;
+    disarm();
+    if (r.act === 'open') {
+      if (st.after[trip.seq]?.busy) return undefined;
+      const where = target.closest('[data-cap]')?.dataset.cap || 'after';
+      try {
+        if (await webPick.toggle(`${it.docNo}:${where}`)) setStatus('');
+      } catch (err) {
+        setStatus(err.message, 'error');
+      }
+      return paintList();
+    }
+    if (r.act === 'close') return paintList();
+    if (r.act === 'go') return captureFor(it, r.key.slice(it.docNo.length + 1), r.tabs);
+    return undefined;
+  }
+
+  /**
+   * 고른 웹페이지들을 통째로 캡처해 증빙으로 넣는다(2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로").
+   * 찍는 것은 공문 탭과 같다(webpick.js → src/pagecap.js: 권한 묻기 → 고른 탭을 차례로 앞에 두고 한 화면씩 → A4 장 → 화면 글자 → 보던
+   * 탭으로). 페이지 하나를 PDF 하나로 묶어(pagePdfs — 예약 확인 화면이 석 장이어도 증빙은 하나) 그 칸에 파일을 넣은 것과 같은 길로 보낸다:
+   * 사후정산 칸이면 읽어서 사후정산을 올리고(runAfter), 여비증빙 송부 칸이면 그 칸의 증빙 넣기와 같다(읽을 길이 있으면 읽어서 반영,
+   * 없으면 그대로 담기). 화면 글자는 그 PDF 를 읽을 때 같이 준다 — 웹페이지의 글자는 OCR 보다 정확하다.
+   */
+  async function captureFor(it, where, tabs) {
+    const trip = tripOf(it);
+    if (!trip) return undefined;
+    const a = st.after[trip.seq] || (st.after[trip.seq] = {});
+    if (a.busy) return undefined;
+    Object.assign(a, { busy: true, error: '', stage: '' });
+    const step = (text) => { a.stage = text; setStatus(text); paintList(); };
+    let got = null;
+    let docs = [];
+    try {
+      got = await webPick.shoot(tabs, { today: attendToday(), onStatus: step });
+      step('캡처한 페이지를 PDF 로 묶는 중…');
+      const taken = (await evidence.list(it.docNo).catch(() => a.kept || [])).map((k) => k.name);
+      docs = await pagePdfs(got.pages, { today: attendToday(), taken });
+      if (!docs.length) throw new Error('캡처한 화면이 비어 있습니다.');
+      logEvent('trip', true, `웹페이지 캡처(증빙): ${trip.seq} · ${got.what}`, { seq: trip.seq, docNo: it.docNo, files: docs.map((d) => d.file.name) });
+    } catch (err) {
+      docs = [];
+      setStatus(`웹페이지를 캡처하지 못했습니다: ${err.message}`, 'error');
+      logEvent('trip', false, `웹페이지 캡처(증빙) 실패: ${trip.seq} — ${err.message}`, { seq: trip.seq, docNo: it.docNo });
+    } finally {
+      Object.assign(a, { busy: false, stage: '' });
+      paintList();
+    }
+    if (!docs.length) return undefined;
+    const files = docs.map((d) => d.file);
+    const texts = new Map(docs.map((d) => [d.file, d.text]));
+    if (where === 'send') {
+      const ctx = sendCtx(it);
+      await (ctx.read ? ctx.read(files, { texts }) : sendBox.add(ctx, files));
+    } else {
+      await runAfter(trip.seq, files, { texts });
+    }
+    // 너무 길어 앞부분만 찍은 페이지와 못 찍은 탭은 읽은 뒤의 상태 줄 끝에 덧붙인다.
+    if (got.notes.length) setStatus([el.status.textContent, ...got.notes].filter(Boolean).join(' — '), el.status.classList.contains('error') ? 'error' : '');
+    return undefined;
+  }
+
+  /**
    * 사전정산을 완료(확정)한다 — 계산서 화면의 확정 버튼과 같은 요청이다(src/trip.js 의 tripPreConfirm). 사후정산을 올리거나 증빙을
    * 담당자에게 보내려면 사전정산이 완료돼 있어야 해서(2026-10-03 사용자 지정), 출장 카드의 `사전정산 완료` 버튼과 증빙을 넣었을 때
    * 여기로 온다. 끝나면 다시 읽은 그 계산서 줄로 카드의 단계를 맞추고(freshTrip), 그 줄을 돌려준다. 못 했으면 던진다.
@@ -2321,7 +2407,7 @@ export function createAttendPanel({
    * 사후정산을 이미 완료한 출장에 넣은 증빙도 읽는다(amend, 2026-10-05 사용자 지정) — 숙박 증빙·항공권이면 완료한 사후정산을 다시
    * 작성하는 것으로 보고 올리고(카드에 사후정산 칸이 다시 선다), 아니면 보낼 증빙으로 담기만 한다.
    */
-  async function runAfter(seq, fileList, { given = [] } = {}) {
+  async function runAfter(seq, fileList, { given = [], texts = null } = {}) {
     const it = st.items.find((x) => isTrip(x) && tripOf(x)?.seq === seq);
     const trip = it ? tripOf(it) : null;
     if (!trip) return;
@@ -2375,12 +2461,16 @@ export function createAttendPanel({
       while (taken(`${stem} (${i})${ext}`)) i++;
       return `${stem} (${i})${ext}`;
     };
+    // 웹페이지를 캡처한 PDF 는 그 화면의 글자가 같이 온다(texts — captureFor) — 읽을 때 같이 준다(보관함에는 넣지 않는다).
+    const pageText = new Map();
     for (const f of fileList || []) {
       if (!acceptsFile(EVIDENCE_ACCEPT, f)) { setStatus(`${f.name} 은 이미지나 PDF 가 아니라 뺐습니다.`, 'error'); continue; }
       if (f.size > FILE_LIMIT) { setStatus(`${f.name} 이 너무 큽니다(${Math.round(f.size / 1048576)}MB). 10MB 이하로 넣어 주세요.`, 'error'); continue; }
       try {
         const dataUrl = await readFile(f);
-        files.push({ name: nameFor(f.name, dataUrl), type: f.type, dataUrl });
+        const one = { name: nameFor(f.name, dataUrl), type: f.type, dataUrl };
+        files.push(one);
+        if (texts?.get(f)) pageText.set(one, texts.get(f));
       } catch (err) {
         setStatus(err.message, 'error');
       }
@@ -2411,7 +2501,7 @@ export function createAttendPanel({
       let read = 0;
       if (files.length === 1) onStage(`증빙을 읽는 중 (1/1) — ${files[0].name}`);
       records.push(...await mapPool(files, READ_POOL, async (f) => {
-        const r = await receiptSmart(f, who, { apiKey, useNative: cli });
+        const r = await receiptSmart(f, { ...who, text: pageText.get(f) || '' }, { apiKey, useNative: cli });
         if (++read < files.length) onStage(`증빙 ${files.length}장을 읽는 중 (${read}/${files.length})`);
         return { ...r.record, file: f };
       }));
@@ -2981,6 +3071,9 @@ export function createAttendPanel({
     if (!it || st.busy) return undefined;
     // 목록을 손수 누르기 시작했으면 홈 카드의 부탁(보내기)은 잊는다 — 뒤늦게 다른 카드가 펴지거나 팝업이 뜨지 않게.
     st.seek = null;
+    // 증빙 넣는 곳 아래의 웹페이지 캡처 단추와 탭 목록(webpick.js).
+    const pick = webPick.click(e);
+    if (pick) return onPick(pick, it, target);
     const btn = target.closest('button[data-act]');
     if (!btn) {
       // 줄을 누르면 펴고, 다시 누르면 접는다. 한 번에 한 줄만 펴 둔다.
@@ -3310,6 +3403,8 @@ export function createAttendPanel({
       e.preventDefault();
       input.parentElement.querySelector('button[data-act="ask-krw"]')?.click();
     });
+    // 증빙 넣는 곳 아래에 펴 둔 웹페이지 목록의 체크박스(webpick.js) — 카드를 다시 그리지 않고 고른 것만 맞춘다.
+    el.list.addEventListener('change', (e) => webPick.change(e));
     // 여비증빙 송부 칸의 글 칸(과제·계정, 받는 사람 찾기)과 파일 칸.
     for (const type of ['input', 'change']) {
       el.list.addEventListener(type, (e) => {

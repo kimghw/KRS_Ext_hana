@@ -132,9 +132,18 @@ export async function receiptSmart(file, ctx, opts) {
   return { record: got.data, via: got.via, costUsd: got.costUsd, note: joined(got.notes) };
 }
 
-export function receiptInput(file, { trip = {}, me = '' } = {}) {
+/** 증빙 읽기에 같이 주는 화면 글자의 한도 — 예약 확인 화면은 이보다 훨씬 짧다. 다리는 입력을 2만 자에서 자르고 OCR 글자가 그 뒤에 붙는다. */
+const RECEIPT_PAGE_MAX = 12000;
+
+/**
+ * 증빙 읽기에 줄 글. text 는 웹페이지를 통째로 캡처한 증빙(예약 확인·결제 완료 화면 — 출장 카드의 웹페이지 캡처, 2026-10-08)의 화면
+ * 글자다(src/pagecap.js 의 normalizeText — 머리에 [웹페이지 글자 — 제목] 주소). 그림보다 정확해 같이 준다.
+ */
+export function receiptInput(file, { trip = {}, me = '', text = '' } = {}) {
+  const page = String(text || '').trim();
   return `출장 정보: ${trip.from || '?'} ~ ${trip.to || trip.from || '?'}${trip.location ? ` · 출장지 ${trip.location}` : ''}${me ? ` · 출장자 ${me}` : ''}\n`
-    + `첨부한 문서(파일 이름: ${file.name})를 읽어 출력 키를 채웁니다. 이 문서 한 장만 봅니다.`;
+    + `첨부한 문서(파일 이름: ${file.name})를 읽어 출력 키를 채웁니다. 이 문서 한 장만 봅니다.`
+    + (page ? `\n이 문서는 웹페이지를 통째로 캡처한 것입니다 — 그 화면의 글자도 함께 봅니다(같은 문서입니다).\n<<<\n${page.slice(0, RECEIPT_PAGE_MAX)}\n>>>` : '');
 }
 
 /**

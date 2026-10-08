@@ -857,6 +857,10 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-send-add { display: block; position: relative; margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); background: var(--surface); cursor: pointer; }
 .attend .at-send-add input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .attend .at-send-add:hover { border-color: var(--pick); }
+/* 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸) 바로 아래의 웹페이지 캡처 단추 — 공문 탭과 같은 칸(webpick.js, .wp-*)이다.
+   펴 둔 탭 목록의 줄은 출장 카드의 줄(.at-list li — 테두리·둥근 모서리) 모양을 받지 않는다. */
+.attend .at-cap { display: flex; justify-content: center; margin-top: 4px; }
+.attend .at-list .wp-list li { margin: 0; border: 0; border-radius: 0; font-size: inherit; }
 .attend .at-send-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .attend .at-send-row .at-label { flex-basis: 100%; font-size: 12px; }
 .attend .at-send-row .at-chip { min-height: 28px; padding: 3px 10px; font-size: 12px; }
@@ -978,9 +982,28 @@ button.danger:hover { filter: brightness(1.08); }
 /* 문서 넣는 곳 아래의 두 단추 — 웹페이지 통째로 캡처, 문서 없이 쓰기. */
 .gongmun .gm-intake-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; margin-top: 6px; }
 .gongmun .gm-intake-actions button { font-size: 12px; }
-.gongmun .gm-capture { display: inline-flex; align-items: center; gap: 5px; color: var(--pick); font-weight: 600; }
-.gongmun .gm-capture svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.gongmun .gm-capture:disabled { opacity: .6; cursor: progress; }
+/* 웹페이지 골라 통째로 캡처(webpick.js) — 공문 탭의 문서 넣는 곳과 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸)이 같은 칸을 쓴다.
+   단추를 누르면 이 창의 웹페이지 탭을 줄마다 체크박스로, 맨 위에 전체. 긴 목록은 안에서 스크롤한다. */
+.wp-open { display: inline-flex; align-items: center; gap: 5px; color: var(--pick); font-size: 12px; font-weight: 600; }
+.wp-open svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.wp-open:disabled { opacity: .6; cursor: progress; }
+.wp-tabs { margin-top: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--pick) 25%, var(--line)); border-radius: 12px; background: var(--surface); text-align: left; }
+.wp-tabs input[type="checkbox"] { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--pick); cursor: pointer; }
+.wp-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
+.wp-all { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; cursor: pointer; }
+.wp-all small { color: var(--muted); font-weight: 400; }
+.wp-hint { color: var(--muted); font-size: 12px; }
+.wp-list { max-height: 230px; margin: 0; padding: 2px 0; overflow-y: auto; list-style: none; }
+.wp-list > li { margin: 0; padding: 0; border: 0; background: none; }
+.wp-tab { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px; border-radius: 8px; cursor: pointer; }
+.wp-tab:hover { background: var(--surface-soft); }
+.wp-tab:has(input:checked) { background: var(--pick-soft); }
+.wp-tab input[type="checkbox"] { margin-top: 2px; }
+.wp-tab-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.wp-tab-title { display: -webkit-box; overflow: hidden; color: var(--fg); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.wp-tab-host { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.wp-go { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.wp-go .primary { flex: 1 1 auto; }
 .gongmun .gm-intake .cli-help { margin: 8px 2px 0; }
 .gongmun .statusline { margin-bottom: 10px; }
 
@@ -1087,3 +1110,118 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-reason { min-height: 22px; padding: 1px 7px; font-size: 11px; color: var(--pick); border: 1px solid color-mix(in srgb, var(--pick) 35%, var(--line)); border-radius: 7px; }
 .gongmun .gm-attach { color: var(--fg); font-weight: 600; }
 .gongmun .gm-row-fields textarea { grid-column: 1 / -1; min-height: 60px; font-size: 13px; }
+
+/* ------------------------------------------------------------ R&D */
+
+/* 탭이 여섯 개(근태·공문·R&D·회의실·차량·현황)다 — 위의 공문 쪽 간격 그대로 한 줄에 든다. */
+.rnd { margin-bottom: 18px; }
+
+/* 과제 칩 한 줄 — 별명(없으면 과제명). 긴 이름은 잘리고 전체는 툴팁. 끝의 ＋ 는 과제 더하기. */
+.rnd .rd-projects { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.rnd .rd-proj {
+  display: block; max-width: 100%; min-height: 32px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rnd .rd-proj:hover { background: var(--pick-soft); border-color: var(--pick); }
+.rnd .rd-proj.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+.rnd .rd-proj-add { width: 34px; padding: 4px; color: var(--pick); font-size: 16px; font-weight: 500; }
+.rnd .rd-empty { margin-bottom: 12px; padding: 14px 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.rnd .rd-empty p { margin: 0 0 8px; }
+.rnd .rd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* 고른 과제의 머리 — 과제명 · 과제번호·책임자·연구기간 · 차년도 칩. 오늘이 든 차년도에 "올해". */
+.rnd .rd-head, .rnd .rd-form { margin-bottom: 12px; padding: 14px 16px; }
+.rnd .rd-head { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
+.rnd .rd-head .booking-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rnd .rd-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: -4px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rnd .rd-years { display: flex; flex-wrap: wrap; gap: 3px; }
+.rnd .rd-year {
+  flex: 1 0 auto; min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface); font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap;
+}
+.rnd .rd-year small { margin-left: 4px; padding: 0 5px; border-radius: 6px; background: var(--pick-soft); color: var(--pick); font-size: 10px; font-weight: 700; }
+.rnd .rd-year:hover { background: var(--pick-soft); border-color: var(--pick); }
+.rnd .rd-year.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+.rnd .rd-year.active small { background: rgb(255 255 255 / 22%); color: #fff; }
+.rnd .rd-year-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+
+/* 과제 폼 — 두 칸 격자. 과제명·비고는 한 줄 통째. */
+.rnd .rd-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.rnd .rd-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rnd .rd-field.wide { grid-column: 1 / -1; }
+.rnd .rd-field > span { color: var(--muted); font-size: 12px; }
+.rnd .rd-field .req { margin-left: 3px; color: var(--danger); font-size: 10px; font-weight: 700; }
+.rnd input[type="text"], .rnd input[type="date"], .rnd select, .rnd textarea {
+  width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid transparent; border-radius: 10px;
+  background: var(--surface-soft); font: inherit; font-size: 13px; color: inherit;
+}
+.rnd textarea { resize: vertical; line-height: 1.5; }
+.rnd input:focus, .rnd textarea:focus, .rnd select:focus { border-color: var(--pick); outline: none; }
+.rnd .rd-need { margin: 8px 0 0; color: var(--danger); font-size: 13px; font-weight: 600; }
+.rnd .rd-need:empty { display: none; }
+.rnd .rd-del { color: var(--danger); }
+.rnd .rd-del.armed, .rnd .rd-brow-del.armed { background: var(--danger); color: #fff; }
+.rnd .rd-form .rd-del { margin-left: auto; }
+.rnd .statusline { margin-bottom: 10px; }
+
+/* 접는 칸(예산·연구내역·변경이력) — 공문 탭의 양식·사전 설정 칸과 같은 모양. */
+.rnd .rd-box { margin-bottom: 10px; padding: 0 14px; border-radius: 14px; }
+.rnd details > summary { display: flex; align-items: center; gap: 9px; min-height: 43px; color: var(--muted); font-size: 14px; cursor: pointer; list-style: none; }
+.rnd details > summary::-webkit-details-marker { display: none; }
+.rnd details > summary > svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rnd details > summary::after { content: ""; width: 5px; height: 5px; margin: 0 3px; border-right: 1.4px solid var(--faint); border-bottom: 1.4px solid var(--faint); transform: rotate(-45deg); transition: transform .15s; }
+.rnd details[open] > summary::after { transform: rotate(45deg); }
+.rnd .rd-box > summary > span:first-of-type { color: var(--fg); font-weight: 600; }
+.rnd .rd-box-body { padding: 0 0 14px; }
+
+/* 예산 — 비목 | 계획 | 집행 | 잔액 | × 격자. 줄 아래 가는 막대가 집행률(계획을 넘으면 빨강). */
+.rnd .rd-bhead, .rnd .rd-brow, .rnd .rd-bsum { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .9fr) 22px; gap: 4px; align-items: center; }
+.rnd .rd-bhead { margin: 2px 0 4px; color: var(--muted); font-size: 11px; }
+.rnd .rd-bhead span:nth-child(n+2) { text-align: right; }
+.rnd .rd-brow { position: relative; padding: 2px 0 5px; }
+.rnd .rd-brow input { min-height: 32px; padding: 5px 8px; font-size: 13px; }
+.rnd .rd-brow input[data-k="plan"], .rnd .rd-brow input[data-k="used"] { text-align: right; font-variant-numeric: tabular-nums; }
+.rnd .rd-left { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rnd .rd-left.over { color: var(--danger); font-weight: 600; }
+.rnd .rd-brow-del { width: 22px; min-height: 22px; padding: 0; border-radius: 50%; background: transparent; color: var(--faint); font-size: 16px; line-height: 1; }
+.rnd .rd-brow-del:hover { background: var(--surface-soft); color: var(--danger); }
+.rnd .rd-bar { position: absolute; left: 0; bottom: 1px; height: 2px; max-width: 100%; border-radius: 1px; background: var(--pick); opacity: .6; }
+.rnd .rd-bar.over { background: var(--danger); opacity: .9; }
+.rnd .rd-bsum { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rnd .rd-bsum:empty { display: none; }
+.rnd .rd-bsum span:nth-child(n+2) { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rnd .rd-box-body .rd-actions { margin-top: 6px; }
+
+/* 연구내역·변경이력 — 적는 칸과 목록(늦은 것부터). */
+.rnd .rd-new { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--pick) 5%, var(--surface)); }
+.rnd .rd-new-row { display: flex; gap: 6px; align-items: center; }
+.rnd .rd-new-row input[type="date"] { flex: 0 0 auto; width: 132px; }
+.rnd .rd-new-row select { flex: 0 0 auto; width: auto; }
+.rnd .rd-new-row input[type="text"] { flex: 1; }
+.rnd .rd-new .rd-actions { margin-top: 2px; }
+.rnd .rd-arrow { flex: none; color: var(--faint); font-size: 12px; }
+.rnd .rd-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rnd .rd-list:empty { display: none; }
+.rnd .rd-list li { padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.rnd .rd-list li.editing { border-color: var(--pick); box-shadow: inset 3px 0 0 var(--pick); }
+.rnd .rd-list li.auto { border-left: 3px solid color-mix(in srgb, var(--mine) 70%, var(--line)); }
+.rnd .rd-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.rnd .rd-date { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.rnd .rd-kind { flex: none; padding: 0 6px; border-radius: 6px; background: var(--surface-soft); color: var(--muted); font-size: 11px; font-weight: 600; }
+.rnd .rd-title { flex: 1 1 120px; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.rnd .rd-row-btns { flex: none; margin-left: auto; display: inline-flex; gap: 2px; }
+.rnd .rd-row-btns button { min-height: 24px; padding: 2px 6px; font-size: 12px; }
+.rnd .rd-text { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+.rnd .rd-diff { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.rnd .rd-diff s { color: var(--muted); }
+.rnd .rd-diff b { font-weight: 600; }
+.rnd .rd-reason { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rnd .rd-reason::before { content: "사유 "; color: var(--faint); font-weight: 600; }
+.rnd .rd-reason-in { margin-top: 5px; min-height: 30px; font-size: 12px; }
+
+/* 요약 복사 · JSON 저장·불러오기 · 공문 탭의 과제 가져오기 */
+.rnd .rd-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
+.rnd .rd-import { position: relative; display: inline-flex; align-items: center; min-height: 28px; padding: 4px 8px; border-radius: 9px; background: transparent; color: var(--muted); font-size: 14px; cursor: pointer; }
+.rnd .rd-import:hover { background: var(--surface-soft); color: var(--fg); }
+.rnd .rd-import input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.rnd .rd-import:has(input:focus-visible) { outline: 3px solid var(--pick); outline-offset: 3px; }

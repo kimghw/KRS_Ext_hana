@@ -215,7 +215,8 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
    *   save·confirm 은 사후정산을 저장·확정하는 길(진행 글을 받는 함수를 넘긴다, 못 하면 던진다), again 은 그 뒤의 사정을 다시 주는 길,
    *   hold 는 저장하기 전에 사람이 정해 줄 것이 남았을 때의 까닭이다.
    *   redo 는 맨 아래 보내기 위에 서는 `사전정산 다시하기`·`사후정산 다시하기`({pre, post} — 저마다 {on, title} 이거나, 그 버튼이 설 때가
-   *   아니면 null), read 는 사후정산을 완료한 출장에 넣은 증빙을 읽어 사후정산에 반영하는 길이다(없으면 읽지 않고 그대로 담는다)
+   *   아니면 null), read 는 사후정산을 완료한 출장에 넣은 증빙을 읽어 사후정산에 반영하는 길이다(없으면 읽지 않고 그대로 담는다).
+   *   cap 은 증빙 넣기 아래에 세울 웹페이지 캡처 단추와 탭 목록(글)을 주는 길이다
    */
   function html(ctx) {
     const { it, trip, stage, locked } = ctx;
@@ -260,7 +261,10 @@ export function createSendBox({ escapeHtml, logEvent, evidence, setStatus, setEr
     // 사후정산을 완료한 출장에 넣는 증빙은 읽어서, 숙박 증빙·항공권이면 사후정산에 다시 올린다(ctx.read — 2026-10-05 사용자 지정:
     // "사후정산을 완료 후 보낸 후 증빙을 … 추가 하면 다시 사후정산을 업데이트"). 읽을 길이 없으면(ctx.read 가 없다) 전처럼 그대로 묶는다.
     const add = gate.settle ? '' : `<label class="at-send-add"${ctx.read ? ` title="${ADD_READ_TITLE}"` : ''}><input type="file" multiple accept="${EVIDENCE_ACCEPT}" data-send="file" aria-label="보낼 증빙 넣기"${off} />`
-      + `<span>${all.length ? '증빙 더 넣기' : '증빙 넣기'} · ${ctx.read ? ADD_READ : '읽지 않고 그대로 묶습니다'}</span></label>`;
+      + `<span>${all.length ? '증빙 더 넣기' : '증빙 넣기'} · ${ctx.read ? ADD_READ : '읽지 않고 그대로 묶습니다'}</span></label>`
+      // 그 아래가 웹페이지 캡처 단추와 펴 둔 탭 목록이다(ctx.cap — 공문 탭과 같은 칸, webpick.js — 2026-10-08 사용자 지정: "여기도
+      // 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로"). 캡처한 페이지는 이 칸의 증빙 넣기와 같은 길로 간다(attendpanel.js captureFor).
+      + (ctx.cap ? ctx.cap() : '');
     // 이전에 보낸 곳(2026-10-04 사용자 지정) — 한 줄이 과제·계정 · 받는 사람 · 보내는 길이고, 누르면 그 셋으로 보낸다. 켜진 줄이
     // 지금 보내는 곳이다. 길은 아이콘으로 적고(이름은 낭독기와 마우스를 올렸을 때만), Teams 로 보냈던 줄인데 지금 Teams 로 못 가면
     // 아이콘이 흐리다. 직접 고르는 칸은 접혀 있고 첫 줄 오른쪽의 목록 아이콘으로 편다 — 켜진 줄이 없으면(이전에 보낸 곳이 없거나,

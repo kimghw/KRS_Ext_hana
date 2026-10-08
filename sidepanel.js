@@ -23,6 +23,7 @@ import { fmtTime, todayStr, buildGrid, canDelete } from './src/parse.js';
 import { isFoldedRoom, foldLabels } from './src/roomorder.js';
 import { createAttendPanel } from './attendpanel.js';
 import { createGongmunPanel } from './gongmunpanel.js';
+import { createRndPanel } from './rndpanel.js';
 import { hrListDocs } from './src/hr.js';
 import { PLANS_KEY, loadPlans as readPlans, plansToShow } from './src/plans.js';
 import { tripRule, loadStages } from './src/settling.js';
@@ -41,7 +42,7 @@ const el = {
   stamp: $('stamp'), pickList: $('pickList'),
   ask: $('askInput'), askGo: $('askGo'), askNote: $('askNote'), askList: $('askList'),
   apiKey: $('apiKey'), apiKeyState: $('apiKeyState'), cliState: $('cliState'), cliCheck: $('cliCheck'), cliGuide: $('cliGuide'),
-  tabAttend: $('tabAttend'), tabGongmun: $('tabGongmun'), tabRoom: $('tabRoom'), tabCar: $('tabCar'), tabMine: $('tabMine'), appTitle: $('appTitle'),
+  tabAttend: $('tabAttend'), tabGongmun: $('tabGongmun'), tabRnd: $('tabRnd'), tabRoom: $('tabRoom'), tabCar: $('tabCar'), tabMine: $('tabMine'), appTitle: $('appTitle'),
   openPageInline: $('openPageInline'), scheduleTitle: $('scheduleTitle'), scheduleDate: $('scheduleDate'),
   capture: $('capture'), diagOut: $('diagOut'),
   spanDays: $('spanDays'), spanControl: document.querySelector('.span-control'),
@@ -1726,8 +1727,9 @@ const isCar = () => state.mode === 'car';
 const isMineMode = () => state.mode === 'mine';
 const isAttend = () => state.mode === 'attend';
 const isGongmun = () => state.mode === 'gongmun';
-/** 날짜 격자를 쓰지 않고 제 화면만 두는 탭(근태·공문). */
-const isPanelTab = () => isAttend() || isGongmun();
+const isRnd = () => state.mode === 'rnd';
+/** 날짜 격자를 쓰지 않고 제 화면만 두는 탭(근태·공문·R&D). */
+const isPanelTab = () => isAttend() || isGongmun() || isRnd();
 
 /** 근태 탭. 화면 조각은 attendpanel.js 가 들고 있고, 여기서는 탭을 오갈 때 보이고 숨기기만 한다. */
 const attend = createAttendPanel({
@@ -1744,6 +1746,13 @@ const gongmun = createGongmunPanel({
   $, escapeHtml, logEvent,
   ai: () => ({ apiKey: state.apiKey, cli: state.cli }),
   me: () => state.myName,
+  copyText: (text) => copyText(text),
+  flash: (btn, text, ms) => flash(btn, text, ms),
+});
+
+/** R&D 탭. 화면 조각은 rndpanel.js 가 들고 있고, 여기서는 탭을 오갈 때 보이고 숨기기만 한다. */
+const rnd = createRndPanel({
+  $, escapeHtml, logEvent,
   copyText: (text) => copyText(text),
   flash: (btn, text, ms) => flash(btn, text, ms),
 });
@@ -1811,14 +1820,15 @@ function applyMode(mode) {
   const mineTab = isMineMode();
   const attendTab = isAttend();
   const gongmunTab = isGongmun();
-  const panelTab = attendTab || gongmunTab;
-  for (const [tab, on] of [[el.tabAttend, attendTab], [el.tabGongmun, gongmunTab], [el.tabRoom, !car && !mineTab && !panelTab], [el.tabCar, car], [el.tabMine, mineTab]]) {
+  const rndTab = isRnd();
+  const panelTab = attendTab || gongmunTab || rndTab;
+  for (const [tab, on] of [[el.tabAttend, attendTab], [el.tabGongmun, gongmunTab], [el.tabRnd, rndTab], [el.tabRoom, !car && !mineTab && !panelTab], [el.tabCar, car], [el.tabMine, mineTab]]) {
     tab.classList.toggle('active', on);
     tab.setAttribute('aria-selected', String(on));
   }
 
   const pageName = car ? '차량 이용' : '회의실 예약';
-  el.appTitle.innerHTML = (attendTab ? '근태 신청' : gongmunTab ? '공문 작성' : mineTab ? '현황' : pageName) + '<span class="title-dot">.</span>';
+  el.appTitle.innerHTML = (attendTab ? '근태 신청' : gongmunTab ? '공문 작성' : rndTab ? 'R&amp;D 과제' : mineTab ? '현황' : pageName) + '<span class="title-dot">.</span>';
   const openLabel = `${pageName} 페이지를 새 탭에서 열기`;
   el.openPageInline.title = openLabel;
   el.openPageInline.setAttribute('aria-label', openLabel);
@@ -1838,7 +1848,7 @@ function applyMode(mode) {
   el.region.hidden = car || mineTab;
   // 말로 찾기는 회의실·차량 둘 다 쓴다. 내 예약은 이미 지난 것을 보는 화면이라 뜻이 없다.
   document.querySelector('.ask')?.toggleAttribute('hidden', mineTab || panelTab);
-  // 근태·공문 탭은 날짜 격자도 예약 칸도 쓰지 않는다. 통째로 숨기고 제 화면만 둔다.
+  // 근태·공문·R&D 탭은 날짜 격자도 예약 칸도 쓰지 않는다. 통째로 숨기고 제 화면만 둔다.
   document.querySelector('.controls')?.toggleAttribute('hidden', panelTab);
   document.querySelector('.schedule')?.toggleAttribute('hidden', panelTab);
   // 칸 하나에 로고·입력·버튼이 한 줄로 들어가느라 제목 줄이 없다.
@@ -1853,9 +1863,14 @@ function applyMode(mode) {
 
   chrome.storage.local.set({ mode });
   if (!gongmunTab) gongmun.hide();
+  if (!rndTab) rnd.hide();
   if (gongmunTab) {
     attend.hide();
     return gongmun.show();
+  }
+  if (rndTab) {
+    attend.hide();
+    return rnd.show();
   }
   if (attendTab) return attend.show();
   attend.hide();
@@ -2565,6 +2580,8 @@ async function init() {
   attend.wire();
   el.tabGongmun.addEventListener('click', () => setMode('gongmun'));
   gongmun.wire();
+  el.tabRnd.addEventListener('click', () => setMode('rnd'));
+  rnd.wire();
   el.tabRoom.addEventListener('click', () => setMode('room'));
   el.tabCar.addEventListener('click', () => setMode('car'));
   el.tabMine.addEventListener('click', () => setMode('mine'));
@@ -2662,7 +2679,7 @@ async function init() {
   // 홈의 WORKSPACE 카드에서 한 건을 눌러 열렸으면 저장된 모드 대신 그 날짜·종류로 간다.
   const jump = await takeHomeJump();
   const first = jump ? applyHomeJump(jump)
-    : ['car', 'mine', 'attend', 'gongmun'].includes(saved.mode) ? applyMode(saved.mode) : load();
+    : ['car', 'mine', 'attend', 'gongmun', 'rnd'].includes(saved.mode) ? applyMode(saved.mode) : load();
   // 패널이 이미 열려 있을 때 홈에서 누르면 저장소 변화로 온다.
   chrome.storage.onChanged?.addListener((changes, area) => {
     if (area !== 'local') return;

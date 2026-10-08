@@ -4,7 +4,7 @@
 // 전자결재에는 올리지 않는다(2026-10-07) — 제목·본문을 만들어 복사하게 하고 새 공문 창을 열어 줄 뿐이다. 본문 편집기(DEXT5)는
 // 스크립트로 넣은 글을 저장하지 않아, 사람이 붙여 넣는 것이 지금은 가장 확실한 길이다(src/gongmun.js 머리말).
 //
-//   갈래(구매·교육·출장) → 문서 넣기(캡처 붙여넣기·끌어다 놓기·고르기·보고 있는 웹페이지 통째로 캡처) → 읽은 칸 고치기·과제 고르기 → 제목·본문 복사 → 새 공문 열기
+//   갈래(구매·교육·출장) → 문서 넣기(캡처 붙여넣기·끌어다 놓기·고르기·열어 둔 웹페이지 골라 통째로 캡처) → 읽은 칸 고치기·과제 고르기 → 제목·본문 복사 → 새 공문 열기
 //
 // 양식(eclass 양식·제목 틀·본문 틀)과 사전 설정(부서·부서장·참조자·과제 다섯 개)은 이 탭 아래의 접힌 칸에서 고친다.
 
@@ -16,7 +16,8 @@ import {
   mergeDraft, applyReason, REASON_KEYS, EMPTY_ROW, eduModeOf, spreadParts,
 } from './src/gongmun.js';
 import { gongmunSmart, gongmunSetupSmart, gongmunReasonSmart } from './src/llm.js';
-import { captureActiveTab, MAX_SHOTS } from './src/pagecap.js';
+import { readSlots } from './src/pagecap.js';
+import { createWebPick } from './webpick.js';
 
 const FILE_LIMIT = 10 * 1024 * 1024;
 /** 한 번에 읽는 장 수. 로컬 CLI 다리는 여섯 장까지 받는다(native/host.mjs). 웹페이지 캡처의 그 밖의 장은 첨부에만 넣는다. */
@@ -36,12 +37,13 @@ const formLabel = (id) => FORMS.find((f) => f.id === id)?.label || id;
 /**
  * @param {{$:Function, escapeHtml:Function, logEvent:Function, ai:() => {apiKey:string, cli:boolean}, me?:() => string,
  *   copyText?:(text:string) => Promise<boolean>, flash?:(btn:HTMLElement, text:string, ms?:number) => void,
- *   capture?:(opts: {today: string, onProgress: Function}) => Promise<object>}} deps capture 는 보고 있는 웹페이지를 통째로 찍는 길(src/pagecap.js)
+ *   listTabs?:() => Promise<object[]>, capture?:(tabs: object[], opts: {today: string, onProgress: Function}) => Promise<object>}} deps
+ *   listTabs 는 이 창에 열어 둔 웹페이지 탭들, capture 는 고른 탭들을 통째로 찍는 길(src/pagecap.js) — 탭 고르기 칸(webpick.js)에 넘긴다
  */
-export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '', copyText = defaultCopy, flash = () => {}, capture = captureActiveTab }) {
+export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '', copyText = defaultCopy, flash = () => {}, listTabs, capture }) {
   const el = {
     root: $('gongmun'), kinds: $('gmKinds'), chat: $('gmChat'), chatInput: $('gmChatInput'), chatGo: $('gmChatGo'), chatLog: $('gmChatLog'),
-    intake: $('gmIntake'), file: $('gmFile'), dropLead: $('gmDropLead'), capture: $('gmCapture'),
+    intake: $('gmIntake'), file: $('gmFile'), dropLead: $('gmDropLead'), capture: $('gmCapture'), tabs: $('gmTabs'),
     fileName: $('gmFileName'), manual: $('gmManual'), soon: $('gmSoon'), status: $('gmStatus'),
     draft: $('gmDraft'), source: $('gmSource'), items: $('gmItems'), limit: $('gmLimit'), projects: $('gmProjects'), projInfo: $('gmProjInfo'),
     fields: $('gmFields'), line: $('gmLine'), need: $('gmNeed'), reset: $('gmReset'),
@@ -52,6 +54,9 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     presetBox: $('gmPresetBox'), presetState: $('gmPresetState'), dept: $('gmDept'), head: $('gmHead'), refs: $('gmRefs'),
     projList: $('gmProjList'), projAdd: $('gmProjAdd'), projCount: $('gmProjCount'),
   };
+  // 웹페이지 골라 통째로 캡처 — 탭 고르기 칸은 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js, 2026-10-08 사용자 지정).
+  const pick = createWebPick({ escapeHtml, listTabs, capture });
+  const PICK_KEY = 'gongmun';
   const st = {
     kind: 'purchase', loaded: false, busy: false, capturing: false, ready: true, chatBusy: false, chat: [], reasonBusy: false,
     preset: normalizePreset(null),
@@ -131,6 +136,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     el.dropLead.textContent = st.capturing ? '캡처하는 중…' : st.busy ? '읽는 중…' : w ? k.more : k.ask;
     el.file.disabled = st.busy || st.capturing;
     el.capture.disabled = st.busy || st.capturing;
+    pick.sync(el.tabs, { busy: st.busy || st.capturing });
     el.manual.disabled = st.busy;
     el.manual.hidden = !!w;
     el.fileName.textContent = !st.ready ? 'Claude 가 연결되지 않아 문서를 읽을 수 없습니다 — 문서 없이 쓰기는 됩니다'
@@ -195,8 +201,10 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
    * 읽는 사이에 갈래를 바꿨어도 읽기를 시작한 갈래에 담는다.
    *
    * capture 는 웹페이지를 통째로 캡처한 장들을 넣을 때다(captureTab) — 장 수가 정해져 오지 않으니 읽기에는 남은 자리만큼만 보내고
-   * 나머지 장은 첨부(PDF)에만 넣는다(attachOnly). 장들은 한 묶음(group)이라 읽기가 가린 종류를 뒷장도 이어 받는다(spreadParts).
-   * 화면 글자(text)는 붙여 넣은 글과 같은 자리로 간다.
+   * 나머지 장은 첨부(PDF)에만 넣는다(attachOnly). 탭을 여럿 찍었으면 탭마다 첫 장부터 돌아가며 자리를 나눈다(readSlots).
+   * 한 탭의 장들은 한 묶음(group)이라 읽기가 가린 종류를 뒷장도 이어 받는다(spreadParts). 화면 글자(text)는 붙여 넣은 글과 같은 자리로 간다.
+   * @param {{files?: File[], text?: string, capture?: {groups: string[], counts: number[], notes?: string[]}|null}} input
+   *   capture.groups 는 장마다 묶음, counts 는 탭마다 장 수(찍은 차례), notes 는 읽은 내용에 덧붙일 말(너무 길어 잘린 페이지·못 찍은 탭)
    */
   async function intake({ files = [], text = '', capture = null }) {
     const kind = st.kind;
@@ -206,6 +214,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     const kept = prev?.files || [];
     const room = Math.max(MAX_FILES - kept.filter(readable).length, 0);
     if (files.length && room <= 0 && !capture) return setStatus(`파일은 ${MAX_FILES}장까지 넣습니다 — 새로 시작하려면 읽은 내용의 비우기를 누르세요.`, 'error');
+    const slots = capture ? readSlots(capture.counts, room) : [];
     const picked = [];
     for (const [i, f] of (capture ? files : files.slice(0, room)).entries()) {
       if (!/^image\//.test(f.type) && f.type !== 'application/pdf') return setStatus(`그림·PDF 만 읽습니다 — ${f.name}`, 'error');
@@ -214,7 +223,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
         const named = namedPaste(f, [...kept, ...picked].map((x) => x.name));
         picked.push({
           name: named.name, type: f.type, size: f.size, dataUrl: await readFile(named),
-          ...(capture ? { group: capture.id, attachOnly: i >= room } : {}),
+          ...(capture ? { group: capture.groups[i], attachOnly: !slots[i] } : {}),
         });
       } catch (err) {
         return setStatus(err.message, 'error');
@@ -225,8 +234,10 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     const toRead = all.filter(readable);
     const allText = [prev?.text || '', text].filter((s) => s.trim()).join('\n\n');
     const held = picked.filter((f) => f.attachOnly).length;
+    // 탭을 여럿 찍었으면 읽는 장은 탭마다 앞쪽에서 고른다(readSlots) — "앞 n장" 이 아니다.
+    const front = capture?.counts?.length > 1 ? '페이지마다 앞쪽부터 ' : '앞 ';
     const extra = capture
-      ? (held ? ` · 캡처 ${picked.length}장 가운데 앞 ${picked.length - held}장과 화면 글자를 읽고, 나머지는 첨부에만 넣습니다` : ' · 화면 글자도 함께 읽습니다')
+      ? (held ? ` · 캡처 ${picked.length}장 가운데 ${front}${picked.length - held}장과 화면 글자를 읽고, 나머지는 첨부에만 넣습니다` : ' · 화면 글자도 함께 읽습니다')
       : files.length > room ? ` · ${MAX_FILES}장까지만 넣습니다` : '';
     st.busy = true;
     paintIntake();
@@ -239,8 +250,8 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       if (rec.docType === 'unknown') throw new Error(`품의에 넣을 문서로 보이지 않습니다 — ${rec.summary}`);
       const { draft: fresh, notes } = fromRecord(kind, rec, { me: me(), files: all.map((f) => f.name) });
       if (kind === 'purchase' && rec.docType === 'course') notes.push('교육 안내문으로 보입니다 — 교육 품의라면 교육 갈래에 다시 넣어 주세요');
-      if (capture?.cut) notes.push(`페이지가 너무 길어 앞부분(화면 ${MAX_SHOTS}개)만 캡처했습니다`);
-      if (held) notes.push(`캡처 ${picked.length}장 가운데 앞 ${picked.length - held}장만 읽었습니다 — 나머지 ${held}장은 첨부 PDF 에만 들어갑니다`);
+      if (capture?.notes) notes.push(...capture.notes);
+      if (held) notes.push(`캡처 ${picked.length}장 가운데 ${front}${picked.length - held}장만 읽었습니다 — 나머지 ${held}장은 첨부 PDF 에만 들어갑니다`);
       if (got.note) notes.push(got.note);
       const what = [DOC_LABEL[rec.docType] || '문서', rec.vendor, rec.quoteDate].filter(Boolean).join(' · ');
       const touched = prev?.touched || [];
@@ -270,20 +281,59 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   }
 
   /**
-   * 보고 있는 웹페이지를 통째로 캡처해 읽는다(2026-10-08 사용자 지정) — 교육 안내 페이지를 조각조각 캡처해 붙여 넣지 않아도 된다.
-   * 찍는 일은 src/pagecap.js 가 한다(사이트 접근 권한 묻기 → 한 화면씩 찍기 → A4 장으로 자르기 → 화면 글자). 여기서는 그 장들과 글자를
-   * 문서 넣기와 같은 길(intake)로 읽힌다 — 읽은 뒤 첨부 PDF 저장을 누르면 그 장들이 문서(교육 내용 등)마다 PDF 하나가 된다.
+   * 캡처할 웹페이지 고르기를 펼친다(2026-10-08 사용자 지정) — 활성 탭만 찍으면 옆에 띄워 둔 메일함 같은 엉뚱한 화면이 찍혀서,
+   * 이 창에 열어 둔 웹페이지 탭을 늘어놓고 전체 또는 하나 이상 눌러 고르게 한다. 아무것도 미리 고르지 않는다(탭이 하나뿐이면 그것) —
+   * 받은 편지함 같은 화면이 모르는 새 첨부에 들어가지 않게. 다시 누르면 접는다.
    */
-  async function captureTab() {
+  async function openPicker() {
+    const k = KINDS[st.kind];
+    if (!k.reads || st.busy || st.capturing) return;
+    try {
+      if (await pick.toggle(PICK_KEY)) setStatus('');
+    } catch (err) {
+      return setStatus(err.message, 'error');
+    }
+    paintPicker();
+  }
+
+  function closePicker() {
+    pick.close();
+    paintPicker();
+  }
+
+  /** 탭 목록을 그린다 — 줄마다 체크박스·제목·사이트, 맨 위에 전체(webpick.js). */
+  function paintPicker() {
+    const open = pick.isOpen(PICK_KEY);
+    el.capture.setAttribute('aria-expanded', String(open));
+    el.tabs.classList.toggle('hidden', !open);
+    el.tabs.innerHTML = open ? pick.inner({ busy: st.busy || st.capturing }) : '';
+    pick.sync(el.tabs, { busy: st.busy || st.capturing });
+  }
+
+  const onPickerChange = (e) => pick.change(e, { busy: st.busy || st.capturing });
+
+  function onPickerClick(e) {
+    const r = pick.click(e);
+    if (r?.act === 'close') paintPicker();
+    else if (r?.act === 'go') captureTab(r.tabs);
+  }
+
+  /**
+   * 고른 웹페이지들을 통째로 캡처해 읽는다(2026-10-08 사용자 지정) — 교육 안내 페이지를 조각조각 캡처해 붙여 넣지 않아도 된다.
+   * 찍는 일은 src/pagecap.js 가 한다(사이트 접근 권한 묻기 → 고른 탭을 차례로 앞에 두고 한 화면씩 찍기 → A4 장으로 자르기 → 화면 글자 →
+   * 보던 탭으로 돌아오기). 여기서는 그 장들과 글자를 문서 넣기와 같은 길(intake)로 읽힌다 — 탭마다 한 묶음이고, 읽은 뒤 첨부 PDF 저장을
+   * 누르면 그 장들이 문서(교육 내용 등)마다 PDF 하나가 된다.
+   */
+  async function captureTab(tabs) {
     const k = KINDS[st.kind];
     if (!k.reads || st.busy || st.capturing) return;
     st.capturing = true;
+    closePicker();
     paintIntake();
-    setStatus('보고 있는 웹페이지를 캡처하는 중입니다…');
     let got = null;
     try {
-      got = await capture({ today: today(), onProgress: (done, total) => setStatus(`웹페이지를 캡처하는 중입니다… ${done}/${total}`) });
-      logEvent('gongmun', true, `웹페이지 캡처 · ${got.host} · 화면 ${got.shots}개 → ${got.tiles}장${got.cut ? ' · 너무 길어 앞부분만' : ''}`);
+      got = await pick.shoot(tabs, { today: today(), onStatus: (text) => setStatus(text) });
+      logEvent('gongmun', true, `웹페이지 캡처 · ${got.what}`);
     } catch (err) {
       setStatus(err.message, 'error');
       logEvent('gongmun', false, `웹페이지 캡처 실패 · ${err.message}`);
@@ -292,8 +342,13 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       paintIntake();
     }
     if (!got) return;
-    if (!got.files.length && !got.text) return setStatus('캡처한 화면이 비어 있습니다.', 'error');
-    return intake({ files: got.files, text: got.text, capture: { id: `cap${Date.now()}`, cut: got.cut } });
+    const { pages, notes } = got;
+    const id = `cap${Date.now()}`;
+    return intake({
+      files: pages.flatMap((p) => p.files),
+      text: pages.map((p) => p.text).filter(Boolean).join('\n\n'),
+      capture: { groups: pages.flatMap((p, i) => p.files.map(() => `${id}_${i}`)), counts: pages.map((p) => p.files.length), notes },
+    });
   }
 
   /**
@@ -930,7 +985,9 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     el.chatGo.addEventListener('click', runChat);
     el.chatInput.addEventListener('keydown', onChatKey);
     el.chatInput.addEventListener('input', growChat);
-    el.capture.addEventListener('click', captureTab);
+    el.capture.addEventListener('click', openPicker);
+    el.tabs.addEventListener('change', onPickerChange);
+    el.tabs.addEventListener('click', onPickerClick);
     el.manual.addEventListener('click', startManual);
     el.reset.addEventListener('click', resetWork);
     el.projects.addEventListener('click', onProjectClick);

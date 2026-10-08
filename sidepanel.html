@@ -27,6 +27,7 @@
     <nav class="tabs" role="tablist" aria-label="근태·예약 종류">
       <button id="tabAttend" class="tab" role="tab" aria-selected="false">근태</button>
       <button id="tabGongmun" class="tab" role="tab" aria-selected="false" title="공문 작성 — 견적서·교육 안내문을 넣으면 전자결재 품의(제목·본문·결재선)를 만듭니다">공문</button>
+      <button id="tabRnd" class="tab" role="tab" aria-selected="false" title="R&amp;D 과제 — 과제마다 올해(차년도)의 예산·연구내역·변경이력을 적어 둡니다">R&amp;D</button>
       <button id="tabRoom" class="tab active" role="tab" aria-selected="true">회의실</button>
       <button id="tabCar" class="tab" role="tab" aria-selected="false">차량</button>
       <button id="tabMine" class="tab" role="tab" aria-selected="false" title="WORKSPACE 현황 — 내 회의실·차량 예약과 근태(출장·휴가 …)를 한 목록으로 봅니다">현황</button>
@@ -119,11 +120,14 @@
           <span class="gm-drop-how">캡처해 붙여 넣기(Ctrl+V) · 끌어다 놓기 · 눌러서 고르기</span>
           <span id="gmFileName" class="gm-file"></span>
         </label>
-        <!-- 보고 있는 웹페이지를 위에서 아래까지 통째로 찍어 읽는다(src/pagecap.js) — 교육 안내 페이지를 조각조각 캡처하지 않아도 된다. 처음 한 번 사이트 접근 권한을 묻는다. -->
+        <!-- 이 창에 열어 둔 웹페이지를 골라 위에서 아래까지 통째로 찍어 읽는다(src/pagecap.js) — 교육 안내 페이지를 조각조각 캡처하지 않아도 된다.
+             누르면 웹페이지 탭 목록(gmTabs)이 펼쳐지고 전체 또는 하나 이상 골라 찍는다. 처음 찍을 때 한 번 사이트 접근 권한을 묻는다.
+             탭 고르기 칸은 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js). -->
         <div class="gm-intake-actions">
-          <button type="button" id="gmCapture" class="ghost small gm-capture" title="이 창에서 보고 있는 웹페이지(탭)를 위에서 아래까지 캡처해 화면의 글자와 함께 읽습니다. 캡처는 A4 크기로 잘려 첨부 PDF 가 됩니다. 처음 한 번 사이트 접근 권한을 묻습니다."><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5V3m8 2V3"/></svg>보고 있는 웹페이지 통째로 캡처해 읽기</button>
+          <button type="button" id="gmCapture" class="ghost small wp-open" aria-controls="gmTabs" aria-expanded="false" title="이 창에 열어 둔 웹페이지(탭)를 전체 또는 하나 이상 골라 위에서 아래까지 캡처하고 화면의 글자와 함께 읽습니다. 캡처는 A4 크기로 잘려 첨부 PDF 가 됩니다. 처음 찍을 때 한 번 사이트 접근 권한을 묻습니다."><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5V3m8 2V3"/></svg>웹페이지 골라 통째로 캡처해 읽기</button>
           <button type="button" id="gmManual" class="ghost small gm-manual">문서 없이 쓰기</button>
         </div>
+        <div id="gmTabs" class="wp-tabs hidden" role="group" aria-label="캡처할 웹페이지"></div>
         <p class="cli-help" hidden><span>Claude 가 연결되지 않아 문서를 읽을 수 없습니다.</span><button type="button" class="small cli-guide-copy" title="이 PC 의 Claude Code·Codex 같은 코딩 에이전트에 붙여 넣으면 로컬 Claude CLI 를 연결해 줍니다. 확장 폴더 경로와 확장 ID 가 함께 들어갑니다.">연결 지침 복사</button></p>
       </div>
       <div class="statusline"><span id="gmStatus" class="status" role="status" aria-live="polite"></span></div>
@@ -190,6 +194,108 @@
           <ul id="gmProjList" class="gm-proj-list"></ul>
         </div>
       </details>
+    </section>
+    <!-- R&D 탭. 과제마다 연구기간을 차년도로 잘라, 보고 있는 차년도(처음엔 오늘이 든 차년도)의 예산·연구내역·변경이력을 적어 둔다.
+         어디에도 올리지 않는다 — 이 브라우저(chrome.storage 의 rndBook)에만 남고, JSON 으로 내보내고 들여온다. rndpanel.js 가 그린다.
+         과제는 공문 탭의 사전 설정에서 가져올 수 있다(처음 열 때 과제가 없으면 저절로). 다른 탭에서는 통째로 숨는다. -->
+    <section id="rnd" class="rnd hidden" aria-label="R&amp;D 과제 관리">
+      <!-- 과제 칩 한 줄 — 별명(없으면 과제명)으로, 맨 끝의 ＋ 로 과제를 더한다. -->
+      <div id="rdProjects" class="rd-projects" role="group" aria-label="과제"></div>
+      <div id="rdEmpty" class="rd-empty card hidden">
+        <p>적어 둔 과제가 없습니다. 공문 탭의 사전 설정에 둔 과제를 가져오거나 새 과제를 더하세요.</p>
+        <div class="rd-actions">
+          <button type="button" id="rdEmptyImport" class="ghost small">공문 탭의 과제 가져오기</button>
+          <button type="button" id="rdEmptyAdd" class="primary small">과제 더하기</button>
+        </div>
+      </div>
+      <!-- 고른 과제의 머리 — 과제명 · 과제번호·책임자·연구기간 · 차년도 칩(오늘이 든 차년도에 올해 표시). -->
+      <div id="rdHead" class="rd-head card hidden">
+        <div class="booking-head"><strong id="rdName"></strong><button type="button" id="rdEdit" class="ghost small">과제 고치기</button></div>
+        <p id="rdMeta" class="rd-meta"></p>
+        <div id="rdYears" class="rd-years" role="group" aria-label="차년도"></div>
+        <p id="rdYearNote" class="rd-year-note" role="status"></p>
+      </div>
+      <!-- 과제 더하기·고치기 폼. 책임자·연구기간을 고치면 변경이력에 저절로 남는다(src/rnd.js 의 projectChanges). -->
+      <div id="rdForm" class="rd-form card hidden" aria-label="과제 정보">
+        <div class="booking-head"><strong id="rdFormTitle">과제</strong></div>
+        <div class="rd-fields">
+          <label class="rd-field wide"><span>과제명 <span class="req">필수</span></span><input type="text" id="rdFName" autocomplete="off" spellcheck="false" placeholder="예) MW급 10kV 고전압 직류 시스템용 반도체 차단기 개발" /></label>
+          <label class="rd-field"><span>과제 별명</span><input type="text" id="rdFAlias" autocomplete="off" placeholder="예) 차단기 과제" /></label>
+          <label class="rd-field"><span>과제번호</span><input type="text" id="rdFCode" autocomplete="off" spellcheck="false" placeholder="예) RND-20-2026" /></label>
+          <label class="rd-field"><span>과제책임자</span><input type="text" id="rdFLead" autocomplete="off" placeholder="예) 박기도" /></label>
+          <label class="rd-field"><span>연구 시작일</span><input type="date" id="rdFStart" /></label>
+          <label class="rd-field"><span>연구 종료일</span><input type="date" id="rdFEnd" /></label>
+          <label class="rd-field wide"><span>비고</span><input type="text" id="rdFNote" autocomplete="off" placeholder="예) 산업부 · 주관기관 KRS" /></label>
+        </div>
+        <p id="rdFNeed" class="rd-need" role="status"></p>
+        <div class="rd-actions">
+          <button type="button" id="rdFSave" class="primary">저장</button>
+          <button type="button" id="rdFCancel" class="ghost">취소</button>
+          <button type="button" id="rdFDel" class="ghost rd-del hidden" title="이 과제와 적어 둔 차년도 내용을 모두 지웁니다. 두 번 누릅니다.">과제 지우기</button>
+        </div>
+      </div>
+      <div class="statusline"><span id="rdStatus" class="status" role="status" aria-live="polite"></span></div>
+      <div id="rdBody" class="hidden">
+        <!-- 예산 — 비목마다 계획·집행·잔액. 계획을 고치면 변경이력에 저절로 남는다(src/rnd.js 의 budgetChanges). -->
+        <details id="rdBudgetBox" class="rd-box card" open>
+          <summary><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/></svg><span>예산</span><span id="rdBudgetState" class="summary-detail"></span></summary>
+          <div class="rd-box-body">
+            <div class="rd-bhead" aria-hidden="true"><span>비목</span><span>계획(원)</span><span>집행(원)</span><span>잔액</span><span></span></div>
+            <div id="rdBudget" class="rd-budget" role="table" aria-label="비목별 예산"></div>
+            <div id="rdBudgetSum" class="rd-bsum"></div>
+            <div class="rd-actions"><button type="button" id="rdBudgetAdd" class="ghost small">비목 더하기</button></div>
+          </div>
+        </details>
+        <!-- 연구내역 — 날짜·제목·내용. 늦은 것부터 보인다. -->
+        <details id="rdLogBox" class="rd-box card" open>
+          <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg><span>연구내역</span><span id="rdLogState" class="summary-detail"></span></summary>
+          <div class="rd-box-body">
+            <div class="rd-new" aria-label="연구내역 적기">
+              <div class="rd-new-row">
+                <input type="date" id="rdLogDate" aria-label="날짜" />
+                <input type="text" id="rdLogTitle" aria-label="제목" placeholder="한 줄 제목 — 예) 차단기 시제품 1차 시험" autocomplete="off" />
+              </div>
+              <textarea id="rdLogText" rows="2" aria-label="내용" placeholder="한 일 · 결과 · 산출물 (선택)"></textarea>
+              <div class="rd-actions">
+                <button type="button" id="rdLogAdd" class="primary small">기록</button>
+                <button type="button" id="rdLogCancel" class="ghost small hidden">고치기 그만두기</button>
+              </div>
+            </div>
+            <ul id="rdLogs" class="rd-list"></ul>
+          </div>
+        </details>
+        <!-- 변경이력 — 날짜·구분·항목·변경 전·후·사유. 저절로 남은 줄(auto)은 사유만 적는다. -->
+        <details id="rdChangeBox" class="rd-box card" open>
+          <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg><span>변경이력</span><span id="rdChangeState" class="summary-detail"></span></summary>
+          <div class="rd-box-body">
+            <div class="rd-new" aria-label="변경이력 적기">
+              <div class="rd-new-row">
+                <input type="date" id="rdChDate" aria-label="날짜" />
+                <select id="rdChKind" aria-label="구분"></select>
+                <input type="text" id="rdChItem" aria-label="항목" placeholder="항목 — 예) 연구재료비" autocomplete="off" />
+              </div>
+              <div class="rd-new-row">
+                <input type="text" id="rdChBefore" aria-label="변경 전" placeholder="변경 전" autocomplete="off" />
+                <span class="rd-arrow" aria-hidden="true">→</span>
+                <input type="text" id="rdChAfter" aria-label="변경 후" placeholder="변경 후" autocomplete="off" />
+              </div>
+              <input type="text" id="rdChReason" aria-label="사유" placeholder="사유 (선택)" autocomplete="off" />
+              <div class="rd-actions">
+                <button type="button" id="rdChAdd" class="primary small">기록</button>
+                <button type="button" id="rdChCancel" class="ghost small hidden">고치기 그만두기</button>
+              </div>
+            </div>
+            <ul id="rdChanges" class="rd-list"></ul>
+          </div>
+        </details>
+        <!-- 요약 복사(보고서·메일에 붙여 넣기) · JSON 저장·불러오기(이 브라우저 밖으로) · 공문 탭의 과제 가져오기. -->
+        <div class="rd-tools card">
+          <button type="button" id="rdCopy" class="primary small" title="보고 있는 과제·차년도의 개요·예산표·연구내역·변경이력을 글로 복사합니다">요약 복사</button>
+          <button type="button" id="rdExport" class="ghost small" title="과제 전부를 JSON 파일로 내려받습니다 — 다른 PC·브라우저로 옮기거나 보관할 때">JSON 저장</button>
+          <label class="ghost small rd-import" title="JSON 저장으로 받은 파일을 들여옵니다. 지금 적어 둔 것을 통째로 바꿉니다."><input type="file" id="rdImport" accept="application/json,.json" />JSON 불러오기</label>
+          <button type="button" id="rdImportGm" class="ghost small" title="공문 탭 사전 설정의 과제(과제명·별명·과제번호·책임자·연구기간)를 가져옵니다. 이미 있는 과제는 빈 칸만 채웁니다.">공문 탭의 과제 가져오기</button>
+        </div>
+      </div>
     </section>
     <section class="controls card" aria-label="조회 날짜와 시간">
       <div class="date-bar">

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_SHOTS, SHOT_GAP_MS, MAX_SCALE, A4_RATIO, TEXT_MAX, shotPlan, tileRanges, capturable, hostOf, tileName, normalizeText,
-  stitchTiles, capturePage, pageInfo, pageStep, pageDone,
+  stitchTiles, capturePage, captureMany, readSlots, pageInfo, pageStep, pageDone,
 } from '../src/pagecap.js';
 
 let pass = 0;
@@ -141,6 +141,57 @@ await ta('긴 페이지는 앞부분만 찍고 cut 을 알린다', async () => {
   const tab = fakeTab({ scrollHeight: 100_000 });
   const got = await capturePage({ tab: { url: 'https://a.b/' }, exec: tab.exec, shoot: tab.shoot, wait: async () => {}, stitch: async (j) => j.shots.slice(0, 1).map(() => new Blob(['x'])) });
   assert.deepEqual([got.shots, got.cut], [MAX_SHOTS, true]);
+});
+
+console.log('여러 탭 (2026-10-08 — 전체 또는 하나 이상 골라 찍기)');
+t('읽기 자리는 탭마다 첫 장부터 돌아가며 나눈다 — 긴 탭 하나가 다 차지하지 않는다', () => {
+  assert.deepEqual(readSlots([4, 3], 5), [true, true, true, false, true, true, false]);
+  assert.deepEqual(readSlots([7], 5), [true, true, true, true, true, false, false], '탭 하나면 앞 다섯 장');
+  assert.deepEqual(readSlots([1, 6, 1], 5), [true, true, true, true, false, false, false, true]);
+  assert.deepEqual(readSlots([2, 2], 0), [false, false, false, false], '자리가 없으면 모두 첨부에만');
+  assert.deepEqual(readSlots([2, 1], 9), [true, true, true]);
+});
+/** 가짜 창 — 탭마다 fakeTab 을 두고, 앞에 둔 탭을 적어 둔다. */
+function fakeWindow(pages) {
+  const front = { id: 9 };
+  const order = [];
+  const tabs = Object.fromEntries(Object.entries(pages).map(([id, opts]) => [id, fakeTab(opts)]));
+  return {
+    front, order, tabs,
+    activate: async (tab) => { if (tab.id === 66) throw new Error('탭이 닫혔습니다'); front.id = tab.id; order.push(tab.id); },
+    back: async () => { front.id = 9; order.push(9); },
+    execIn: (tab) => tabs[tab.id].exec,
+    shoot: async () => tabs[front.id].shoot(),
+  };
+}
+const stitchAll = async (j) => j.shots.map(() => new Blob(['png'], { type: 'image/png' }));
+await ta('고른 탭을 차례로 앞에 두고 찍은 뒤 보던 탭으로 돌아온다 — 같은 사이트는 장 번호를 잇고, 글자 한도는 탭 수로 나눈다', async () => {
+  const win = fakeWindow({ 1: { scrollHeight: 2000, text: '가'.repeat(TEXT_MAX) }, 2: { scrollHeight: 1000, text: '나'.repeat(TEXT_MAX) } });
+  const progress = [];
+  const got = await captureMany({
+    tabs: [{ id: 1, url: 'https://www.inflearn.com/course/x', title: '강의' }, { id: 2, url: 'https://www.inflearn.com/course/x/curriculum', title: '커리큘럼' }],
+    activate: win.activate, back: win.back, execIn: win.execIn, shoot: win.shoot, wait: async () => {}, stitch: stitchAll, today: '2026-10-08',
+    onProgress: (...a) => progress.push(a.join(' ')),
+  });
+  assert.deepEqual(win.order, [1, 2, 9]);
+  assert.deepEqual(progress, ['1 2 1 2', '2 2 1 2', '1 1 2 2']);
+  assert.deepEqual(got.pages.map((p) => p.files.map((f) => f.name.replace('화면캡처_inflearn.com_2026-10-08_', ''))), [['1.png', '2.png'], ['3.png']]);
+  assert.deepEqual(got.failed, []);
+  const total = got.pages.reduce((n, p) => n + p.text.length, 0) + 2;   // 이음 줄
+  assert.ok(total <= TEXT_MAX, `두 탭의 글자를 합쳐 ${total}자 — ${TEXT_MAX}자 안이어야 한다`);
+  assert.ok(got.pages.every((p) => /잘랐습니다\)$/.test(p.text)));
+});
+await ta('한 탭이 실패해도 나머지는 찍고 까닭을 남긴다, 모두 실패하면 던지고 그래도 보던 탭으로 돌아온다', async () => {
+  const win = fakeWindow({ 1: {} });
+  const got = await captureMany({
+    tabs: [{ id: 66, url: 'https://gone.example/', title: '닫힌 탭' }, { id: 1, url: 'https://a.b/', title: '강의' }],
+    activate: win.activate, back: win.back, execIn: win.execIn, shoot: win.shoot, wait: async () => {}, stitch: stitchAll,
+  });
+  assert.deepEqual([got.pages.length, got.failed], [1, [{ title: '닫힌 탭', why: '탭이 닫혔습니다' }]]);
+  const win2 = fakeWindow({});
+  await assert.rejects(captureMany({ tabs: [{ id: 66, url: 'https://gone.example/', title: '닫힌 탭' }], activate: win2.activate, back: win2.back, execIn: win2.execIn, shoot: win2.shoot }), /탭이 닫혔습니다/);
+  assert.deepEqual(win2.order, [9]);
+  await assert.rejects(captureMany({ tabs: [], activate: win2.activate, back: win2.back }), /고르세요/);
 });
 
 console.log('잇고 자르기 (가짜 캔버스)');

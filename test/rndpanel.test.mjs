@@ -1,0 +1,404 @@
+// R&D 탭의 화면(rndpanel.js) — 과제·차년도 칩, 예산 줄(계획을 고치면 변경이력에 저절로), 연구내역·변경이력 적기·고치기·지우기(두 번),
+// 과제 더하기·고치기(책임자·연구기간을 바꾸면 변경이력에 저절로)·지우기, 요약 복사·JSON 저장·불러오기, 공문 탭의 과제 가져오기, 다시 열기.
+// 진짜 화면(sidepanel.html)에 붙여 눌러 본다. 어디에도 보내지 않는다 — 저장소는 흉내이고 날짜는 2026-10-08 로 못 박는다.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { JSDOM } from 'jsdom';
+
+let pass = 0;
+const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
+const ta = async (name, fn) => { await fn(); pass++; console.log('  ok  ' + name); };
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const html = fs.readFileSync(new URL('../sidepanel.html', import.meta.url), 'utf8');
+const { window } = new JSDOM(html, { url: 'https://example.org/' });
+const doc = window.document;
+for (const g of ['document', 'FileReader', 'Element', 'HTMLElement', 'File', 'Blob']) globalThis[g] = window[g];
+globalThis.window = window;
+
+// 공문 탭의 사전 설정에 과제 하나가 있다. 저장은 복사해 둔다 — 정말 저장이 됐는지 보려고.
+const store = { gongmunProjects: [{ name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', period: '2026.04.01 ~ 2029.12.31', about: '', content: '', account: '' }] };
+globalThis.chrome = { storage: { local: { get: async () => store, set: async (obj) => { Object.assign(store, JSON.parse(JSON.stringify(obj))); } } } };
+
+const { createRndPanel } = await import('../rndpanel.js');
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const logs = [];
+const copied = [];
+const downloads = [];
+const flashed = [];
+const make = () => createRndPanel({
+  $: (id) => doc.getElementById(id), escapeHtml,
+  logEvent: (kind, ok, text) => logs.push({ kind, ok, text }),
+  copyText: async (text) => { copied.push(text); return true; },
+  flash: (btn, text) => flashed.push([btn.id, text]),
+  download: async (text, name) => { downloads.push({ text, name }); },
+  today: () => '2026-10-08',
+});
+let panel = make();
+panel.wire();
+await panel.show();
+
+const $ = (id) => doc.getElementById(id);
+const q = (sel) => doc.querySelector(sel);
+const type = (node, value, ev = 'input') => { node.value = value; node.dispatchEvent(new window.Event(ev, { bubbles: true })); };
+/** 다 적고 칸을 나간다(input 뒤 change). */
+const commit = (node, value) => { type(node, value); node.dispatchEvent(new window.Event('change', { bubbles: true })); };
+const chips = () => [...$('rdProjects').querySelectorAll('[data-proj]')].map((b) => [b.textContent, b.classList.contains('active')]);
+const years = () => [...$('rdYears').querySelectorAll('[data-year]')].map((b) => `${b.textContent}${b.classList.contains('active') ? '*' : ''}`);
+const rows = () => [...$('rdBudget').querySelectorAll('.rd-brow')].map((r) => [r.querySelector('[data-k="item"]').value, r.querySelector('[data-k="plan"]').value, r.querySelector('[data-k="used"]').value, r.querySelector('[data-left]').textContent]);
+const row = (item) => [...$('rdBudget').querySelectorAll('.rd-brow')].find((r) => r.querySelector('[data-k="item"]').value === item);
+const sum = () => [...$('rdBudgetSum').children].map((s) => s.textContent);
+const logItems = () => [...$('rdLogs').querySelectorAll('li')].map((li) => [li.querySelector('.rd-date').textContent, li.querySelector('.rd-title').textContent, li.querySelector('.rd-text')?.textContent || '']);
+const chItems = () => [...$('rdChanges').querySelectorAll('li')].map((li) => [
+  li.querySelector('.rd-date').textContent, li.querySelector('.rd-kind').textContent, li.querySelector('.rd-title').textContent,
+  li.querySelector('.rd-diff')?.textContent || '', li.querySelector('.rd-reason')?.textContent || '', li.classList.contains('auto'),
+]);
+const status = () => $('rdStatus').textContent;
+const hidden = (id) => $(id).classList.contains('hidden');
+
+console.log('처음 열기 — 공문 탭의 과제를 가져온다');
+t('과제 칩 하나(별명)가 켜져 있고 머리에 과제명·번호·책임자·연구기간(총 4차년도)', () => {
+  assert.deepEqual(chips(), [['차단기 과제', true]]);
+  assert.ok(hidden('rdEmpty'));
+  assert.ok(!hidden('rdHead'));
+  assert.ok(!hidden('rdBody'));
+  assert.ok(hidden('rdForm'));
+  assert.equal($('rdName').textContent, '차단기 과제');
+  assert.match($('rdMeta').textContent, /MVDC 차단기 개발.*과제번호 RND-20-2026.*책임자 박기도.*연구기간 2026\.04\.01 ~ 2029\.12\.31 \(총 4차년도\)/);
+  assert.match(status(), /공문 탭의 과제 1개를 가져왔습니다/);
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /처음 열 때/.test(l.text)));
+});
+t('차년도 칩은 넷, 오늘(2026-10-08)이 든 1차년도가 켜져 있고 "올해" 표시', () => {
+  assert.deepEqual(years(), ['1차년도올해*', '2차년도', '3차년도', '4차년도']);
+  assert.equal(q('#rdYears .rd-year.now').dataset.year, '1');
+  assert.equal(q('#rdYears [data-year="2"]').title, '2027.04.01 ~ 2028.03.31');
+  assert.equal($('rdYearNote').textContent, '1차년도 · 2026.04.01 ~ 2027.03.31 · 진행 중');
+});
+t('기본 비목 여섯 줄, 아직 적은 것 없음 · 변경이력 구분 다섯', () => {
+  assert.deepEqual(rows().map((r) => r[0]), ['인건비', '연구시설·장비비', '연구재료비', '연구활동비', '연구수당', '간접비']);
+  assert.equal($('rdBudgetState').textContent, '적은 것 없음');
+  assert.equal($('rdLogState').textContent, '적은 것 없음');
+  assert.equal($('rdChangeState').textContent, '적은 것 없음');
+  assert.deepEqual([...$('rdChKind').options].map((o) => o.value), ['예산', '연구내용', '연구기간', '연구진', '기타']);
+  assert.equal($('rdLogDate').value, '2026-10-08');
+});
+await ta('저장소(rndBook)에 남는다', async () => {
+  await wait(500);
+  assert.equal(store.rndBook.projects.length, 1);
+  assert.deepEqual([store.rndBook.projects[0].alias, store.rndBook.projects[0].start, store.rndBook.projects[0].end], ['차단기 과제', '2026-04-01', '2029-12-31']);
+});
+
+console.log('예산');
+t('계획을 1,000만처럼 적으면 원으로 읽어 쉼표로 보이고, 처음 적는 것은 변경이 아니다', () => {
+  commit(row('인건비').querySelector('[data-k="plan"]'), '1,000만');
+  assert.equal(row('인건비').querySelector('[data-k="plan"]').value, '10,000,000');
+  assert.equal(row('인건비').querySelector('[data-left]').textContent, '10,000,000');
+  assert.deepEqual(sum(), ['합계', '10,000,000', '0', '10,000,000', '']);
+  assert.equal($('rdBudgetState').textContent, '계획 1,000만 · 집행 0원 (0%)');
+  assert.equal(chItems().length, 0);
+});
+t('집행을 적으면 잔액·집행률 — 막대 80%. 집행은 변경이 아니다', () => {
+  commit(row('인건비').querySelector('[data-k="used"]'), '8000000');
+  assert.equal(row('인건비').querySelector('[data-left]').textContent, '2,000,000');
+  assert.equal(row('인건비').querySelector('.rd-bar').style.width, '80%');
+  assert.equal($('rdBudgetState').textContent, '계획 1,000만 · 집행 800만 (80%)');
+  assert.equal(chItems().length, 0);
+});
+t('계획을 고치면 변경이력에 저절로 남고 사유를 묻는다', () => {
+  commit(row('인건비').querySelector('[data-k="plan"]'), '1,500만');
+  assert.deepEqual(chItems(), [['2026.10.08', '예산', '인건비', '10,000,000원→15,000,000원', '', true]]);
+  assert.equal($('rdChangeState').textContent, '1건 · 사유 없음 1');
+  assert.match(status(), /변경이력에 1건을 남겼습니다/);
+  assert.ok($('rdChanges').querySelector('[data-reason]'), '줄 안에 사유 칸');
+  assert.deepEqual(sum(), ['합계', '15,000,000', '8,000,000', '7,000,000', '']);
+});
+t('줄 안의 사유 칸에 적으면 붙는다', () => {
+  commit($('rdChanges').querySelector('[data-reason]'), '연구원 1명 충원');
+  assert.equal(chItems()[0][4], '연구원 1명 충원');
+  assert.equal($('rdChangeState').textContent, '1건');
+  assert.ok(!$('rdChanges').querySelector('[data-reason]'));
+});
+t('못 읽는 금액은 되돌리고 말한다', () => {
+  commit(row('인건비').querySelector('[data-k="plan"]'), 'abc');
+  assert.equal(row('인건비').querySelector('[data-k="plan"]').value, '15,000,000');
+  assert.match(status(), /금액을 읽지 못했습니다/);
+  assert.equal(chItems().length, 1);
+});
+t('집행이 계획을 넘으면 잔액이 빨갛고 막대도 넘침', () => {
+  commit(row('인건비').querySelector('[data-k="used"]'), '2천만');
+  assert.equal(row('인건비').querySelector('[data-left]').textContent, '-5,000,000');
+  assert.ok(row('인건비').querySelector('[data-left]').classList.contains('over'));
+  assert.ok(row('인건비').querySelector('.rd-bar').classList.contains('over'));
+  assert.equal(row('인건비').querySelector('.rd-bar').style.width, '100%');
+  commit(row('인건비').querySelector('[data-k="used"]'), '8,000,000');
+  assert.ok(!row('인건비').querySelector('[data-left]').classList.contains('over'));
+});
+t('비목 더하기 → 이름 적기. 빈 줄은 바로 빼고 금액 있는 줄은 두 번 — 뺀 비목도 변경이력에', () => {
+  $('rdBudgetAdd').click();
+  assert.equal(rows().length, 7);
+  type(q('#rdBudget .rd-brow:last-child [data-k="item"]'), '위탁연구개발비');
+  commit(q('#rdBudget .rd-brow:last-child [data-k="plan"]'), '300만');
+  assert.equal(chItems().length, 1, '처음 적는 계획은 변경이 아니다');
+  $('rdBudgetAdd').click();
+  assert.equal(rows().length, 8);
+  q('#rdBudget .rd-brow:last-child [data-del]').click();
+  assert.equal(rows().length, 7, '빈 줄은 바로');
+  const del = row('위탁연구개발비').querySelector('[data-del]');
+  del.click();
+  assert.equal(rows().length, 7, '한 번으로는 안 뺀다');
+  assert.equal(del.textContent, '정말');
+  del.click();
+  assert.equal(rows().length, 6);
+  assert.deepEqual(chItems()[0].slice(1, 4), ['예산', '위탁연구개발비', '3,000,000원→(비목 뺌)']);
+  assert.equal($('rdChangeState').textContent, '2건 · 사유 없음 1');
+});
+
+console.log('연구내역');
+t('제목을 적고 기록 — 늦은 것부터, 내용은 여러 줄, 칸은 비운다', () => {
+  type($('rdLogTitle'), '차단기 시제품 1차 시험');
+  type($('rdLogText'), '10kV 인가\n차단 성공');
+  $('rdLogAdd').click();
+  type($('rdLogDate'), '2026-06-15');
+  type($('rdLogTitle'), '설계 검토회');
+  $('rdLogAdd').click();
+  assert.deepEqual(logItems(), [['2026.10.08', '차단기 시제품 1차 시험', '10kV 인가\n차단 성공'], ['2026.06.15', '설계 검토회', '']]);
+  assert.equal($('rdLogState').textContent, '2건');
+  assert.equal($('rdLogTitle').value, '');
+  assert.equal($('rdLogDate').value, '2026-10-08');
+});
+t('빈 채로 기록은 안 된다 · Enter 로도 기록', () => {
+  $('rdLogAdd').click();
+  assert.equal(logItems().length, 2);
+  assert.match(status(), /제목이나 내용을 적으세요/);
+  type($('rdLogTitle'), 'Enter 로 적음');
+  $('rdLogTitle').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.equal(logItems().length, 3);
+  const del = q('#rdLogs li [data-del]');
+  del.click();
+  del.click();
+  assert.equal(logItems().length, 2);
+});
+t('고치기 → 칸에 올라오고 저장하면 바뀐다 · 그만두기', () => {
+  q('#rdLogs li:nth-child(2) [data-edit]').click();
+  assert.equal($('rdLogTitle').value, '설계 검토회');
+  assert.equal($('rdLogDate').value, '2026-06-15');
+  assert.equal($('rdLogAdd').textContent, '저장');
+  assert.ok(!hidden('rdLogCancel'));
+  assert.ok(q('#rdLogs li:nth-child(2)').classList.contains('editing'));
+  type($('rdLogTitle'), '설계 검토회(2차)');
+  $('rdLogAdd').click();
+  assert.equal(logItems()[1][1], '설계 검토회(2차)');
+  assert.equal($('rdLogAdd').textContent, '기록');
+  assert.ok(hidden('rdLogCancel'));
+  q('#rdLogs li [data-edit]').click();
+  $('rdLogCancel').click();
+  assert.equal($('rdLogTitle').value, '');
+  assert.ok(!q('#rdLogs li.editing'));
+});
+t('지우기는 두 번', () => {
+  const del = q('#rdLogs li:nth-child(2) [data-del]');
+  del.click();
+  assert.equal(logItems().length, 2);
+  assert.equal(del.textContent, '정말 지우기');
+  del.click();
+  assert.equal(logItems().length, 1);
+  assert.match(status(), /연구내역을 지웠습니다/);
+});
+
+console.log('변경이력 — 손으로');
+t('구분·항목·전후·사유를 적고 기록하면 날짜 차례에 들어가고 칸은 비운다', () => {
+  type($('rdChDate'), '2026-09-20');
+  $('rdChKind').value = '연구내용';
+  type($('rdChItem'), '2차년도 목표');
+  type($('rdChBefore'), '10kV');
+  type($('rdChAfter'), '12kV');
+  type($('rdChReason'), '발주처 요청');
+  $('rdChAdd').click();
+  assert.deepEqual(chItems().at(-1), ['2026.09.20', '연구내용', '2차년도 목표', '10kV→12kV', '발주처 요청', false]);
+  assert.equal($('rdChangeState').textContent, '3건 · 사유 없음 1');
+  assert.equal($('rdChKind').value, '예산');
+  assert.equal($('rdChItem').value, '');
+  $('rdChAdd').click();
+  assert.equal(chItems().length, 3, '빈 채로는 안 된다');
+  assert.match(status(), /항목이나 변경 전·후를 적으세요/);
+});
+t('고치기·지우기(두 번)', () => {
+  q('#rdChanges li:last-child [data-edit]').click();
+  assert.equal($('rdChItem').value, '2차년도 목표');
+  assert.equal($('rdChKind').value, '연구내용');
+  type($('rdChAfter'), '12.5kV');
+  $('rdChAdd').click();
+  assert.equal(chItems().at(-1)[3], '10kV→12.5kV');
+  const del = q('#rdChanges li:last-child [data-del]');
+  del.click();
+  assert.equal(chItems().length, 3);
+  del.click();
+  assert.equal(chItems().length, 2);
+});
+
+console.log('차년도 바꾸기');
+t('2차년도를 누르면 그 차년도의 빈 장부, 1차년도로 돌아오면 그대로', () => {
+  q('#rdYears [data-year="2"]').click();
+  assert.deepEqual(years(), ['1차년도올해', '2차년도*', '3차년도', '4차년도']);
+  assert.equal($('rdYearNote').textContent, '2차년도 · 2027.04.01 ~ 2028.03.31 · 예정');
+  assert.equal($('rdBudgetState').textContent, '적은 것 없음');
+  assert.equal(rows().length, 6);
+  assert.equal(logItems().length, 0);
+  assert.equal(chItems().length, 0);
+  q('#rdYears [data-year="1"]').click();
+  assert.equal(logItems().length, 1);
+  assert.equal(chItems().length, 2);
+  assert.equal(rows().find((r) => r[0] === '인건비')[1], '15,000,000');
+});
+await ta('보고 있던 차년도가 저장된다', async () => {
+  q('#rdYears [data-year="3"]').click();
+  await wait(500);
+  const id = store.rndBook.projects[0].id;
+  assert.equal(store.rndBook.current.year[id], 3);
+  q('#rdYears [data-year="1"]').click();
+});
+
+console.log('과제 더하기·고치기·지우기');
+t('＋ → 폼이 서고 머리·몸통은 숨는다. 과제명 없이는 저장 안 됨', () => {
+  q('#rdProjects [data-add]').click();
+  assert.ok(!hidden('rdForm'));
+  assert.ok(hidden('rdHead'));
+  assert.ok(hidden('rdBody'));
+  assert.ok(hidden('rdFDel'));
+  assert.equal($('rdFormTitle').textContent, '새 과제');
+  $('rdFSave').click();
+  assert.equal($('rdFNeed').textContent, '과제명을 적으세요.');
+  assert.ok(!hidden('rdForm'));
+});
+t('종료일이 시작일보다 앞서면 안 됨', () => {
+  type($('rdFName'), '수소 추진');
+  type($('rdFStart'), '2027-01-01');
+  type($('rdFEnd'), '2026-12-31');
+  $('rdFSave').click();
+  assert.equal($('rdFNeed').textContent, '종료일이 시작일보다 앞섭니다.');
+});
+t('저장하면 칩이 둘이고 새 과제가 켜진다 — 연구기간 없는 과제는 1차년도 하나·미정', () => {
+  type($('rdFStart'), '');
+  type($('rdFEnd'), '');
+  $('rdFSave').click();
+  assert.deepEqual(chips(), [['차단기 과제', false], ['수소 추진', true]]);
+  assert.ok(hidden('rdForm'));
+  assert.ok(!hidden('rdHead'));
+  assert.deepEqual(years(), ['1차년도*']);
+  assert.match($('rdMeta').textContent, /연구기간 미정/);
+  assert.equal($('rdYearNote').textContent, '1차년도 · 연구기간 미정');
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /과제 더함: 수소 추진/.test(l.text)));
+});
+t('칩을 누르면 그 과제로', () => {
+  q('#rdProjects [data-proj]').click();
+  assert.deepEqual(chips(), [['차단기 과제', true], ['수소 추진', false]]);
+  assert.equal(chItems().length, 2);
+});
+t('과제 고치기 — 책임자·연구기간을 바꾸면 변경이력에 저절로 두 줄', () => {
+  $('rdEdit').click();
+  assert.equal($('rdFormTitle').textContent, '과제 고치기');
+  assert.equal($('rdFName').value, 'MVDC 차단기 개발');
+  assert.equal($('rdFLead').value, '박기도');
+  assert.equal($('rdFEnd').value, '2029-12-31');
+  assert.ok(!hidden('rdFDel'));
+  type($('rdFLead'), '김철수');
+  type($('rdFEnd'), '2030-03-31');
+  $('rdFSave').click();
+  assert.match($('rdMeta').textContent, /책임자 김철수.*2026\.04\.01 ~ 2030\.03\.31 \(총 4차년도\)/);
+  assert.deepEqual(chItems().slice(0, 2).map((c) => c.slice(1, 4)), [
+    ['연구기간', '연구기간', '2026.04.01 ~ 2029.12.31→2026.04.01 ~ 2030.03.31'], ['연구진', '과제책임자', '박기도→김철수'],
+  ]);
+  assert.equal($('rdChangeState').textContent, '4건 · 사유 없음 3');
+  assert.match(status(), /변경이력에 2건을 남겼습니다/);
+});
+t('Enter 로 저장 · Esc 로 닫기 · 과제 지우기는 두 번', () => {
+  $('rdEdit').click();
+  type($('rdFNote'), '산업부');
+  $('rdFNote').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.ok(hidden('rdForm'));
+  assert.match($('rdMeta').textContent, /산업부/);
+  assert.equal(chItems().length, 4, '비고는 이력이 아니다');
+  doc.querySelectorAll('#rdProjects [data-proj]')[1].click();
+  $('rdEdit').click();
+  $('rdForm').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.ok(hidden('rdForm'));
+  $('rdEdit').click();
+  $('rdFDel').click();
+  assert.equal($('rdFDel').textContent, '정말 지우기');
+  assert.equal(chips().length, 2);
+  $('rdFDel').click();
+  assert.deepEqual(chips(), [['차단기 과제', true]]);
+  assert.ok(hidden('rdForm'));
+  assert.match(status(), /과제를 지웠습니다 — 수소 추진/);
+});
+
+console.log('요약 복사 · JSON 저장·불러오기 · 공문 탭의 과제 가져오기');
+await ta('요약 복사 — 보고 있는 과제·차년도의 개요·예산·연구내역·변경이력', async () => {
+  $('rdCopy').click();
+  await wait(10);
+  assert.equal(copied.length, 1);
+  assert.match(copied[0], /^\[차단기 과제\] 1차년도 \(2026\.04\.01 ~ 2027\.03\.31\) — 진행 중\n/);
+  assert.match(copied[0], /- 인건비: 계획 15,000,000원 · 집행 8,000,000원 · 잔액 7,000,000원 · 집행률 53%/);
+  assert.match(copied[0], /- 2026\.10\.08 차단기 시제품 1차 시험 — 10kV 인가 \/ 차단 성공/);
+  assert.match(copied[0], /\[연구진\] 과제책임자: 박기도 → 김철수/);
+  assert.deepEqual(flashed.at(-1), ['rdCopy', '복사했습니다 ✓']);
+});
+await ta('JSON 저장', async () => {
+  $('rdExport').click();
+  await wait(10);
+  assert.equal(downloads[0].name, 'R&D과제_2026-10-08.json');
+  const obj = JSON.parse(downloads[0].text);
+  assert.equal(obj.kind, 'rndBook');
+  assert.equal(obj.projects.length, 1);
+  assert.match(status(), /저장했습니다 — R&D과제_2026-10-08\.json/);
+});
+await ta('JSON 불러오기 — 같은 id 는 파일 것으로, 없던 과제는 더함', async () => {
+  const obj = JSON.parse(downloads[0].text);
+  obj.projects[0].years[1].logs.push({ id: 'from-file', date: '2026-07-07', title: '파일에서 온 기록' });
+  obj.projects.push({ id: 'new-from-file', name: '파일 과제', start: '2026-01-01', end: '2026-12-31' });
+  const file = new window.File([JSON.stringify(obj)], 'rnd.json', { type: 'application/json' });
+  Object.defineProperty($('rdImport'), 'files', { value: [file], configurable: true });
+  $('rdImport').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(60);
+  assert.deepEqual(chips(), [['차단기 과제', true], ['파일 과제', false]]);
+  assert.ok(logItems().some((l) => l[1] === '파일에서 온 기록'));
+  assert.match(status(), /들여왔습니다 — 바꿈 1 · 더함 1 \(과제 2개\)/);
+});
+await ta('못 읽는 파일은 말만 하고 아무것도 바꾸지 않는다', async () => {
+  const file = new window.File(['{"x":1}'], 'bad.json');
+  Object.defineProperty($('rdImport'), 'files', { value: [file], configurable: true });
+  $('rdImport').dispatchEvent(new window.Event('change', { bubbles: true }));
+  await wait(60);
+  assert.match(status(), /들여오지 못했습니다 — R&D 과제 파일이 아닙니다/);
+  assert.equal(chips().length, 2);
+  assert.ok(logs.some((l) => l.kind === 'rnd' && !l.ok && /불러오기 실패/.test(l.text)));
+});
+await ta('공문 탭의 과제 가져오기 — 이미 있으면 그대로(빈 칸만 채움), 새것은 더한다, 다시 누르면 달라질 것 없음', async () => {
+  store.gongmunProjects.push({ name: '수소전기추진 연구', alias: '', code: 'RND-21-2026', lead: '노길태', period: '', about: '', content: '', account: '' });
+  $('rdImportGm').click();
+  await wait(20);
+  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구']);
+  assert.match(status(), /공문 탭의 과제를 가져왔습니다 — 더함 1$/);
+  assert.match($('rdMeta').textContent, /책임자 김철수/, '있는 칸은 공문 탭 것으로 덮지 않는다');
+  $('rdImportGm').click();
+  await wait(20);
+  assert.match(status(), /이미 다 있습니다/);
+  assert.equal(chips().length, 3);
+});
+
+console.log('다시 열기');
+await ta('저장된 것으로 다시 선다 — 공문 탭에서 다시 가져오지 않는다', async () => {
+  await wait(500);
+  panel.hide();
+  assert.ok(hidden('rnd'));
+  panel = make();
+  await panel.show();
+  assert.ok(!hidden('rnd'));
+  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구']);
+  assert.equal(logItems().length, 2);
+  assert.equal(chItems().length, 4);
+  assert.equal(rows().find((r) => r[0] === '인건비')[1], '15,000,000');
+  assert.equal(panel.book().projects.length, 3);
+});
+
+console.log(`\n${pass} passed`);
