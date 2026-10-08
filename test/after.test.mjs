@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { afterNeed, afterPlan, afterSummary, afterFields, nightsBetween, evidenceOf, periodMiss, needsAfter, AFTER_TRANSPORT, PRE_PLANE } from '../src/after.js';
 import { lodgeAsk, lodgeSettle, lodgeOver, lodgeChoices, lodgeApproval, lodgeDecide } from '../src/after.js';
+import { lodgeReason, lodgeComment, lodgeCommentWith, lodgeCommentWithout, LODGE_OVER_REASON } from '../src/after.js';
 import { TRAVEL_RULES } from '../src/travelspec.js';
 
 let pass = 0;
@@ -407,8 +408,10 @@ console.log('숙박비 상한액 초과 — 상한액의 1.5배까지는 부서�
 {
   const row = (actual, over = {}) => lodgeSettle({ stay: '소노캄 고양', company: '아고다', sday: 1, maxconv: '120000', settle: '', notes: [], actual,
     doc: { currency: 'USD', total: 131.57, supply: null, vat: null }, ...over });
-  t('규칙은 travel-rules.yaml 에서 온다 — 1.5배, 부서장', () => {
+  t('규칙은 travel-rules.yaml 에서 온다 — 1.5배, 부서장, 비고의 기본 사유', () => {
     assert.deepEqual([TRAVEL_RULES.lodging.over_cap.approve_rate, TRAVEL_RULES.lodging.over_cap.approver], [1.5, '부서장']);
+    assert.equal(LODGE_OVER_REASON, '인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움');
+    assert.equal(TRAVEL_RULES.lodging.over_cap.reason, LODGE_OVER_REASON);
   });
   t('상한액 안이거나 상한액을 모르면 물을 것도 승인도 없다', () => {
     assert.deepEqual([lodgeOver(row(120000)), lodgeChoices(row(110000)), lodgeOver(row(177101, { maxconv: '' })), lodgeApproval(row(110000, { settle: 'real' }))], [null, null, null, '']);
@@ -420,7 +423,7 @@ console.log('숙박비 상한액 초과 — 상한액의 1.5배까지는 부서�
       question: '실제 금액 177,101원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?',
       choices: [
         { settle: 'cap', label: '상한액 120,000원으로' },
-        { settle: 'real', label: '실제 금액 177,101원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다' },
+        { settle: 'real', label: '실제 금액 177,101원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다', reason: LODGE_OVER_REASON },
       ],
     });
     assert.equal(lodgeOver(row(180000)).within, true, '꼭 1.5배인 금액은 범위 안이다');
@@ -428,7 +431,7 @@ console.log('숙박비 상한액 초과 — 상한액의 1.5배까지는 부서�
   t('1.5배를 넘으면 승인 범위를 벗어난다고 적는다 — 고르는 것은 막지 않는다', () => {
     const l = row(180001);
     assert.equal(lodgeOver(l).within, false);
-    assert.deepEqual(lodgeChoices(l).choices[1], { settle: 'real', label: '실제 금액 180,001원으로', note: '상한액의 1.5배(180,000원)를 넘어 부서장 승인으로 정산할 수 있는 범위를 벗어납니다' });
+    assert.deepEqual(lodgeChoices(l).choices[1], { settle: 'real', label: '실제 금액 180,001원으로', note: '상한액의 1.5배(180,000원)를 넘어 부서장 승인으로 정산할 수 있는 범위를 벗어납니다', reason: LODGE_OVER_REASON });
     assert.equal(lodgeApproval({ ...l, settle: 'real' }), '상한액의 1.5배(180,000원) 초과 — 부서장 승인 범위를 벗어남');
   });
   t('상한액은 박 수만큼이다 — 2박이면 240,000원, 승인 범위는 360,000원', () => {
@@ -445,6 +448,58 @@ console.log('숙박비 상한액 초과 — 상한액의 1.5배까지는 부서�
     assert.deepEqual(plan.notes.filter((n) => n === note).length, 1, '두 번 골라도 알림은 한 번이다');
     lodgeDecide(plan, l, 'cap');
     assert.deepEqual([l.total, l.capped, l.samount, l.vat, l.notes, plan.notes], [120000, true, 109091, 10909, [], ['추가 정보 — Receipt.pdf: 예약 번호 2048075129']]);
+  });
+}
+
+// 2026-10-08 사용자 지정: "상한액 넘어 가면 '비고' 란에 상한 이유를 넣어야 하거든. 이게 상한액 넘어 가면 필수라서. 기본적으로
+// '인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움' 라는 내용을 넣어주고, 수정 가능하게 해줘."
+console.log('숙박비 상한액 초과 — 실제 금액으로 정산하는 줄의 비고에 상한 초과 사유가 붙는다(기본 문구, 고쳐 쓸 수 있다)');
+{
+  const row = (actual, over = {}) => lodgeSettle({ stay: '소노캄 고양', company: '아고다', comment: '소노캄 고양', sday: 1, maxconv: '120000', settle: '', notes: [], actual,
+    doc: { currency: 'KRW', total: actual, supply: null, vat: null }, ...over });
+  t('사유는 정산금액이 상한액을 넘을 때만이다 — 실제 금액으로 정산하기로 했고 실제 금액이 상한액을 넘는다. 상한액으로 정산하거나 상한액 안이면 없다', () => {
+    assert.equal(lodgeReason(row(177101, { settle: 'real' })), LODGE_OVER_REASON);
+    assert.deepEqual([lodgeReason(row(177101, { settle: 'cap' })), lodgeReason(row(177101)), lodgeReason(row(110000, { settle: 'real' })), lodgeReason(row(177101, { settle: 'real', maxconv: '' }))], ['', '', '', '']);
+    assert.equal(lodgeReason(row(177101, { settle: 'real', reason: '행사 기간이라 인근 숙소가 다 찼음' })), '행사 기간이라 인근 숙소가 다 찼음', '고쳐 쓴 사유가 먼저다');
+    assert.equal(lodgeReason(row(177101, { settle: 'real', reason: '  ' })), LODGE_OVER_REASON, '빈 글이면 기본 문구다(사유는 필수)');
+  });
+  t('비고에 올릴 글은 묵은 곳·사업자명 뒤에 사유를 이은 것이다 — 사유가 없으면 묵은 곳만, 묵은 곳이 없으면 사유만', () => {
+    assert.equal(lodgeComment(row(177101, { settle: 'real' })), `소노캄 고양 · ${LODGE_OVER_REASON}`);
+    assert.equal(lodgeComment(row(177101, { settle: 'cap' })), '소노캄 고양');
+    assert.equal(lodgeComment(row(177101, { settle: 'real', comment: '' })), LODGE_OVER_REASON);
+    assert.equal(lodgeComment(row(110000, { settle: 'real', comment: '' })), '');
+  });
+  t('고를 때 사유를 같이 주면 그 줄에 적힌다 — 상한액으로 바꿔도 적어 둔 사유는 남아 다시 실제 금액으로 고르면 그대로 쓴다. 빈 글은 기본 문구다', () => {
+    const l = row(177101);
+    const plan = { lodge: [l], notes: [] };
+    lodgeDecide(plan, l, 'real', '행사 기간이라 인근 숙소가 다 찼음');
+    assert.deepEqual([l.reason, lodgeComment(l), lodgeChoices({ ...l, settle: '' }).choices[1].reason], ['행사 기간이라 인근 숙소가 다 찼음', '소노캄 고양 · 행사 기간이라 인근 숙소가 다 찼음', '행사 기간이라 인근 숙소가 다 찼음']);
+    lodgeDecide(plan, l, 'cap');
+    assert.deepEqual([l.reason, lodgeComment(l)], ['행사 기간이라 인근 숙소가 다 찼음', '소노캄 고양'], '사유를 안 주면 있던 것을 둔다 — 상한액이라 비고에는 안 붙는다');
+    lodgeDecide(plan, l, 'real');
+    assert.equal(lodgeComment(l), '소노캄 고양 · 행사 기간이라 인근 숙소가 다 찼음');
+    lodgeDecide(plan, l, 'real', '');
+    assert.deepEqual([l.reason, lodgeComment(l)], ['', `소노캄 고양 · ${LODGE_OVER_REASON}`]);
+  });
+  t('비고 글에 사유를 잇고 걷는 낱개 — 이미 들어 있으면 두 번 잇지 않고, 걷으면 나머지 글만 남고, 사유가 없는 글은 띄어쓰기까지 그대로다', () => {
+    assert.equal(lodgeCommentWith('소노캄 고양', LODGE_OVER_REASON), `소노캄 고양 · ${LODGE_OVER_REASON}`);
+    assert.equal(lodgeCommentWith(`소노캄 고양 · ${LODGE_OVER_REASON}`, LODGE_OVER_REASON), `소노캄 고양 · ${LODGE_OVER_REASON}`);
+    assert.deepEqual([lodgeCommentWith('', LODGE_OVER_REASON), lodgeCommentWith('소노캄 고양', ''), lodgeCommentWith(null, '')], [LODGE_OVER_REASON, '소노캄 고양', '']);
+    assert.equal(lodgeCommentWithout(`소노캄 고양 · ${LODGE_OVER_REASON}`, LODGE_OVER_REASON), '소노캄 고양');
+    assert.equal(lodgeCommentWithout(`${LODGE_OVER_REASON} · 소노캄 고양 · 조식 포함`, [LODGE_OVER_REASON]), '소노캄 고양 · 조식 포함');
+    assert.equal(lodgeCommentWithout(LODGE_OVER_REASON, ['다른 사유', LODGE_OVER_REASON]), '');
+    assert.equal(lodgeCommentWithout('소노캄 고양·조식', LODGE_OVER_REASON), '소노캄 고양·조식', '사유가 없으면 손대지 않는다');
+  });
+  t('올리는 폼의 비고 칸(lodge_comment)에 사유가 이어져 나간다 — 실제 금액으로 정산하는 줄만. 상한액으로 정산하는 줄은 묵은 곳만', () => {
+    const plan = afterPlan([rec({ docType: 'lodging_receipt', vendor: '소노캄 고양', seller: '아고다', payDate: '2026-09-10', nights: 1, total: 177101, currency: 'KRW', file: PNG })], { trip: TRIP, detail: NONE });
+    const l = Object.assign(plan.lodge[0], { maxtotal: '120000', maxcur: 'KRW', maxrate: '1', maxconv: '120000' });
+    lodgeDecide(plan, l, 'real');
+    const comment = (fields) => fields.filter(([n]) => n === 'lodge_comment').map(([, v]) => v);
+    assert.deepEqual(comment(afterFields([], plan)), [`소노캄 고양 · ${LODGE_OVER_REASON}`]);
+    lodgeDecide(plan, l, 'real', '행사 기간이라 인근 숙소가 다 찼음');
+    assert.deepEqual(comment(afterFields([], plan)), ['소노캄 고양 · 행사 기간이라 인근 숙소가 다 찼음']);
+    lodgeDecide(plan, l, 'cap');
+    assert.deepEqual(comment(afterFields([], plan)), ['소노캄 고양']);
   });
 }
 

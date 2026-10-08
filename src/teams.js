@@ -33,8 +33,11 @@ export function rpcReply(text, id) {
   return null;
 }
 
-/** MCP 서버와 한 번 붙어(initialize) 도구를 부를 수 있는 손잡이를 준다. 닿지 않으면 던진다. */
-async function connect(url, fetchFn, timeoutMs) {
+/**
+ * MCP 서버와 한 번 붙어(initialize) 도구를 부를 수 있는 손잡이를 준다. 닿지 않으면 던진다.
+ * KR_MS365_mcp 의 다른 서버(onenote — src/rndnote.js)도 이것으로 붙는다. label 은 오류 글에 쓰는 서버 이름.
+ */
+export async function connect(url, fetchFn, timeoutMs, label = 'Teams MCP') {
   let session = '';
   let seq = 0;
   const post = async (body, ms = timeoutMs) => {
@@ -43,15 +46,15 @@ async function connect(url, fetchFn, timeoutMs) {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(session ? { 'Mcp-Session-Id': session, 'MCP-Protocol-Version': PROTOCOL } : {}) },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`Teams MCP 가 HTTP ${res.status} 로 답했습니다`);
+    if (!res.ok) throw new Error(`${label} 가 HTTP ${res.status} 로 답했습니다`);
     session = res.headers.get('mcp-session-id') || session;
     return res.text();
   };
   const call = async (method, params, ms) => {
     const id = ++seq;
     const reply = rpcReply(await post({ jsonrpc: '2.0', id, method, params }, ms), id);
-    if (!reply) throw new Error('Teams MCP 의 답을 읽지 못했습니다');
-    if (reply.error) throw new Error(reply.error.message || 'Teams MCP 오류');
+    if (!reply) throw new Error(`${label} 의 답을 읽지 못했습니다`);
+    if (reply.error) throw new Error(reply.error.message || `${label} 오류`);
     return reply.result;
   };
   await call('initialize', { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: 'krs-workspace', version: '1' } });

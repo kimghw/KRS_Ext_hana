@@ -6,6 +6,7 @@
 // 날짜를 바꾸면 시각이 초기화된다. 그래서 순서를 여기서 한 번에 정해 두고 테스트로 못 박는다.
 
 import { TRANSPORTS, DEFAULT_TRANSPORT, DEFAULT_GRADE, transportsOf } from './travel.js';
+import { WELFARE_BLANK, WELFARE_CHECK, welfareFields, welfareProblems } from './welfare.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -135,6 +136,27 @@ export const SUBS = {
 };
 const MEET = SUBS.out.find((s) => s.value === 'MEET');
 
+/**
+ * 연차에 기념일 지원을 붙였는가 — 연차 칸 아래의 "기념일 지원" 체크박스(wfa, 2026-10-08 사용자 지정: "연차 내부에 체크박스로 기념을을 넣어서
+ * 기념을 내용을 넣을 수 있도록"). 기념일 지원은 HR 이 아니라 eclass 복지기금의 **직원 및 직원가족 기념일 지원** 신청이다 — 연차는 HR 에
+ * 그대로 올라가고, 결재요청 뒤 그 신청 화면을 채워 연다(src/welfare.js). 연차휴가 사용일을 적는 신청이라 연차(LY)에만 있다.
+ */
+export const isWelfare = (form) => form?.kind === 'leave' && codeOf(form) === 'LY' && form?.wfa === true;
+
+/**
+ * 연차현황(HR 홈 카드의 /main/main/userleaves — src/hr.js 의 hrUserLeaves). 값은 "6.0 / 21.0" 꼴의 글이고 앞이 잔여, 뒤가 부여다
+ * (2026-10-08 실제 화면에서 휴가사용종합현황의 잔여 6·부여 21 과 맞춰 확인). HR 은 체력단련을 "체력관리"라고 부른다.
+ * @returns {{key:string, label:string, left:number|null, total:number|null, text:string}[]}
+ */
+export const LEAVE_BALANCE = [['yearLeaves', '연차'], ['lhLeaves', '체력단련'], ['lasLeaves', '저축연차']];
+export function leaveBalance(data) {
+  return LEAVE_BALANCE.map(([key, label]) => {
+    const raw = String(data?.[key] ?? '').trim();
+    const m = raw.match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)$/);
+    return { key, label, left: m ? +m[1] : null, total: m ? +m[2] : null, text: m ? `${m[1]} / ${m[2]}` : raw || '-' };
+  });
+}
+
 /** 연차의 구분. 빈 값이 전일이다. code 는 HR 의 근태구분(WC12). */
 export const HALVES = [
   { value: '', label: '전일', code: '01' }, { value: 'am', label: '오전', code: '02' }, { value: 'pm', label: '오후', code: '03' },
@@ -256,21 +278,24 @@ export function fillFlexWeek(form, week) {
 /**
  * 반차가 그 날 근무시간에서 어떻게 잡히는지. 하루짜리 연차의 오전·오후가 아니거나 출근시간을 모르면 null.
  *
- * 근무는 점심 한 시간을 낀 아홉 시간이다. 오전 반차는 출근부터 네 시간, 오후 반차는 퇴근 전 네 시간이다
- * (08:00 출근이면 08:00~12:00 / 13:00~17:00). 출근이 정시가 아니면(08:30) 반차를 바로 쓰지 않고
- * **09:00~18:00 으로 옮긴 뒤** 쓴다(2026-10-02 사용자 지정) — 그때는 flexStart 에 옮길 출근시간이 들어 있다.
- * @returns {{half:string, workStart:string, flexStart:string, from:string, to:string}|null}
+ * 근무는 점심 한 시간을 낀 아홉 시간이다. 오전 반차는 출근부터 **12시까지**(네 시간을 넘지 않게 — 07:00 출근이면 07:00~11:00), 오후 반차는
+ * **13시부터 퇴근까지**(09:00 출근이면 13:00~18:00, 08:00 이면 13:00~17:00 — 2026-10-08 사용자 지정 "9시 18시 이면 오전은 9시부터 12시,
+ * 오후는 13시 부터 18시 … 8시 부터면 12시 까지, 7시 부터면 11시 까지"). 출근이 11시 뒤로 밀리면 오후는 퇴근 전 다섯 시간이다.
+ *
+ * 출근이 정시가 아니면(08:30·09:30) **반차를 쓸 수 없다**(blocked — 2026-10-08 사용자 지정 "오전/오후 반차는 사용할 수 없으니 알람을 줄 수 있도록").
+ * 그때 flexStart 에는 반차를 쓰려면 먼저 옮겨야 할 출근시간(09:00)이 들어 있고 from·to 는 그렇게 옮긴 뒤의 시간이다 — 화면이 알람을 띄우고,
+ * 사람이 "유연근무를 먼저 올리고 반차 쓰기"를 고르면 그 유연근무(halfFlexForm)를 앞에 올린다(2026-10-02 의 길을 사람이 고를 때만 쓴다).
+ * @returns {{half:string, workStart:string, blocked:boolean, flexStart:string, from:string, to:string}|null}
  */
 export function halfPlan(form, workStart) {
   const half = halfOf(form);
   if (!half || !TIME_RE.test(workStart || '')) return null;
-  const onHour = workStart.endsWith(':00');
-  const [h, m] = (onHour ? workStart : HALF_FLEX_START).split(':').map(Number);
-  const at = (plus) => `${pad(h + plus)}:${pad(m)}`;
-  return {
-    half, workStart, flexStart: onHour ? '' : HALF_FLEX_START,
-    from: at(half === 'am' ? 0 : 5), to: at(half === 'am' ? 4 : 9),
-  };
+  const blocked = !workStart.endsWith(':00');
+  const start = minutesOf(blocked ? HALF_FLEX_START : workStart);
+  const end = start + 9 * 60;   // 퇴근 — 점심 한 시간을 낀 아홉 시간
+  const am = { from: clock(start), to: clock(Math.min(start + 4 * 60, 12 * 60)) };
+  const pm = { from: clock(Math.max(13 * 60, end - 5 * 60)), to: clock(end) };
+  return { half, workStart, blocked, flexStart: blocked ? HALF_FLEX_START : '', ...(half === 'am' ? am : pm) };
 }
 
 /** 반차 앞에 올릴 유연근무 폼(그 날 출근시간을 정시로 옮긴다). 옮길 것이 없으면 null. */
@@ -311,6 +336,8 @@ export function blankForm(kind, today) {
     car: false, carPlace: '',
     sub: SUBS[kind]?.[0].value || '', half: '', span: '',
     flexMode: 'day', ...Object.fromEntries(FLEX_DAYS.map((d) => [d.key, ''])),
+    // 기념일 지원(휴가의 기념일 갈래 — src/welfare.js)의 칸. 연차 사용일은 시작일·며칠간이 그대로다.
+    ...WELFARE_BLANK,
   };
   // 출장은 아침 7시에 떠나 저녁 8시에 닿는 당일 하루가 기본이다(2026-10-02 사용자 지정).
   if (kind === 'trip') Object.assign(base, { start: '07:00', end: '20:00', expense: 'Y' });
@@ -434,12 +461,19 @@ export function fieldsFor(form) {
     return fields;
   }
   if (k === 'leave') {
-    // 연차·체력단련은 HR 이 사유를 받지 않는다(사유 줄이 숨어 있다). 구분은 하루짜리 연차에만 묻는다.
-    const fields = [sub, { ...date, label: '시작일' }, days];
-    if (codeOf(form) === 'LY' && form.days === 1) {
-      fields.push({ key: 'half', label: '구분', type: 'choice', required: false, options: HALVES.map(({ value, label }) => ({ value, label })) });
-    }
-    return fields;
+    // 연차·체력단련은 HR 이 사유를 받지 않는다(사유 줄이 숨어 있다). 시작일·종료일이 한 줄(묶음 lv), 그 아래 며칠간 1D~5D 칩 오른쪽에
+    // 오전·오후가 한 줄이다(묶음 lvdays — 2026-10-08 사용자 지정: "시작일과 종료일이 같은 줄에 있고 아래에 1,2,3,4,5d 버튼을 주고 오른쪽에
+    // 오전,오후 … 1d 면 전일"). 전일 칩은 없다 — 1D 에 오전·오후를 고르지 않은 것이 전일이고, 켜진 오전·오후를 다시 누르면 꺼진다(전일).
+    // 오전·오후는 하루짜리 연차에만 산다(halfOf) — 여러 날이거나 체력단련(HR 이 전일로 잠근다)이면 잠긴 채 보인다(locked).
+    // 종료일은 며칠간에서 나오지만 달력으로 고르면 며칠간이 따라 바뀐다(출장의 도착일과 같다).
+    const locked = codeOf(form) !== 'LY' || form.days !== 1;
+    return [sub, { ...date, label: '시작일', group: 'lv' }, { key: 'dateTo', label: '종료일', type: 'date', required: true, group: 'lv' },
+      { ...days, inline: true, group: 'lvdays' },
+      { key: 'half', label: '구분', type: 'choice', required: false, group: 'lvdays', locked,
+        hint: locked ? '오전·오후는 하루짜리 연차에만 있습니다' : '오전·오후 반차 — 다시 누르면 전일',
+        options: HALVES.filter((h) => h.value).map(({ value, label }) => ({ value, label })) },
+      // 연차에는 그 아래 "기념일 지원" 체크박스 — 켜면 기념일 칸(신청사항·기념일·대상자·가족관계·시설 이용일·금액·사용구분)이 붙는다(src/welfare.js).
+      ...(codeOf(form) === 'LY' ? [WELFARE_CHECK, ...(isWelfare(form) ? welfareFields() : [])] : [])];
   }
   // 건강검진: 하루 전체 아니면 시간. 사유와 첨부(검진 확인서)는 사이트가 반드시 요구한다.
   const fields = [date, { key: 'allDay', label: '하루 전체', type: 'check', required: false }];
@@ -478,6 +512,8 @@ export function problems(form) {
   for (const key of ['dateFrom', 'dateTo']) {
     if (filled(form[key]) && !DATE_RE.test(form[key])) out.push({ key, message: '날짜 형식이 올바르지 않습니다.' });
   }
+  // 연차에 붙인 기념일 지원의 칸(기념일·시설 이용일·금액·사용구분)은 src/welfare.js 가 본다.
+  if (isWelfare(form)) out.push(...welfareProblems(form));
   const timed = k !== 'flex' && k !== 'leave' && !(k === 'health' && form.allDay);
   if (timed) {
     const s = minutesOf(form.start);
@@ -608,6 +644,7 @@ export function spanHours(form) {
 export function buildJob(form, { action = 'none', doc = null } = {}) {
   const kind = KINDS[form?.kind];
   if (!kind) throw new Error('근태 종류를 고르세요.');
+  // 기념일 지원을 붙인 연차도 HR 에는 연차 그대로 올라간다 — 기념일 칸(wfa…)은 넣지 않는다(결재요청 뒤 attendpanel.js 가 eclass 신청 화면을 채운다).
   if (!readyToSend(form)) throw new Error('비어 있거나 맞지 않는 칸이 있습니다.');
   const spec = FORMS[kind.form];
   const ops = [];
@@ -1077,6 +1114,8 @@ export function normalizePatch(raw) {
   for (const d of FLEX_DAYS) if (flexTimesFor(d.wide).some((t) => t.start === raw[d.key])) p[d.key] = raw[d.key];
   if (validDays(raw.days)) p.days = raw.days;
   if (typeof raw.allDay === 'boolean') p.allDay = raw.allDay;
+  // 연차에 기념일 지원을 붙인다("가족 기념일에 연차") — 켜기만 한다. 끄는 것은 체크박스로.
+  if (raw.wfa === true) p.wfa = true;
   // 갈래는 여기서 모양만 본다. 그 종류의 갈래가 맞는지는 종류가 정해진 뒤 applyPatch 가 가린다.
   if (Object.values(SUBS).flat().some((s) => s.value === raw.sub)) p.sub = raw.sub;
   if (raw.half === 'am' || raw.half === 'pm') p.half = raw.half;
@@ -1182,9 +1221,9 @@ export function halfFromTimes(start, end) {
 const KIND_WORDS = [
   ['out', /소통회/], ['trip', /출장/], ['leaveout', /외출/], ['out', /외근|교육/],
   ['health', /건강\s*검진|검진/], ['flex', /자율\s*출퇴근|유연\s*근무|출근\s*시간|시차\s*출근/],
-  ['leave', /연차|반차|휴가|체력\s*(?:단련|관리)/],
+  ['leave', /연차|반차|휴가|체력\s*(?:단련|관리)|기념일/],
 ];
-const SUB_WORDS = [['MEET', /소통회/], ['TR', /교육/], ['LH', /체력\s*(?:단련|관리)/], ['LY', /연차|반차/], ['OD', /외근/]];
+const SUB_WORDS = [['MEET', /소통회/], ['TR', /교육/], ['LH', /체력\s*(?:단련|관리)/], ['LY', /연차|반차|기념일/], ['OD', /외근/]];
 const DOW = '일월화수목금토';
 
 function localDate(t, today) {
@@ -1293,6 +1332,8 @@ export function parseAttendLocal(textIn, today, form = {}) {
   const kind = patch.kind || form.kind;
   const sub = SUB_WORDS.find(([value, re]) => re.test(t) && (SUBS[kind] || []).some((s) => s.value === value));
   if (sub) patch.sub = sub[0];
+  // "가족 기념일에 연차"·"기념일 지원" — 연차에 기념일 지원 체크박스를 켠다.
+  if (kind === 'leave' && patch.sub !== 'LH' && /기념일/.test(t)) patch.wfa = true;
   const date = localDate(t, today);
   if (date) patch.dateFrom = date;
   const times = localTimes(t);

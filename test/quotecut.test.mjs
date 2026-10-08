@@ -62,6 +62,18 @@ t('오린 그림과 같은 묶음의 장은 빠지고, 따로 넣은 그림·다
   assert.deepEqual(cutDrop([{ file: 't_1.png' }], files), ['t_1.png', 't_2.png', 't_3.png']);
   assert.deepEqual(cutDrop([{ file: 'spec.png' }], files), ['spec.png'], '묶음이 아니면 그 그림만');
 });
+t('강의 소개·커리큘럼으로 가린 장(course·content)은 묶음 안이어도 남는다 — 견적서와 함께 강의 내용으로 첨부', () => {
+  const files = [png('t_1.png', 'cap1'), png('t_2.png', 'cap1'), png('t_3.png', 'cap1')];
+  const parts = [{ file: 't_1.png', kind: 'order' }, { file: 't_2.png', kind: 'content' }, { file: 't_3.png', kind: 'course' }];
+  assert.deepEqual(cutDrop([{ file: 't_1.png' }], files, parts), ['t_1.png']);
+  assert.deepEqual(cutDrop([{ file: 't_2.png' }], files, parts), ['t_1.png'], '오린 그림이 강의 내용이면 그 장도 남는다');
+});
+t('교육 — 주문·결제 화면(order)만 빠지고 그 밖의 장(other 까지)은 교육 내용으로 남는다', () => {
+  const files = [png('t_1.png', 'cap1'), png('t_2.png', 'cap1'), png('t_3.png', 'cap1')];
+  const parts = [{ file: 't_1.png', kind: 'other' }, { file: 't_2.png', kind: 'order' }, { file: 't_3.png', kind: 'course' }];
+  assert.deepEqual(cutDrop([{ file: 't_1.png' }], files, parts, 'edu'), ['t_2.png']);
+  assert.deepEqual(cutDrop([{ file: 't_1.png' }], files, parts), ['t_1.png', 't_2.png'], '구매는 other 도 뺀다');
+});
 t('오린 그림의 이름 — 넣은 파일과 겹치면 _2', () => {
   assert.equal(cutName('2026-10-08'), '견적서_가격부분_2026-10-08.png');
   assert.equal(cutName('2026-10-08', ['견적서_가격부분_2026-10-08.png']), '견적서_가격부분_2026-10-08_2.png');

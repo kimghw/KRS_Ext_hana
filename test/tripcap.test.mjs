@@ -149,12 +149,14 @@ const q = (sel) => doc.querySelector(`#atList ${sel}`);
 const DAY = /\d{4}-\d{2}-\d{2}/.source;
 
 console.log('캡처 단추 둘(webpick.js) — 공문 탭과 출장 카드가 같이 쓴다');
-t('단추 — 보고 있는 탭은 아이콘만(이름은 낭독기·풍선말), 고르는 중이면 부분 단추가 "고르기 취소"가 되고 탭 단추는 잠긴다', () => {
+t('단추 — 글자는 전체 · 부분(아이콘과 함께), 고르는 중이면 부분 단추가 "고르기 취소"가 되고 전체 단추는 잠긴다', () => {
   const box = doc.createElement('div');
   box.innerHTML = pickButton();
   const [tab, part] = box.querySelectorAll('button');
-  assert.deepEqual([tab.dataset.pick, tab.textContent, tab.getAttribute('aria-label'), tab.disabled], ['tab', '', '보고 있는 탭 통째로 캡처해 읽기', false]);
-  assert.deepEqual([part.dataset.pick, part.textContent, part.getAttribute('aria-pressed')], ['part', '부분 골라 캡처', 'false']);
+  assert.deepEqual([tab.dataset.pick, tab.textContent, tab.disabled], ['tab', '전체', false]);
+  assert.ok(tab.querySelector('svg') && part.querySelector('svg'));
+  assert.match(tab.title, /^전체 캡처 — /);
+  assert.deepEqual([part.dataset.pick, part.textContent, part.getAttribute('aria-pressed')], ['part', '부분', 'false']);
   box.innerHTML = pickButton({ picking: true, disabled: true });
   const [tab2, part2] = box.querySelectorAll('button');
   assert.deepEqual([tab2.disabled, part2.disabled, part2.textContent, part2.getAttribute('aria-pressed')], [true, false, '고르기 취소', 'true'], '잠가도 취소는 남는다');
@@ -207,7 +209,7 @@ t('증빙 넣는 곳 바로 아래에 공문 탭과 같은 단추 둘(보고 있
   const tab = q('.at-after .at-cap button[data-pick="tab"]');
   assert.ok(tab, '사후정산 칸 안에 있어야 한다');
   assert.ok(tab.closest('.at-cap').previousElementSibling.classList.contains('at-after-drop'), '증빙 넣는 곳 바로 아래');
-  assert.equal(q('.at-after .at-cap button[data-pick="part"]').textContent, '부분 골라 캡처');
+  assert.equal(q('.at-after .at-cap button[data-pick="part"]').textContent, '부분');
   assert.equal(q('.wp-tabs'), null, '탭 목록은 없다');
 });
 site.record = {
@@ -286,7 +288,7 @@ await ta('고른 상자만 한 번 찍어 PDF 하나로 읽지 않고 보관함�
   assert.match(kept[1].name, new RegExp(`^화면캡처_koreanair\\.com_${DAY}_2\\.pdf$`));
   assert.equal(site.asks.length, 1, '읽지 않았다');
   assert.equal(site.posts.length, 1, '사후정산은 그대로다');
-  assert.equal(q('.at-send button[data-pick="part"]').textContent, '부분 골라 캡처');
+  assert.equal(q('.at-send button[data-pick="part"]').textContent, '부분');
   assert.ok(logs.some((l) => l.kind === 'trip' && l.ok && /웹페이지 캡처\(증빙\): 145580 · 부분 1 koreanair\.com 화면 1개 → 1장/.test(l.text)));
 });
 

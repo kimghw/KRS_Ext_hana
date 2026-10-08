@@ -146,20 +146,23 @@ export function lodgeOver(row) {
  * 상한액을 넘은 숙박 줄을 어느 금액으로 정산할지 물을 때의 말과 고를 것 — 패널의 출장 카드와 홈 카드의 출장 줄이 같은 말을 쓴다.
  * 실제 금액이 승인 범위(상한액의 1.5배) 안이면 그 버튼에 누구의 승인인지 적고, 범위를 넘으면 넘는다고 적는다 — 넘을 때의 규정은
  * 듣지 못해 고르는 것은 막지 않는다. 상한액을 넘지 않은 줄이면 null.
- * @returns {{question: string, choices: {settle: 'cap'|'real', label: string, note?: string}[]}|null}
+ * @returns {{question: string, choices: {settle: 'cap'|'real', label: string, note?: string, reason?: string}[]}|null}
+ *   실제 금액 선택지의 reason 은 그렇게 올릴 때 비고에 적히는 상한 초과 사유다(고르는 자리가 보여 주거나 고쳐 쓰게 한다)
  */
 export function lodgeChoices(row) {
   const over = lodgeOver(row);
   if (!over) return null;
   const day = lodgeCap(row).day;
   const range = `상한액의 ${over.rate}배(${wonText(over.limit)})`;
+  // 실제 금액으로 정산하면 비고에 상한 초과 사유가 필수다 — 고쳐 쓴 것이 있으면 그것, 없으면 기본 문구(2026-10-08 사용자 지정).
+  const reason = text(row.reason) || LODGE_OVER_REASON;
   return {
     question: `실제 금액 ${wonText(row.actual)}이 상한액 ${wonText(over.cap)}(1일 ${wonText(day)} × ${row.sday}박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?`,
     choices: [
       { settle: 'cap', label: `상한액 ${wonText(over.cap)}으로` },
       over.within
-        ? { settle: 'real', label: `실제 금액 ${wonText(row.actual)}으로 · ${over.approver} 승인`, note: `${range} 이내라 ${over.approver} 승인을 받아 실제 금액으로 정산할 수 있습니다` }
-        : { settle: 'real', label: `실제 금액 ${wonText(row.actual)}으로`, note: `${range}를 넘어 ${over.approver} 승인으로 정산할 수 있는 범위를 벗어납니다` },
+        ? { settle: 'real', label: `실제 금액 ${wonText(row.actual)}으로 · ${over.approver} 승인`, note: `${range} 이내라 ${over.approver} 승인을 받아 실제 금액으로 정산할 수 있습니다`, reason }
+        : { settle: 'real', label: `실제 금액 ${wonText(row.actual)}으로`, note: `${range}를 넘어 ${over.approver} 승인으로 정산할 수 있는 범위를 벗어납니다`, reason },
     ],
   };
 }
@@ -175,16 +178,64 @@ export function lodgeApproval(row) {
 }
 
 /**
+ * 상한액을 넘겨 실제 금액으로 정산할 때 숙박 줄의 **비고에 적는 기본 사유**(references/travel-rules.yaml 의 lodging.over_cap.reason).
+ * 2026-10-08 사용자 지정: "상한액 넘어 가면 '비고' 란에 상한 이유를 넣어야 하거든. 이게 상한액 넘어 가면 필수라서. 기본적으로
+ * '인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움' 라는 내용을 넣어주고, 수정 가능하게 해줘."
+ */
+export const LODGE_OVER_REASON = TRAVEL_RULES.lodging.over_cap.reason;
+/** 비고 안에서 묵은 곳·사업자명·사유를 가르는 글(lodgeOf 가 쓰는 것과 같다). */
+const COMMENT_SEP = ' · ';
+const COMMENT_SEP_RE = /\s*·\s*/;
+
+/**
+ * 그 숙박 줄의 비고에 들어가야 하는 상한 초과 사유 — **정산금액이 상한액을 넘을 때**(실제 금액으로 정산하기로 했고 실제 금액이 상한액을
+ * 넘는다, lodgeOver) 필수다. 사람이 고쳐 쓴 것(row.reason)이 먼저고, 없으면 기본 문구(LODGE_OVER_REASON)다.
+ * 상한액으로 정산하거나(정산금액이 상한액 안이다) 상한액을 모르면 빈 글 — 사유를 적지 않는다.
+ */
+export function lodgeReason(row) {
+  if (row?.settle !== 'real' || !lodgeOver(row)) return '';
+  return text(row.reason) || LODGE_OVER_REASON;
+}
+
+/** 숙박 줄의 비고에 올릴 글 전부 — 묵은 곳·사업자명(lodgeOf 의 comment) 뒤에 상한 초과 사유(lodgeReason)를 잇는다. afterFields 가 쓴다. */
+export function lodgeComment(row) {
+  return lodgeCommentWith(row?.comment, lodgeReason(row));
+}
+
+/** 비고 글에 사유를 잇는다(` · ` 로). 사유가 비었거나 이미 들어 있으면 그대로다. */
+export function lodgeCommentWith(comment, reason) {
+  const base = text(comment);
+  const r = text(reason);
+  if (!r || base.includes(r)) return base;
+  return [base, r].filter(Boolean).join(COMMENT_SEP);
+}
+
+/**
+ * 비고 글에서 그 사유(들)를 뺀다 — 상한액으로 되돌릴 때 적어 둔 사유(또는 기본 문구)를 걷는다. 사유만 적혀 있었으면 빈 글이 되고,
+ * 다른 글(묵은 곳 등)은 남는다. 어느 사유도 들어 있지 않으면 글을 그대로 돌려준다(띄어쓰기도 건드리지 않는다).
+ */
+export function lodgeCommentWithout(comment, reasons) {
+  let s = text(comment);
+  const drop = (Array.isArray(reasons) ? reasons : [reasons]).map(text).filter((r) => r && s.includes(r));
+  if (!drop.length) return s;
+  for (const r of drop) s = s.split(r).join(COMMENT_SEP);
+  return s.split(COMMENT_SEP_RE).map((p) => p.trim()).filter(Boolean).join(COMMENT_SEP);
+}
+
+/**
  * 상한액을 넘은 숙박 줄을 어느 금액으로 정산할지 정한다(카드에서 고른 것) — 정산금액을 다시 셈하고(lodgeSettle), 실제 금액으로
  * 정산하면 승인이 필요하다는 알림을 그 줄과 계획의 알림에 더한다(올린 뒤의 결과 글과 줄의 설명에 같이 보인다).
+ * 실제 금액으로 정산하는 줄의 비고에는 상한 초과 사유가 붙는다(lodgeReason — 올릴 때 afterFields 가 lodgeComment 로 잇는다).
  * @param {{notes: string[]}} plan afterPlan 의 결과
  * @param {object} row 그 계획의 숙박 줄
  * @param {'cap'|'real'} settle
+ * @param {string} [reason] 비고에 적을 상한 초과 사유(사람이 고쳐 쓴 것). 주면 그 줄에 적어 두고(빈 글이면 기본 문구를 쓴다), 안 주면 있던 것을 둔다
  * @returns {object} 그 줄(같은 객체)
  */
-export function lodgeDecide(plan, row, settle) {
+export function lodgeDecide(plan, row, settle, reason) {
   const before = lodgeApprovalNote(row);
   row.settle = settle === 'cap' ? 'cap' : 'real';
+  if (typeof reason === 'string') row.reason = text(reason);
   lodgeSettle(row);
   const note = lodgeApprovalNote(row);
   if (before !== note) {
@@ -522,6 +573,7 @@ export function afterSummary(plan) {
 /**
  * 사후정산 입력 화면의 폼 그대로 보낼 칸을 차례대로 만든다 — 화면이 가진 칸(base: formFields 의 결과)에 항공·식비 값을 얹고,
  * 숙박·교통 줄을 화면의 addLodge()/addTr() 가 만드는 순서대로 덧붙인다(같은 이름이 줄마다 되풀이되는 배열 폼이다).
+ * 숙박 줄의 비고는 묵은 곳·사업자명 뒤에 상한 초과 사유를 이은 글이다(lodgeComment — 상한액을 넘겨 실제 금액으로 정산하는 줄에만 붙는다).
  * 파일은 { file } 로 표시해 두고 보내는 쪽(src/trip.js)이 Blob 으로 바꾼다.
  * @param {[string,string][]} base 화면의 칸
  * @param {ReturnType<typeof afterPlan>} plan
@@ -545,7 +597,7 @@ export function afterFields(base, plan) {
       ['lodge_maxtotal', s(l.maxtotal)], ['lodge_maxcur', s(l.maxcur)], ['lodge_maxrate', s(l.maxrate)], ['lodge_maxconv', s(l.maxconv)],
       ['lodge_paydate', s(l.paydate)], ['lodge_sday', s(l.sday)], ['lodge_company', s(l.company)], ['lodge_companycode', s(l.companycode)],
       ['lodge_currency', s(l.currency)], ['lodge_cocard', s(l.cocard || '0')], ['lodge_total', s(l.total)], ['lodge_samount', s(l.samount)],
-      ['lodge_vat', s(l.vat)], ['lodge_comment', s(l.comment)], ['lodge_etcname', s(l.etcname)]);
+      ['lodge_vat', s(l.vat)], ['lodge_comment', lodgeComment(l)], ['lodge_etcname', s(l.etcname)]);
     if (l.file) out.push(['lodge_file', { file: l.file }]);
   }
   for (const t of plan.trans) {

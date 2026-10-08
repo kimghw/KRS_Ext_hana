@@ -147,11 +147,11 @@ export function receiptInput(file, { trip = {}, me = '', text = '' } = {}) {
 }
 
 /**
- * 공문(구매·교육 품의)에 넣을 문서를 읽는다(input.yaml 의 gongmun). 파일(이미지·PDF) 여러 장은 한 문서의 여러 쪽으로 보고 한 번에
+ * 공문(구매·교육·출장 품의)에 넣을 문서를 읽는다(input.yaml 의 gongmun). 파일(이미지·PDF) 여러 장은 한 문서의 여러 쪽으로 보고 한 번에
  * 보내며, 글을 붙여 넣었으면 글만 보낸다. 규칙 해석(local)은 없다 — 로컬 CLI 도 API 키도 안 되면 던진다.
  * 초안으로 바꾸는 것은 src/gongmun.js 의 fromRecord 다.
  * @param {{files?: {name:string,type:string,dataUrl:string}[], text?: string}} source
- * @param {{kind: 'purchase'|'edu', today?: string}} ctx 화면이 고른 갈래
+ * @param {{kind: 'purchase'|'edu'|'trip', today?: string}} ctx 화면이 고른 갈래
  * @returns {Promise<{record: object, via: 'cli'|'api', costUsd?: number, note?: string}>}
  */
 export async function gongmunSmart(source, ctx, opts) {
@@ -181,7 +181,11 @@ export async function gongmunSetupSmart(text, now = {}, opts = {}) {
   return { patch: out.data, reply: local.reply, via: 'local', note: joined(got.fails, out.notes) };
 }
 
-const GONGMUN_DOC = { purchase: '구매(견적서·거래명세서·쇼핑몰 주문 화면)', edu: '교육(교육 안내문·교육 신청 확인서·교육비 견적서)' };
+const GONGMUN_DOC = {
+  purchase: '구매(견적서·거래명세서·쇼핑몰 주문 화면)', edu: '교육(교육 안내문·교육 신청 확인서·교육비 견적서)',
+  trip: '출장(행사·회의·학회 안내문·초청장·출장 일정표·교통/숙박 견적서)',
+  outside: '외부활동 허가(강의·자문·심사·발표·위원 위촉 요청 공문·초청장·요청 메일·행사 안내문)',
+};
 
 /**
  * 문서 읽기에 줄 글. 파일 여러 장은 같은 건의 문서들이다(교육이면 교육 견적서와 교육 내용 캡처 — 2026-10-07 사용자 지정).
@@ -202,10 +206,11 @@ export function gongmunInput({ files = [], text = '' } = {}, { kind = 'purchase'
 /**
  * 과제 내용으로 품의 사유(구매사유·교육사유)와 용도(교육목적)를 쓴다(input.yaml 의 gongmunReason — 2026-10-07 사용자 지정).
  * 쓰는 일이라 규칙 해석은 없다 — 로컬 CLI 도 API 키도 안 되면 던진다. 초안에 넣는 것은 src/gongmun.js 의 applyReason 이다.
- * @returns {Promise<{data: {reason: string, use: string|null}, via: 'cli'|'api', costUsd?: number, note?: string}>}
+ * ask 는 초안의 에이전트 칸에 사용자가 적은 말이다 — 있으면 그 말대로 고쳐 쓰고 reply 에 한 줄로 답한다(2026-10-08 사용자 지정).
+ * @returns {Promise<{data: {reason: string, use: string|null, reply: string|null}, via: 'cli'|'api', costUsd?: number, note?: string}>}
  */
-export async function gongmunReasonSmart(kind, draft, project, opts) {
-  const got = await askClaude('gongmunReason', reasonInput(kind, draft, project), { ...opts, kind });
+export async function gongmunReasonSmart(kind, draft, project, opts, { ask = '' } = {}) {
+  const got = await askClaude('gongmunReason', reasonInput(kind, draft, project, { ask }), { ...opts, kind });
   if (!got.data) throw new Error(`사유를 쓰지 못했습니다 — ${joined(got.fails) || 'Claude 연결(로컬 CLI 또는 API 키)이 필요합니다'}`);
   return { data: got.data, via: got.via, costUsd: got.costUsd, note: joined(got.notes) };
 }

@@ -540,32 +540,59 @@ export async function tripAfterLodgeDelete(seq, trseq, lodgeSeq) {
 /**
  * 사후정산의 숙박 줄 하나의 정산금액(공급가액·부가세까지)을 바꾼다 — 입력 화면에서 그 줄의 세 칸을 고치고 저장한 것과 같다
  * (그 줄의 lodge_total·lodge_samount·lodge_vat 만 바꾸고 폼을 그대로 제출한다). 출장 카드 숙박비 내역의 `상한` 버튼이
- * 상한액과 실제 금액 사이를 오갈 때 쓴다(lodgebox.js). 보낸 뒤 화면을 다시 읽어 정산금액이 바뀌었는지로 성공을 판정한다 —
- * 그대로면 던진다.
+ * 상한액과 실제 금액 사이를 오갈 때 쓴다(lodgebox.js). 비고(comment)를 같이 주면 그 줄의 lodge_comment 도 바꾼다 — 상한액을 넘겨
+ * 실제 금액으로 되돌릴 때 상한 초과 사유를 적고, 상한액으로 낮출 때 걷는다(2026-10-08 사용자 지정). 보낸 뒤 화면을 다시 읽어
+ * 정산금액(과 비고)이 바뀌었는지로 성공을 판정한다 — 그대로면 던진다.
  *
  * **2026-10-06 현재 실제로 보내 본 적이 없다**(실제 계산서의 금액이 바뀌는 일이라 시험으로 보내지 않았다).
  *
  * @param {string} lodgeSeq 바꿀 줄의 번호(lodge_seq)
- * @param {{total:number, samount:number, vat:number}} amount 원 단위의 수(src/after.js lodgeSettle 이 셈한 것)
+ * @param {{total:number, samount:number, vat:number, comment?:string}} amount 원 단위의 수(src/after.js lodgeSettle 이 셈한 것)와, 바꿀 때만 비고 글
  * @returns {Promise<Record<string,string>[]>} 바꾼 뒤 화면의 숙박 줄
  */
-export async function tripAfterLodgeAmount(seq, trseq, lodgeSeq, { total, samount, vat }) {
+export async function tripAfterLodgeAmount(seq, trseq, lodgeSeq, { total, samount, vat, comment }) {
+  const put = { total, samount, vat, ...(typeof comment === 'string' ? { comment } : {}) };
+  return putLodgeFields(seq, trseq, lodgeSeq, put, '정산금액', (row) => {
+    if (Number(String(row.total ?? '').replace(/,/g, '')) !== Number(total)) return '정산금액이 바뀌지 않았습니다';
+    if (typeof comment === 'string' && String(row.comment ?? '').trim() !== comment.trim()) return '비고가 바뀌지 않았습니다';
+    return '';
+  });
+}
+
+/**
+ * 사후정산의 숙박 줄 하나의 비고(lodge_comment)만 바꾼다 — 입력 화면에서 그 줄의 비고를 고치고 저장한 것과 같다. 출장 카드 숙박비
+ * 내역에서 상한액을 넘긴 줄의 상한 초과 사유를 고쳐 쓸 때 쓴다(lodgebox.js, 2026-10-08 사용자 지정: "수정 가능하게 해줘").
+ * 보낸 뒤 화면을 다시 읽어 비고가 바뀌었는지로 성공을 판정한다 — 그대로면 던진다.
+ *
+ * **2026-10-08 현재 실제로 보내 본 적이 없다.**
+ * @returns {Promise<Record<string,string>[]>} 바꾼 뒤 화면의 숙박 줄
+ */
+export async function tripAfterLodgeComment(seq, trseq, lodgeSeq, comment) {
+  const want = String(comment ?? '').trim();
+  return putLodgeFields(seq, trseq, lodgeSeq, { comment: want }, '비고', (row) => (String(row.comment ?? '').trim() !== want ? '비고가 바뀌지 않았습니다' : ''));
+}
+
+/**
+ * 그 숙박 줄의 칸 몇 개(lodge_ 뒤의 이름 → 값)만 바꿔 폼을 그대로 제출하고, 화면을 다시 읽어 check 로 바뀌었는지 본다.
+ * check 는 다시 읽은 그 줄을 받아 안 바뀐 까닭을 돌려준다(빈 글이면 됐다). what 은 잘못을 말할 때 부르는 이름이다.
+ */
+async function putLodgeFields(seq, trseq, lodgeSeq, put, what, check) {
   const { fields, via } = await afterForm(seq, trseq);
   const at = lodgeFieldsAt(fields, lodgeSeq);
   if (!at) throw new Error('그 숙박 줄이 사후정산 화면에 없습니다(이미 지워졌을 수 있습니다). 새로 읽어 주세요.');
-  if (at.total == null || at.samount == null || at.vat == null) throw new Error('사후정산 입력 화면의 숙박 줄 모양이 다릅니다(정산금액·공급가액·부가세 칸).');
-  if (via === 'tab') throw new Error('확장의 직접 요청이 막혀 정산금액을 바꾸지 못했습니다. eclass 의 사후정산 입력 화면에서 고쳐 주세요.');
-  const put = new Map([[at.total, total], [at.samount, samount], [at.vat, vat]]);
+  const keys = Object.keys(put);
+  if (keys.some((k) => at[k] == null)) throw new Error(`사후정산 입력 화면의 숙박 줄 모양이 다릅니다(${what} 칸).`);
+  if (via === 'tab') throw new Error(`확장의 직접 요청이 막혀 ${what}을 바꾸지 못했습니다. eclass 의 사후정산 입력 화면에서 고쳐 주세요.`);
+  const values = new Map(keys.map((k) => [at[k], put[k]]));
   const body = new FormData();
-  for (const [i, [name, value]] of fields.entries()) body.append(name, put.has(i) ? String(put.get(i) ?? '') : value ?? '');
+  for (const [i, [name, value]] of fields.entries()) body.append(name, values.has(i) ? String(values.get(i) ?? '') : value ?? '');
   await directFetch(`${BASE}/AfterTrip/Save`, { method: 'POST', body });
 
   const left = await tripAfterLodges(seq, trseq);
   const row = left.find((r) => r.seq === String(lodgeSeq));
   if (!row) throw new Error('저장을 보냈지만 그 줄이 사후정산 화면에 없습니다. eclass 의 사후정산 입력 화면에서 확인해 주세요.');
-  if (Number(String(row.total ?? '').replace(/,/g, '')) !== Number(total)) {
-    throw new Error('저장을 보냈지만 정산금액이 바뀌지 않았습니다. eclass 의 사후정산 입력 화면에서 확인해 주세요.');
-  }
+  const why = check(row);
+  if (why) throw new Error(`저장을 보냈지만 ${why}. eclass 의 사후정산 입력 화면에서 확인해 주세요.`);
   return left;
 }
 

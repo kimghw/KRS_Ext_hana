@@ -853,7 +853,7 @@ console.log('공문 탭');
   t('공문 탭 클릭과 공문 화면의 리스너', () => {
     assert.ok(wired.get('tabGongmun')?.has('click'));
     const want = [['gmKinds', 'click'], ['gmChatGo', 'click'], ['gmChatInput', 'keydown'], ['gmFile', 'change'], ['gmCapture', 'click'], ['gmManual', 'click'],
-      ['gmReset', 'click'], ['gmCut', 'click'], ['gmProjects', 'click'], ['gmFields', 'input'], ['gmTitle', 'input'], ['gmBody', 'input'], ['gmRegen', 'click'],
+      ['gmReset', 'click'], ['gmCut', 'click'], ['gmAgentGo', 'click'], ['gmAgentInput', 'keydown'], ['gmMoreFields', 'input'], ['gmPick', 'click'], ['gmProjects', 'click'], ['gmFields', 'input'], ['gmTitle', 'input'], ['gmBody', 'input'], ['gmRegen', 'click'],
       ['gmCopyTitle', 'click'], ['gmCopyBody', 'click'], ['gmOpen', 'click'], ['gmSavePdf', 'click'], ['gmTplForm', 'change'], ['gmTplTitle', 'input'],
       ['gmTplBody', 'input'], ['gmTplReset', 'click'], ['gmDept', 'input'], ['gmHead', 'input'], ['gmRefs', 'input'], ['gmProjAdd', 'click'],
       ['gmProjList', 'input'], ['gongmun', 'dragover'], ['gongmun', 'drop']];
@@ -866,7 +866,7 @@ console.log('공문 탭');
   const doc = window.document;
   const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
   const type = (node, value) => { node.value = value; node.dispatchEvent(new window.Event('input', { bubbles: true })); };
-  const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
+  const field = (key) => doc.querySelector(`#gmDraft [data-key="${key}"]`);
   await settle();
   t('저장된 모드가 공문이면 공문 탭으로 열리고 날짜 격자·예약 현황·말로 찾기·근태는 숨는다', () => {
     assert.ok(doc.getElementById('tabGongmun').classList.contains('active'));
@@ -875,11 +875,15 @@ console.log('공문 탭');
     assert.ok(doc.getElementById('attend').classList.contains('hidden'));
     for (const sel of ['.controls', '.schedule', '.ask']) assert.ok(doc.querySelector(sel).hasAttribute('hidden'), sel);
   });
-  t('갈래는 구매·교육·출장이고(출장은 준비 중) 처음에는 구매다', () => {
+  t('갈래는 구매·교육·출장이고 처음에는 구매다 — 셋 다 같은 문서 넣는 곳이고, 상자의 안내는 한 줄뿐이다(2026-10-08 사용자 지정)', () => {
     const kinds = [...doc.querySelectorAll('#gmKinds .gm-kind')].map((b) => b.dataset.kind);
-    assert.deepEqual(kinds, ['purchase', 'edu', 'trip']);
-    assert.match(doc.querySelector('#gmKinds [data-kind="trip"]').textContent, /준비 중/);
+    assert.deepEqual(kinds, ['purchase', 'edu', 'trip', 'outside']);
+    assert.equal(doc.querySelector('#gmKinds [data-kind="outside"]').textContent, '외부활동');
+    assert.equal(doc.querySelector('#gmKinds [data-kind="outside"]').title, '외부활동 허가 신청서');
+    assert.ok(!doc.querySelector('#gmKinds [data-kind="trip"]').textContent.includes('준비 중'));
     assert.equal(doc.querySelector('#gmKinds .gm-kind.active').dataset.kind, 'purchase');
+    assert.equal(doc.getElementById('gmSoon'), null, '준비 중 안내는 없다');
+    assert.deepEqual([...doc.querySelectorAll('#gmIntake .gm-drop > span')].map((s) => s.textContent.trim()), ['견적서를 넣으세요', '드래그 · 붙여넣기 · 캡처 가능']);
   });
   t('Claude 가 없으면 채팅 칸은 회색이되 열려 있다(규칙으로 읽는다)', () => {
     assert.ok(doc.getElementById('gmChat').classList.contains('off'));
@@ -902,9 +906,11 @@ console.log('공문 탭');
 
   doc.getElementById('gmManual').click();
   await settle();
-  t('문서 없이 쓰면 초안이 열리고, 과제가 하나뿐이면 바로 골라진다', () => {
+  t('문서 없이 쓰면 초안이 열리고, 과제가 하나뿐이면 바로 골라진다 — 과제는 갈래 아래의 과제 줄에 있고 카드 안 목록은 숨는다', () => {
     assert.ok(!doc.getElementById('gmDraft').classList.contains('hidden'));
-    assert.equal(doc.querySelector('#gmProjects .gm-proj.active .gm-proj-name').textContent, PROJECT);
+    assert.equal(doc.querySelector('#gmPick .gm-pick.active').textContent, PROJECT, '별칭이 없으면 과제명');
+    assert.ok(doc.getElementById('gmProjects').classList.contains('hidden'));
+    assert.ok(doc.getElementById('gmProjLabel').classList.contains('hidden'));
   });
   t('결재선 — 기안자 → 합의자(과제책임자) → 결재자(부서장) · 참조자', () => {
     const line = doc.getElementById('gmLine').textContent;
@@ -967,13 +973,138 @@ console.log('공문 탭');
   });
 
   doc.querySelector('#gmKinds [data-kind="trip"]').click();
-  t('출장은 빈 껍데기 — 문서 넣는 곳·초안 없이 준비 중 안내와 출장 양식만 보인다', () => {
-    assert.ok(doc.getElementById('gmIntake').classList.contains('hidden'));
-    assert.ok(!doc.getElementById('gmSoon').classList.contains('hidden'));
+  t('출장도 같은 문서 넣는 곳 — 머리말만 다르고, 전체·부분 캡처 단추·문서 없이 쓰기가 선다', () => {
+    assert.ok(!doc.getElementById('gmIntake').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmDropLead').textContent, '행사·회의 안내문이나 초청장을 넣으세요');
+    assert.ok(doc.querySelector('#gmCapture .wp-open'), '웹페이지 캡처 단추');
+    assert.ok(!doc.getElementById('gmManual').hidden);
     assert.ok(doc.getElementById('gmDraft').classList.contains('hidden'));
-    assert.ok(doc.getElementById('gmDoc').classList.contains('hidden'));
     assert.match(doc.getElementById('gmTplTitle').value, /출장 품의/);
   });
+  doc.getElementById('gmManual').click();
+  await settle();
+  t('출장 — 문서 없이 쓰면 출장 칸(읽은 칸은 접힘, 출장목적·출장사유는 펼침)이 서고 과제·결재선은 다른 갈래와 같다', () => {
+    assert.ok(!doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.deepEqual([...doc.querySelectorAll('#gmMoreFields [data-key]')].map((n) => n.dataset.key), ['place', 'from', 'to', 'who', 'cost', 'account']);
+    assert.deepEqual([...doc.querySelectorAll('#gmFields [data-key]')].map((n) => n.dataset.key), ['purpose', 'reason']);
+    assert.equal(field('who').value, '김거화');
+    assert.equal(doc.querySelector('#gmPick .gm-pick.active').textContent, PROJECT);
+    assert.match(doc.getElementById('gmLine').textContent, /기안자김거화→합의자박기도과제책임자→결재자노길태부서장/);
+    assert.match(doc.getElementById('gmNeed').textContent, /출장지 · 출장기간 · 예상경비 · 출장목적 · 출장사유/);
+  });
+  type(field('place'), '대전(한국기계연구원)');
+  type(field('from'), '2026-10-20');
+  type(field('to'), '2026-10-21');
+  type(field('cost'), '300,000');
+  type(field('purpose'), '실증 시험 참관');
+  type(field('reason'), '과제 실증 시험 결과 확인에 필요함');
+  t('출장 — 양식대로 제목·본문(출장 내용 · 출장사유 · ※ 첨부 행사 안내문)이 만들어진다', () => {
+    assert.ok(!doc.getElementById('gmDoc').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmTitle').value, `${PROJECT} 수행을 위한 출장 품의`);
+    const body = doc.getElementById('gmBody').value;
+    assert.match(body, /나\. 출장 내용\n {4}\(1\) 출 장 지 : 대전\(한국기계연구원\)\n {4}\(2\) 출장기간 : 2026\. 10\. 20\. ~ 2026\. 10\. 21\. \(2일\)\n {4}\(3\) 출 장 자 : 김거화\n {4}\(4\) 출장목적 : 실증 시험 참관\n {4}\(5\) 출장사유 : 과제 실증 시험 결과 확인에 필요함\n {4}\(6\) 예상경비 : 300,000원\n {4}\(7\) 예산계정 : 연구활동비\(국내여비\)/);
+    assert.match(body, /※ 첨 부\n {4}1\. 행사 안내문 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSteps').textContent, /첨부 행사 안내문/);
+  });
+
+  // 외부활동 허가 신청서(2026-10-08 사용자 지정: "출장 옆에 외부활동 허가 신청서") — 같은 문서 넣는 곳, 요청 공문을 읽는다.
+  doc.querySelector('#gmKinds [data-kind="outside"]').click();
+  t('외부활동도 같은 문서 넣는 곳 — 요청 공문을 넣으라고 하고, 양식의 제목은 "[요청 기관] [구분] 외부활동 허가 신청"', () => {
+    assert.ok(!doc.getElementById('gmIntake').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmDropLead').textContent, '외부활동 요청 공문·메일(강의·자문·심사·발표 의뢰)을 넣으세요');
+    assert.ok(doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmTplTitle').value, '{요청기관} {활동구분} 외부활동 허가 신청');
+    assert.match(doc.getElementById('gmTplBody').value, /외부활동 내용/);
+  });
+  doc.getElementById('gmManual').click();
+  await settle();
+  t('외부활동 — 문서 없이 쓰면 외부활동 칸(읽은 칸은 접힘, 활동목적·신청사유는 펼침)이 서고, 구분은 강의가 기본', () => {
+    assert.ok(!doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.deepEqual([...doc.querySelectorAll('#gmMoreFields [data-key]')].map((n) => n.dataset.key), ['type', 'org', 'subject', 'from', 'to', 'hours', 'place', 'fee', 'topics', 'who']);
+    assert.deepEqual([...doc.querySelectorAll('#gmFields [data-key]')].map((n) => n.dataset.key), ['purpose', 'reason']);
+    assert.equal(field('type').value, '강의');
+    assert.equal(field('who').value, '김거화');
+    assert.match(doc.getElementById('gmNeed').textContent, /요청 기관 · 활동명 · 활동기간 · 활동장소 · 활동목적 · 신청사유/);
+  });
+  t('외부활동 — 과제는 갈래 아래가 아니라 읽은 내용 카드 안에서 고른다', () => {
+    assert.ok(doc.getElementById('gmProjBar').classList.contains('hidden'));
+    assert.ok(!doc.getElementById('gmProjects').classList.contains('hidden'));
+    assert.equal(doc.querySelector('#gmProjects .gm-proj.active .gm-proj-name').textContent, PROJECT);
+  });
+  type(field('org'), '부산대학교');
+  type(field('subject'), 'MVDC 차단기 기술 특강');
+  type(field('from'), '2026-11-05');
+  type(field('place'), '부산대학교 공학관');
+  type(field('purpose'), '연구 성과 확산');
+  type(field('reason'), '과제 연구 성과의 확산에 필요함');
+  t('외부활동 — 양식대로 제목·본문(외부활동 내용 · 신청사유 · ※ 첨부 요청 공문)이 만들어진다', () => {
+    assert.ok(!doc.getElementById('gmDoc').classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmTitle').value, '부산대학교 강의 외부활동 허가 신청');
+    const body = doc.getElementById('gmBody').value;
+    assert.match(body, /나\. 외부활동 내용\n {4}\(1\) 활동구분 : 강의\n {4}\(2\) 요청기관 : 부산대학교\n {4}\(3\) 활 동 명 : MVDC 차단기 기술 특강\n {4}\(4\) 활동기간 : 2026\. 11\. 5\. \(1일\)\n {4}\(5\) 활동장소 : 부산대학교 공학관\n {4}\(6\) 활 동 자 : 김거화\n {4}\(7\) 활동목적 : 연구 성과 확산\n {4}\(8\) 신청사유 : 과제 연구 성과의 확산에 필요함/);
+    assert.match(body, /※ 첨 부\n {4}1\. 요청 공문 1부\.  끝\.$/);
+    assert.ok(!body.includes('예산계정'));
+    assert.match(doc.getElementById('gmSteps').textContent, /첨부 요청 공문/);
+  });
+}
+
+console.log('공문 탭 — 구매·교육·출장은 갈래 아래의 과제 줄(별칭 칩)에서 과제를 먼저 고른다(2026-10-08 사용자 지정)');
+{
+  const A = 'MW급 10kV 반도체 차단기 개발';
+  const B = '선박용 수소 연료전지 추진 시스템 실증';
+  const { window, store } = await boot({
+    mode: 'gongmun', gongmunKind: 'purchase', myName: '김거화',
+    gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
+    rndBook: { projects: [
+      { id: 'p1', name: A, alias: 'SSCB', code: 'RS-2026-0001', lead: '박기도' },
+      { id: 'p2', name: B, alias: '수소추진', code: 'RS-2026-0002', lead: '홍길동' },
+    ] },
+  });
+  const doc = window.document;
+  const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+  const chips = () => [...doc.querySelectorAll('#gmPick .gm-pick')].map((b) => [b.textContent, b.classList.contains('active')]);
+  const chip = (label) => [...doc.querySelectorAll('#gmPick .gm-pick')].find((b) => b.textContent === label);
+  await settle();
+  t('문서를 넣기 전에도 갈래 바로 아래에 과제 줄이 서고, 칩은 별칭이다 — 과제가 둘이라 고르라고 한다', () => {
+    const bar = doc.getElementById('gmProjBar');
+    assert.ok(!bar.classList.contains('hidden'));
+    assert.equal(doc.getElementById('gmKinds').nextElementSibling, bar, '채팅 칸·문서 넣는 곳보다 위');
+    assert.ok(doc.getElementById('gmDraft').classList.contains('hidden'), '초안은 아직 없다');
+    assert.deepEqual(chips(), [['SSCB', false], ['수소추진', false]]);
+    assert.ok(bar.classList.contains('need'));
+    assert.equal(bar.querySelector('.gm-projbar-label').textContent, '과제를 고르세요');
+    assert.equal(chip('수소추진').title, `${B} · RS-2026-0002 · 책임자 홍길동`);
+  });
+  chip('수소추진').click();
+  await ta('고르면 켜지고 남는다 — 켜진 칩을 다시 눌러도 풀리지 않는다', async () => {
+    assert.deepEqual(chips(), [['SSCB', false], ['수소추진', true]]);
+    assert.equal(doc.querySelector('#gmProjBar .gm-projbar-label').textContent, '과제');
+    chip('수소추진').click();
+    assert.deepEqual(chips(), [['SSCB', false], ['수소추진', true]]);
+    await settle(500);
+    assert.equal(store.gongmunDraft?.lastProject, B);
+  });
+  doc.getElementById('gmManual').click();
+  await settle();
+  t('문서 없이 쓰면 먼저 고른 과제로 초안이 시작한다 — 과제 기본 내용·합의자가 그 과제의 것', () => {
+    assert.ok(!doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.match(doc.getElementById('gmProjInfo').textContent, /별명 수소추진.*번호 RS-2026-0002/);
+    assert.match(doc.getElementById('gmLine').textContent, /합의자홍길동/);
+  });
+  chip('SSCB').click();
+  await settle();
+  t('초안이 있을 때 과제 줄에서 바꾸면 초안의 과제가 바뀐다', () => {
+    assert.deepEqual(chips(), [['SSCB', true], ['수소추진', false]]);
+    assert.match(doc.getElementById('gmProjInfo').textContent, /별명 SSCB/);
+    assert.match(doc.getElementById('gmLine').textContent, /합의자박기도/);
+  });
+  doc.querySelector('#gmKinds [data-kind="edu"]').click();
+  t('초안이 없는 다른 갈래로 가도 마지막에 고른 과제가 켜져 있다', () => {
+    assert.ok(doc.getElementById('gmDraft').classList.contains('hidden'));
+    assert.deepEqual(chips(), [['SSCB', true], ['수소추진', false]]);
+  });
+  doc.querySelector('#gmKinds [data-kind="outside"]').click();
+  t('외부활동에서는 과제 줄이 숨는다(읽은 내용 카드 안에서 고른다)', () => assert.ok(doc.getElementById('gmProjBar').classList.contains('hidden')));
 }
 
 console.log('R&D 탭');
@@ -983,6 +1114,8 @@ console.log('R&D 탭');
   t('R&D 탭 클릭과 R&D 화면의 리스너', () => {
     assert.ok(wired.get('tabRnd')?.has('click'));
     const want = [['rdProjects', 'click'], ['rdEmptyAdd', 'click'], ['rdEmptyImport', 'click'], ['rdEdit', 'click'], ['rdYears', 'click'],
+      ['rdAliasSet', 'click'], ['rdAliasIn', 'keydown'], ['rdRosterCopy', 'click'], ['rdPlanCopy', 'click'],
+      ['rdNoteOn', 'change'], ['rdNoteSection', 'change'], ['rdNoteSections', 'click'], ['rdNoteSync', 'click'],
       ['rdFSave', 'click'], ['rdFCancel', 'click'], ['rdFDel', 'click'], ['rdForm', 'keydown'],
       ['rdBudget', 'input'], ['rdBudget', 'change'], ['rdBudget', 'click'], ['rdBudgetAdd', 'click'],
       ['rdLogAdd', 'click'], ['rdLogCancel', 'click'], ['rdLogTitle', 'keydown'], ['rdLogs', 'click'],
@@ -1070,7 +1203,7 @@ console.log('공문 탭 — 교육: 견적서에 교육 내용 캡처를 더 넣
     Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: names.map((n) => new window.File([PNG], n, { type: 'image/png' })) } });
     doc.getElementById('gmIntake').dispatchEvent(ev);
   };
-  const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
+  const field = (key) => doc.querySelector(`#gmDraft [data-key="${key}"]`);
   const type = (node, value) => { node.value = value; node.dispatchEvent(new window.Event('input', { bubbles: true })); };
   await settle();
   t('교육은 견적서와 교육 내용을 함께 넣으라고 안내한다', () => assert.equal(doc.getElementById('gmDropLead').textContent, '교육 견적서·교육 내용을 넣으세요'));
@@ -1132,7 +1265,8 @@ console.log('공문 탭 — 교육: 견적서에 교육 내용 캡처를 더 넣
     assert.equal(doc.getElementById('gmTitle').value, '차단기 과제 수행을 위한 교육 품의');
     assert.match(doc.getElementById('gmBody').value, /\(3\) 연구기간 : 2026\.04\.01 ~ 2029\.12\.31\n {4}\(4\) 과제책임자 : 박기도/);
     assert.match(doc.getElementById('gmProjInfo').textContent, /별명 차단기 과제/);
-    assert.match(doc.querySelector('#gmProjects .gm-proj .gm-proj-lead').textContent, /별명 차단기 과제 · 책임 박기도/);
+    assert.equal(doc.querySelector('#gmPick .gm-pick.active').textContent, '차단기 과제', '과제 줄의 칩이 별명으로 바뀐다');
+    assert.equal(doc.querySelector('#gmPick .gm-pick.active').title, 'MVDC 차단기 개발 · RND-20-2026 · 책임자 박기도');
     assert.ok(!/과제 별명/.test(doc.getElementById('gmNeed').textContent));
     assert.equal(store.gongmunProjects[0].alias, '차단기 과제');
     assert.equal(store.gongmunProjects[0].period, '2026.04.01 ~ 2029.12.31');
@@ -1276,7 +1410,125 @@ console.log('공문 탭 — 구매: 쇼핑몰 화면을 넣으면 가격과 그 
   Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap });
 }
 
-console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10-08, 아이콘 단추): 권한 → 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 교육 내용 PDF');
+console.log('공문 탭 — 구매: 읽은 문서는 접고 과제(R&D 탭)·용도·사유·에이전트·결재선만 펼침, 연구 내용으로 사유, 강의를 사면 견적서와 강의 내용 첨부(2026-10-08)');
+{
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const asked = [];
+  const fetchImpl = async (url, init) => {
+    if (!String(url).includes('api.anthropic.com')) throw new Error('offline');
+    const body = JSON.parse(init.body);
+    const props = Object.keys(body.output_config.format.schema.properties);
+    const input = JSON.stringify(body.messages[0].content);
+    asked.push({ props, input });
+    let record;
+    if (props.includes('parts')) {
+      // 인프런 강의를 구매로 — 첫 장은 가격 칸(오린다), 둘째 장은 커리큘럼(강의 내용).
+      record = {
+        docType: 'order', vendor: '(주)인프랩', gist: 'Hermes Bot 강의', total: 84700, summary: '인프런 강의 84,700원',
+        parts: [{ file: '인프런_1.png', kind: 'order' }, { file: '인프런_2.png', kind: 'content' }],
+        quoteArea: [{ file: '인프런_1.png', left: 60, top: 10, right: 95, bottom: 60 }],
+      };
+    } else if (props.includes('reason')) {
+      record = input.includes('사용자의 말')
+        ? { reason: '고전압 시험 장비 검증 역량 확보에 필요함', use: '시험 장비 검증 교육용', reply: '사유를 시험 장비 검증 쪽으로 고쳤습니다' }
+        : { reason: '차단기 시제품 설계에 AI 도구 활용 역량이 필요함', use: 'AI 설계 도구 학습용', reply: null };
+    } else {
+      throw new Error(`모르는 작업: ${props}`);
+    }
+    return { ok: true, status: 200, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(record) }] }) };
+  };
+  // R&D 과제 — 오늘이 1차년도 안에 들게 한 달 전에 시작한다.
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const ymdOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const now = new Date();
+  const start = ymdOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30));
+  const end = ymdOf(new Date(now.getFullYear() + 3, now.getMonth(), now.getDate()));
+  const NAME = 'MW급 10kV 고전압 직류 시스템용 반도체 차단기 개발';
+  const saved = {
+    mode: 'gongmun', gongmunKind: 'purchase', apiKey: 'sk-ant-test', myName: '김거화',
+    gongmunPreset: { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: [] },
+    gongmunProjects: [{ name: '사전 설정에만 있는 과제', lead: '홍길동' }],
+    rndBook: { projects: [{ id: 'p1', name: NAME, alias: 'SSCB', code: 'RS-2026-0001', lead: '박기도', start, end,
+      years: { 1: { logs: [{ date: start, title: '연구개발 계획', key: 'plan', text: '■ 개발목표\n1. 10kV 반도체 차단기 시제품 설계' }] } } }] },
+  };
+  const { window } = await boot(saved, { fetchImpl });
+  const doc = window.document;
+  const kept = { canvas: globalThis.OffscreenCanvas, bitmap: globalThis.createImageBitmap };
+  globalThis.OffscreenCanvas = class {
+    constructor(w, h) { this.width = w; this.height = h; }
+    getContext() { return { fillRect() {}, drawImage() {} }; }
+    async convertToBlob({ type }) { return new window.Blob([PNG], { type }); }
+  };
+  globalThis.createImageBitmap = async () => ({ width: 1000, height: 800, close() {} });
+  const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  const drop = (names) => {
+    const ev = new window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: { types: ['Files'], files: names.map((n) => new window.File([PNG], n, { type: 'image/png' })) } });
+    doc.getElementById('gmIntake').dispatchEvent(ev);
+  };
+  const field = (key) => doc.querySelector(`#gmDraft [data-key="${key}"]`);
+  const type = (node, value) => { node.value = value; node.dispatchEvent(new window.Event('input', { bubbles: true })); };
+  const body = () => doc.getElementById('gmBody').value;
+  const reasons = () => asked.filter((a) => a.props.includes('reason'));
+  await settle();
+  drop(['인프런_1.png', '인프런_2.png']);
+  await settle(300);
+  t('읽은 문서는 한 줄로 접혀 있고(무엇을 읽었는지·첨부), 펼친 칸은 용도·구매사유뿐 — 나머지 읽은 칸·오린 견적서는 접힌 칸 안', () => {
+    assert.equal(doc.getElementById('gmMore').open, false);
+    assert.match(doc.getElementById('gmMoreState').textContent, /^주문 화면 · \(주\)인프랩 · 첨부 견적서 · 강의 내용$/);
+    assert.deepEqual([...doc.querySelectorAll('#gmFields [data-key]')].map((n) => n.dataset.key), ['use', 'reason']);
+    assert.deepEqual([...doc.querySelectorAll('#gmMoreFields [data-key]')].map((n) => n.dataset.key), ['gist', 'vendor', 'total', 'summary', 'account']);
+    assert.ok(doc.querySelector('#gmMore #gmCut img'));
+    assert.ok(!doc.getElementById('gmAgent').classList.contains('hidden'));
+  });
+  t('과제는 R&D 탭의 과제다(사전 설정의 과제가 아니다) — 하나뿐이라 골라지고, 기본 내용에 연구 내용이 보인다', () => {
+    assert.deepEqual([...doc.querySelectorAll('#gmPick .gm-pick')].map((n) => n.textContent), ['SSCB'], '칩은 별칭');
+    assert.ok(doc.querySelector('#gmPick .gm-pick.active').title.startsWith(NAME), '과제명은 툴팁');
+    assert.match(doc.getElementById('gmProjInfo').textContent, /별명 SSCB.*번호 RS-2026-0001.*연구 내용 연구개발 계획 1차년도/);
+    assert.match(doc.getElementById('gmLine').textContent, /합의자박기도/);
+  });
+  t('고른 과제의 연구 내용(연구개발 계획)을 근거로 용도·구매사유를 저절로 쓴다', () => {
+    assert.equal(reasons().length, 1, `사유를 쓰지 않았다 — ${doc.getElementById('gmStatus').textContent}`);
+    assert.match(reasons()[0].input, /과제 내용\(R&D 탭의 연구 내용 — 연구개발 계획·진행 기록\):\\n<<<\\n\[연구개발 계획 — 1차년도\]\\n■ 개발목표/);
+    assert.equal(field('reason').value, '차단기 시제품 설계에 AI 도구 활용 역량이 필요함');
+    assert.equal(field('use').value, 'AI 설계 도구 학습용');
+    assert.equal(doc.querySelector('#gmFields [data-act="reason"]').textContent, '연구 내용으로 쓰기');
+  });
+  t('공문의 첨부는 오린 견적서와 강의 내용 두 줄 — PDF 도 둘', () => {
+    assert.match(body(), /※ 첨 부\n {4}1\. 견적서 1부\.\n {4}2\. 강의 내용 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSavePdf').textContent, /첨부 PDF 2개 저장 \(견적서 · 강의 내용\)/);
+  });
+
+  type(field('use'), '내가 쓴 용도');
+  type(doc.getElementById('gmAgentInput'), '사유를 시험 장비 검증 쪽으로 다시 써 줘');
+  doc.getElementById('gmAgentGo').click();
+  await settle(200);
+  t('에이전트 칸 — 적은 말과 지금 적힌 사유를 연구 내용과 함께 넘기고, 고쳐 쓴 용도·사유가 칸과 본문에 들어가며 답이 남는다', () => {
+    const ask = reasons().at(-1);
+    assert.equal(reasons().length, 2);
+    assert.match(ask.input, /지금 적힌 구매사유: 차단기 시제품 설계에 AI 도구 활용 역량이 필요함\\n사용자의 말:\\n<<<\\n사유를 시험 장비 검증 쪽으로 다시 써 줘\\n>>>/);
+    assert.match(ask.input, /\[연구개발 계획 — 1차년도\]/);
+    assert.equal(field('reason').value, '고전압 시험 장비 검증 역량 확보에 필요함');
+    assert.equal(field('use').value, '시험 장비 검증 교육용', '고쳐 달라고 했으니 손으로 고친 용도도 바꾼다');
+    assert.match(body(), /용도 : 시험 장비 검증 교육용/);
+    assert.deepEqual([...doc.querySelectorAll('#gmAgentLog .gm-say')].map((n) => n.textContent),
+      ['사유를 시험 장비 검증 쪽으로 다시 써 줘', '사유를 시험 장비 검증 쪽으로 고쳤습니다']);
+    assert.equal(doc.getElementById('gmAgentInput').value, '');
+  });
+
+  doc.getElementById('gmMore').open = false;
+  type(field('total'), '1,200,000');
+  t('합계가 한도를 넘으면 접힌 읽은 문서가 펴진다 — 합계 칸이 그 안에 있다', () => {
+    assert.equal(doc.getElementById('gmMore').open, true);
+    assert.match(doc.getElementById('gmLimit').textContent, /읽은 문서의 합계 칸을 고쳐 주세요/);
+  });
+  doc.querySelector('#gmProjInfo [data-act="rnd"]').click();
+  await settle();
+  t('과제 기본 내용의 R&D 탭 단추는 R&D 탭으로 간다', () => assert.ok(doc.getElementById('tabRnd').classList.contains('active')));
+  Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap });
+}
+
+console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10-08, 아이콘 단추): 권한 → 한 화면씩 찍기 → A4 장 → 다섯 장과 화면 글자 읽기, 나머지는 첨부에만 → 수강료 칸을 오린 교육 견적서 · 교육 내용 PDF');
 {
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
   const asked = [];
@@ -1291,11 +1543,13 @@ console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10
     let record;
     if (props.includes('parts')) {
       // 읽기는 보낸 다섯 장 가운데 첫 장을 교육 안내문, 둘째 장을 교육 내용으로 가리고 나머지는 적지 않았다 — 뒷장이 이어 받는지 본다.
+      // 첫 장의 수강료 칸(quoteArea)을 짚었다 — 그 칸을 오려 교육 견적서로 첨부하는지 본다(2026-10-08 사용자 지정).
       const names = [...new Set([...input.matchAll(/화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_\d+\.png/g)].map((m) => m[0]))];
       record = {
         docType: 'course', vendor: '인프런', courseName: '[단테랩스] Hermes Bot × OpenAI Dots', total: 84700, gist: 'Hermes Bot 강의', summary: '인프런 온라인 강의 안내 84,700원',
         place: '온라인', courseHours: '7분(수업 19개)', topics: '두 봇 지도와 하이라이트 릴 · 봇 하나로 놀기', use: 'AI 봇 활용 역량 강화',
         parts: [{ file: names[0], kind: 'course' }, { file: names[1], kind: 'content' }],
+        quoteArea: [{ file: names[0], left: 5, top: 10, right: 95, bottom: 40 }],
       };
     } else if (props.includes('reason')) {
       record = { reason: '과제의 AI 봇 플랫폼 활용 역량 확보에 필요함', use: null };
@@ -1358,18 +1612,17 @@ console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10
   globalThis.URL.createObjectURL = (b) => { blobs.push(b); return 'blob:gongmun-cap'; };
   globalThis.URL.revokeObjectURL = () => {};
   const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
-  const field = (key) => doc.querySelector(`#gmFields [data-key="${key}"]`);
+  const field = (key) => doc.querySelector(`#gmDraft [data-key="${key}"]`);
   await settle();
   const tabBtn = () => doc.querySelector('#gmCapture [data-pick="tab"]');
   const partBtn = () => doc.querySelector('#gmCapture [data-pick="part"]');
-  t('문서 넣는 곳 아래에 단추 둘 — 보고 있는 탭(아이콘, 이름은 낭독기·풍선말)과 "부분 골라 캡처". 탭 목록은 없다', () => {
+  t('문서 넣는 곳 아래에 단추 둘 — 전체(보고 있는 탭 통째로)와 부분(골라 캡처). 탭 목록은 없다', () => {
     const box = doc.getElementById('gmCapture');
     assert.ok(box.closest('#gmIntake'), '문서 넣는 곳 안에 있어야 한다');
-    assert.equal(tabBtn().textContent, '', '아이콘만');
+    assert.equal(tabBtn().textContent, '전체', '전체 · 부분 — 글자가 보인다');
     assert.ok(tabBtn().querySelector('svg'));
-    assert.equal(tabBtn().getAttribute('aria-label'), '보고 있는 탭 통째로 캡처해 읽기');
     assert.match(tabBtn().title, /보고 있는 웹페이지를 위에서 아래까지 캡처/);
-    assert.equal(partBtn().textContent, '부분 골라 캡처');
+    assert.equal(partBtn().textContent, '부분');
     assert.equal(partBtn().getAttribute('aria-pressed'), 'false');
     assert.ok(!tabBtn().disabled && !partBtn().disabled);
     assert.equal(doc.getElementById('gmTabs'), null);
@@ -1392,8 +1645,9 @@ console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10
     assert.deepEqual(calls.shotOpts, [7, { format: 'png' }]);
     assert.deepEqual(page.steps, [[0, false], [1000, true], [2000, true], [3000, true], [4000, true], [5000, true]]);
     assert.equal(page.done, 0);
-    assert.equal(canvases.length, 7);
+    assert.equal(canvases.length, 8, 'A4 일곱 장 + 오린 교육 견적서 한 장');
     assert.deepEqual(canvases[0], [600, 849]);
+    assert.deepEqual(canvases[7], [576, 336], '첫 장의 수강료 칸(5~95% × 10~40%)을 둘레 18px 더 넣어 오렸다');
     assert.ok(!tabBtn().disabled && !partBtn().disabled);
   });
   t('뒤에 있던 메일함은 앞에 나오지 않는다 — 보던 탭 그대로', () => {
@@ -1419,19 +1673,31 @@ console.log('공문 탭 — 보고 있는 탭 통째로 캡처해 읽기(2026-10
       `사유가 비었다 — 부른 작업: ${asked.map((a) => a.props.slice(0, 2).join('|')).join(', ')} · 상태: ${doc.getElementById('gmStatus').textContent}`);
     assert.equal(doc.getElementById('gmTitle').value, '차단기 과제 수행을 위한 온라인교육 품의');
   });
-  t('첨부 — 읽기가 가린 종류를 뒷장이 이어 받아 교육 안내문 1장·교육 내용 6장이고, 본문 ※ 첨부는 두 줄', () => {
-    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 안내문 · 교육 내용 6장/);
-    assert.match(doc.getElementById('gmBody').value, /※ 첨 부\n {4}1\. 교육 안내문 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/);
-    assert.match(doc.getElementById('gmSavePdf').textContent, /첨부 PDF 2개 저장 \(교육 안내문 · 교육 내용\)/);
+  t('첨부 — 수강료 칸을 오린 그림이 교육 견적서, 페이지 일곱 장(안내문 장까지)은 교육 내용이고, 본문 ※ 첨부는 그 두 줄', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 견적서 · 교육 내용 7장/);
+    assert.match(doc.getElementById('gmBody').value, /※ 첨 부\n {4}1\. 교육 견적서 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmSavePdf').textContent, /첨부 PDF 2개 저장 \(교육 견적서 · 교육 내용\)/);
+    const cut = doc.getElementById('gmCut');
+    assert.ok(!cut.classList.contains('hidden'), '오린 교육 견적서를 보여 준다');
+    assert.match(cut.querySelector('.gm-cut-head').textContent, /^교육 견적서가격과 그 둘레를 오렸습니다 — 화면캡처_inflearn\.com_\d{4}-\d{2}-\d{2}_1\.png$/);
+    assert.ok(!/교육 견적서|교육 내용/.test(doc.getElementById('gmNeed').textContent), '두 첨부가 다 있으니 남은 것에 없다');
   });
   doc.getElementById('gmSavePdf').click();
   await settle(800);
-  await ta('첨부 PDF 저장 — 교육 안내문 PDF(한 쪽)와 교육 내용 PDF(여섯 쪽)가 내려받아진다', async () => {
-    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['교육안내문_인프런.pdf', '교육내용_인프런.pdf']);
+  await ta('첨부 PDF 저장 — 교육 견적서 PDF(오린 한 쪽)와 교육 내용 PDF(일곱 쪽)가 내려받아진다', async () => {
+    assert.deepEqual(calls.downloads.map((d) => d.filename.replace(/_\d{4}-\d{2}-\d{2}/, '')), ['교육견적서_인프런.pdf', '교육내용_인프런.pdf']);
     const { PDFDocument } = await import('../vendor/pdf-lib.esm.min.js');
     const pages = [];
     for (const b of blobs) pages.push((await PDFDocument.load(new Uint8Array(await b.arrayBuffer()))).getPageCount());
-    assert.deepEqual(pages, [1, 6]);
+    assert.deepEqual(pages, [1, 7]);
+  });
+  doc.querySelector('#gmCut [data-cut="off"]').click();
+  await settle();
+  t('원래 장으로 — 수강료 칸이 없으니 교육 견적서가 남은 것이 되고, 넣는 곳은 교육 견적서를 넣으라고 한다(본문 ※ 첨부는 두 줄 그대로)', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 내용 7장/);
+    assert.match(doc.getElementById('gmBody').value, /※ 첨 부\n {4}1\. 교육 견적서 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/);
+    assert.match(doc.getElementById('gmNeed').textContent, /교육 견적서\(첨부\)/);
+    assert.equal(doc.getElementById('gmDropLead').textContent, '교육 견적서(수강료 화면) 더 넣기');
   });
   Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
 }
@@ -1553,7 +1819,7 @@ console.log('공문 탭 — 부분 골라 캡처(2026-10-08 "탭이 아니라 �
   t('고르기 취소를 누르면 페이지의 막을 걷고(pickCancel) 단추가 돌아온다 — 아무것도 찍지 않는다', () => {
     assert.deepEqual(ran.map((r) => r[1]), ['pagePick', 'pickCancel']);
     assert.equal(pending, null);
-    assert.equal(partBtn().textContent, '부분 골라 캡처');
+    assert.equal(partBtn().textContent, '부분');
     assert.ok(!tabBtn().disabled);
     assert.equal(doc.getElementById('gmStatus').textContent, '부분 고르기를 그만뒀습니다.');
     assert.equal(shots.length, 0);
@@ -1565,7 +1831,7 @@ console.log('공문 탭 — 부분 골라 캡처(2026-10-08 "탭이 아니라 �
   await settle(30);
   t('고른 뒤 찍는 동안은 단추와 파일 넣기가 잠긴다', () => {
     assert.ok(tabBtn().disabled && partBtn().disabled);
-    assert.equal(partBtn().textContent, '부분 골라 캡처');
+    assert.equal(partBtn().textContent, '부분');
     assert.ok(doc.getElementById('gmFile').disabled);
     assert.match(doc.getElementById('gmStatus').textContent, /캡처하는 중/);
   });
@@ -1592,10 +1858,12 @@ console.log('공문 탭 — 부분 골라 캡처(2026-10-08 "탭이 아니라 �
     assert.match(read.input, /\[웹페이지 글자 — e-Class — 교육 안내\] https:\/\/eclass\.krs\.co\.kr\/notice\/view\?id=7\\n전력전자 실무 교육 안내/);
     assert.match(read.input, /\[웹페이지 글자 — e-Class — 교육비\] https:\/\/eclass\.krs\.co\.kr\/eClassVer4\/Home\/Index\\n교육비 330,000원/);
     assert.match(doc.getElementById('gmSource').textContent, /화면캡처_eclass\.krs\.co\.kr_\d{4}-\d{2}-\d{2}_1\.png, 화면캡처_eclass\.krs\.co\.kr_\d{4}-\d{2}-\d{2}_2\.png/);
-    assert.equal(doc.querySelector('#gmFields [data-key="course"]').value, '전력전자 실무');
+    assert.equal(doc.querySelector('#gmDraft [data-key="course"]').value, '전력전자 실무');
   });
-  t('고른 칸마다 한 묶음 — 틀은 교육 안내문, 상자는 교육 내용', () => {
-    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 안내문 · 교육 내용/);
+  t('고른 칸마다 한 묶음 — 틀(교육 안내문)과 상자(교육 내용) 모두 교육 내용이고, 견적서가 없으니 교육 견적서가 남은 것', () => {
+    assert.match(doc.getElementById('gmSource').textContent, /첨부 · 교육 내용 2장/);
+    assert.match(doc.getElementById('gmNeed').textContent, /교육 견적서\(첨부\)/);
+    assert.equal(doc.getElementById('gmDropLead').textContent, '교육 견적서(수강료 화면) 더 넣기');
   });
   Object.assign(globalThis, { OffscreenCanvas: kept.canvas, createImageBitmap: kept.bitmap, File: kept.file });
 }
@@ -2003,17 +2271,25 @@ console.log('근태 탭');
   doc.querySelector('#atKinds .at-kind[data-kind="leave"]').click();
   const chipsOf = (key) => [...doc.querySelectorAll(`.at-field[data-key="${key}"] .at-chip`)];
   const keys = () => [...doc.querySelectorAll('#atFields .at-field')].map((n) => n.dataset.key);
-  t('휴가: 연차가 기본이고 며칠간을 묻는다. 그대로 올릴 수 있다 (적어 둔 날짜는 가져가고 날 수는 하루로 돌아간다)', () => {
-    assert.deepEqual(keys(), ['sub', 'dateFrom', 'days', 'half']);
-    assert.deepEqual(chipsOf('sub').map((b) => [b.textContent, b.classList.contains('active')]), [['연차', true], ['체력단련', false]]);
-    assert.deepEqual(chipsOf('half').map((b) => [b.textContent, b.classList.contains('active')]), [['전일', true], ['오전', false], ['오후', false]]);
+  t('휴가: 연차가 기본이고 시작일·종료일이 한 줄, 그 아래 며칠간 칩 오른쪽에 오전·오후, 그 아래 기념일 지원 체크박스다(2026-10-08 사용자 지정). 그대로 올릴 수 있다', () => {
+    assert.deepEqual(keys(), ['sub', 'dateFrom', 'dateTo', 'days', 'half', 'wfa']);
+    assert.deepEqual(chipsOf('sub').map((b) => [b.textContent, b.classList.contains('active')]), [['연차', true], ['체력단련', false]], '기념일은 갈래 칩이 아니다');
+    assert.equal(doc.getElementById('at_wfa').type, 'checkbox');
+    assert.equal(doc.getElementById('at_wfa').checked, false);
+    assert.match(doc.querySelector('.at-field[data-key="wfa"] .at-label').textContent, /기념일 지원/);
+    assert.match(doc.getElementById('atLeaves').textContent, /연차현황을 읽는 중/, '종류 칩 아래에 연차현황 한 줄');
+    assert.deepEqual([...doc.querySelector('.at-group.at-lv').children].map((n) => n.dataset.key), ['dateFrom', 'dateTo'], '시작일·종료일 한 줄');
+    assert.deepEqual([doc.getElementById('at_dateFrom').value, doc.getElementById('at_dateTo').value], ['2026-10-20', '2026-10-20']);
+    assert.deepEqual([...doc.querySelector('.at-group.at-lvdays').children].map((n) => n.dataset.key), ['days', 'half'], '며칠간 칩과 오전·오후가 한 줄');
+    assert.equal(doc.querySelector('.at-field[data-key="days"] input[type="date"]'), null, '며칠간 줄에는 달력이 없다 — 종료일 칸이 받는다');
+    assert.deepEqual(chipsOf('half').map((b) => [b.textContent, b.classList.contains('active'), b.disabled]), [['오전', false, false], ['오후', false, false]], '전일 칩은 없다 — 1D 가 전일');
     assert.match(doc.getElementById('atFormTitle').textContent, /연차 신청/);
     assert.equal(doc.getElementById('atSubmit').disabled, false);
     assert.match(doc.getElementById('atNeed').textContent, /연차 10\/20 전일/);
   });
   t('휴가의 며칠간 칩도 1D~5D 다', () =>
     assert.deepEqual(chipsOf('days').map((b) => b.textContent), ['1D', '2D', '3D', '4D', '5D']));
-  chipsOf('half')[2].click();
+  chipsOf('half')[1].click();
   t('하루짜리 연차에서 오후를 고르면 요약에 오후가 적히고, 그 날 근무시간을 확인한다고 말한다', () => {
     assert.match(doc.getElementById('atNeed').textContent, /연차 10\/20 오후/);
     assert.match(doc.getElementById('at_half_msg').textContent, /근무시간을 확인하는 중/);
@@ -2023,18 +2299,91 @@ console.log('근태 탭');
     assert.match(doc.getElementById('at_half_msg').textContent, /근무시간을 확인하지 못했습니다.*09:00 출근으로 먼저/);
     assert.equal(doc.getElementById('atSubmit').disabled, false);
   });
+  chipsOf('half')[1].click();
+  t('켜진 오후를 다시 누르면 꺼져 전일이다', () => {
+    assert.deepEqual(chipsOf('half').map((b) => b.classList.contains('active')), [false, false]);
+    assert.match(doc.getElementById('atNeed').textContent, /연차 10\/20 전일/);
+  });
   chipsOf('days')[1].click();
-  t('이틀로 늘리면 구분 칸이 없어지고 전일로 올라간다', () => {
-    assert.deepEqual(keys(), ['sub', 'dateFrom', 'days']);
+  t('이틀로 늘리면 종료일이 따라오고 오전·오후는 잠긴 채 남으며 전일로 올라간다', () => {
+    assert.deepEqual(keys(), ['sub', 'dateFrom', 'dateTo', 'days', 'half', 'wfa']);
+    assert.equal(doc.getElementById('at_dateTo').value, '2026-10-21');
+    assert.ok(chipsOf('half').every((b) => b.disabled));
     assert.match(doc.getElementById('atNeed').textContent, /연차 10\/20~10\/21 2일간/);
   });
   chipsOf('sub')[1].click();
-  t('체력단련을 고르면 제목이 바뀐다', () => {
+  t('체력단련을 고르면 제목이 바뀌고 기념일 지원 체크박스는 없다', () => {
     assert.match(doc.getElementById('atFormTitle').textContent, /체력단련 신청/);
     assert.match(doc.getElementById('atNeed').textContent, /체력단련 10\/20~10\/21 2일간/);
+    assert.deepEqual(keys(), ['sub', 'dateFrom', 'dateTo', 'days', 'half']);
   });
   t('말로 채운 것이 활동 기록에 남는다', () =>
     assert.ok((store.activityLog || []).some((e) => e.kind === 'attend-ask' && /10월 20일 출장/.test(e.text))));
+  t('연차현황 — HR 에 닿지 못하면 그렇다고 적는다(연차·체력단련·저축연차는 HR 홈 카드의 값)', () =>
+    assert.match(doc.getElementById('atLeaves').textContent, /연차현황을 읽지 못했습니다/));
+
+  // 기념일 지원(2026-10-08 사용자 지정: "연차 내부에 체크박스로 기념을을 넣어서 기념을 내용을 넣을 수 있도록") — 연차 안의 체크박스를 켜면
+  // 기념일 칸이 붙는다. 연차는 HR 에 그대로 올라가고, 결재요청 뒤 eclass 복지기금 신청 화면을 채워 연다.
+  chipsOf('sub')[0].click();
+  chipsOf('days')[0].click();   // 앞에서 이틀로 늘려 두었다 — 연차 하루로
+  const check = (id, on) => { const n = doc.getElementById(id); n.checked = on; n.dispatchEvent(new window.Event('change', { bubbles: true })); };
+  check('at_wfa', true);
+  await new Promise((r) => setTimeout(r, 80));
+  t('기념일 지원을 켜면 연차 칸 아래에 기념일 칸(신청사항·기념일·대상자·가족관계·시설 이용일·금액·사용구분)이 붙고, 결재요청·임시저장은 그대로다', () => {
+    assert.equal(doc.getElementById('atFormTitle').textContent, '연차 신청 · 기념일 지원');
+    assert.deepEqual(keys(), ['sub', 'dateFrom', 'dateTo', 'days', 'half', 'wfa',
+      'wfaReason', 'wfaDate', 'wfaName', 'wfaRelation', 'wfaStayFrom', 'wfaStayTo', 'wfaPaid', 'wfaAsk', 'wfaCash']);
+    assert.equal(doc.getElementById('at_wfa').checked, true);
+    assert.deepEqual(chipsOf('wfaRelation').map((b) => [b.textContent, b.classList.contains('active')]).slice(0, 2), [['본인', true], ['배우자', false]]);
+    assert.ok(!doc.getElementById('atSubmit').classList.contains('hidden') && !doc.getElementById('atSave').classList.contains('hidden'));
+    assert.equal(doc.getElementById('atSubmit').disabled, true, '기념일의 내용(신청사항·기념일·대상자)이 비어 있다');
+    assert.match(doc.getElementById('atWfa').textContent, /가족 기념일 지원/);
+    assert.match(doc.getElementById('atWfa').textContent, /신청 현황을 읽지 못했습니다/, '사이트에 닿지 못하는 환경');
+    assert.match(doc.getElementById('atWfa').textContent, /결제증빙/);
+    assert.equal(doc.querySelector('#atWfa a[href*="WFA_Application_List"]')?.textContent, '신청 현황');
+    assert.equal(doc.getElementById('atWfaOpen').disabled, true, '신청 화면만 열기도 빈 칸이 있으면 잠긴다');
+  });
+  const fill = (id, value) => { const n = doc.getElementById(id); n.value = value; n.dispatchEvent(new window.Event('input', { bubbles: true })); n.dispatchEvent(new window.Event('change', { bubbles: true })); };
+  fill('at_wfaReason', '결혼기념일');
+  fill('at_wfaDate', '2026-10-20');
+  fill('at_wfaName', '본인');
+  t('기념일의 내용만 채우면 올릴 수 있다 — 올릴 내용에 연차와, 결재요청 뒤 채울 기념일 지원이 같이 적힌다(금액은 신청 화면에서)', () => {
+    assert.equal(doc.getElementById('atNeed').textContent,
+      '올릴 내용 — 연차 10/20 전일 → 결재요청 뒤 기념일 지원 신청 화면(채워서): 결혼기념일 10/20 · 본인(본인) · 신청금액은 신청 화면에서');
+    assert.equal(doc.getElementById('atSubmit').disabled, false);
+    assert.equal(doc.getElementById('atWfaOpen').disabled, false);
+  });
+  fill('at_wfaPaid', '299,000');
+  fill('at_wfaAsk', '200000');
+  t('신청금액이 15만원을 넘으면 그 칸이 붉고 결재요청도 신청 화면만 열기도 잠긴다', () => {
+    assert.match(doc.getElementById('at_wfaAsk_msg').textContent, /150,000원까지/);
+    assert.equal(doc.getElementById('atSubmit').disabled, true);
+    assert.equal(doc.getElementById('atWfaOpen').disabled, true);
+  });
+  fill('at_wfaAsk', '150000');
+  chipsOf('wfaCash')[1].click();
+  t('금액·사용구분을 적으면 올릴 내용의 기념일 쪽에 신청금액이 적힌다', () =>
+    assert.match(doc.getElementById('atNeed').textContent, /→ 결재요청 뒤 기념일 지원 신청 화면\(채워서\): 결혼기념일 10\/20 · 본인\(본인\) · 신청 150,000원$/));
+  const wfaTabsBefore = calls.tabs.length;
+  doc.getElementById('atSubmit').click();
+  await new Promise((r) => setTimeout(r, 150));
+  t('결재요청 — 연차가 HR 에 올라가지 않으면(여기서는 HR 에 닿지 못함) 기념일 지원 신청 화면도 열지 않는다', () => {
+    assert.match(doc.getElementById('atStatus').textContent, /결재요청 실패/);
+    assert.ok(!calls.tabs.slice(wfaTabsBefore).some((t) => /WFA_Application_Save/.test(t.url || '')));
+  });
+  doc.getElementById('atWfaOpen').click();
+  await new Promise((r) => setTimeout(r, 80));
+  t('신청 화면만 열기 — HR 에 올리지 않고 신청 화면 탭을 앞에 열어 채운다(여기서는 탭이 안 열려 그렇다고 말한다)', () => {
+    assert.match(doc.getElementById('atStatus').textContent, /기념일 지원 신청 화면을 열지 못했습니다: 신청 화면 탭을 열지 못했습니다/);
+    assert.ok(calls.tabs.some((t) => /WFA_Application_Save\.aspx\?s_code=0202090300$/.test(t.url) && t.active));
+  });
+  check('at_wfa', false);
+  t('기념일 지원을 끄면 연차 칸만 남고 제목도 돌아온다', () => {
+    assert.deepEqual(keys(), ['sub', 'dateFrom', 'dateTo', 'days', 'half', 'wfa']);
+    assert.equal(doc.getElementById('atFormTitle').textContent, '연차 신청');
+    assert.equal(doc.getElementById('atWfa'), null);
+    assert.equal(doc.getElementById('atNeed').textContent, '올릴 내용 — 연차 10/20 전일');
+  });
 }
 {
   // 유연근무의 기간: 당일·주간·전체. 근무시간표는 읽히지 않는 환경이라(HR 탭 없음) 주간의 요일 칸은 빈 채로 뜬다.

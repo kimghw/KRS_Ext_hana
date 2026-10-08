@@ -453,6 +453,43 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-msg:empty { display: none; }
 /* 안내(반차가 몇 시부터인지, 유연근무를 먼저 올리는지). 잘못이 아니므로 흐린 색이 아니라 읽히는 색으로 둔다. */
 .attend .at-msg.note { font-size: 12px; line-height: 1.5; color: var(--muted); }
+/* 알람 — 출근이 정시가 아닌 날(08:30·09:30)의 반차는 쓸 수 없다(2026-10-08 사용자 지정). 붉은 테두리 상자에 적고, 유연근무를 먼저 올리는 단추를 안에 둔다. */
+.attend .at-msg.alarm {
+  display: block; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--danger); border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--fg);
+}
+.attend .at-msg.alarm strong { color: var(--danger); }
+.attend .at-msg.alarm .at-halfflex { display: inline-block; margin-top: 6px; }
+
+/* 연차현황 — 휴가 폼의 종류 칩 아래 **한 줄** 글(연차 6/21 · 체력단련 0/6 · 저축연차 0/0 남음/부여, HR 홈 카드와 같은 값 — 2026-10-08 사용자 지정 "한 줄로 표기").
+   칩이 아니라 글이고 칸 두 줄을 다 쓴다(grid-column) — 좁아도 줄이 늘지 않고, 넘치면 끝을 … 으로 줄인다. */
+.attend .at-leaves { grid-column: 1 / -1; margin-top: -6px; font-size: 12px; line-height: 1.5; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.attend .at-leaves:empty { display: none; }
+.attend .at-leave { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.attend .at-leave em { margin-right: 3px; font-style: normal; font-weight: 600; color: var(--muted); }
+.attend .at-leaves-sep { margin: 0 5px; color: var(--faint); }
+.attend .at-leaves-how, .attend .at-leaves-wait { margin-left: 6px; font-size: 11px; color: var(--faint); }
+.attend .at-leaves-err { color: var(--danger); font-size: 11px; }
+
+/* 기념일 지원(휴가의 기념일 갈래) — 칸들 아래의 신청 현황·하는 법·붙일 파일. */
+.attend .at-wfa { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--surface-soft); font-size: 12px; color: var(--muted); }
+.attend .at-wfa-head { display: flex; align-items: center; gap: 8px; }
+.attend .at-wfa-head strong { color: var(--fg); font-size: 13px; }
+.attend .at-wfa-head a { color: var(--pick); text-decoration: none; }
+.attend .at-wfa-head a:hover { text-decoration: underline; }
+.attend .at-wfa-count { color: var(--fg); font-weight: 600; }
+.attend .at-wfa-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.attend .at-wfa-rows li { display: grid; grid-template-columns: 3.2em minmax(0, 1fr) auto auto; gap: 8px; font-variant-numeric: tabular-nums; }
+.attend .at-wfa-rows li span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attend .at-wfa-how { margin: 0; line-height: 1.5; }
+.attend .at-wfa-how b { color: var(--fg); }
+.attend .at-wfa-files { margin: 0; padding-left: 18px; line-height: 1.5; }
+.attend .at-wfa-files li.need { color: var(--fg); }
+.attend .at-wfa-err, .attend .at-wfa-wait { font-size: 11px; }
+.attend .at-wfa-err { color: var(--danger); }
+.attend .at-wfa-open { align-self: flex-start; }
+/* 연차 안의 "기념일 지원" 체크박스 — 연차 칸과 기념일 칸 사이의 머리다. 위에 가는 선을 두어 아래 칸이 기념일 몫인 것이 보이게 한다. */
+.attend .at-field.at-check[data-key="wfa"] { padding-top: 10px; border-top: 1px solid var(--line); font-weight: 600; }
 
 /* 날짜·시각 칸은 이름을 칸 안 왼쪽에 적는다 — 이름 줄을 따로 두지 않아 한 줄씩 줄어든다.
    이름은 칸 위에 얹고(눌러도 칸이 받는다), 칸은 이름 글자 수(--lab)만큼 왼쪽을 비운다. */
@@ -596,6 +633,11 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-after-ask li p { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .attend .at-ask-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
 .attend .at-ask-row input.at-ask-krw { flex: 1; min-width: 90px; max-width: 140px; min-height: 28px; padding: 3px 8px; text-align: right; }
+/* 비고의 상한 초과 사유(2026-10-08 사용자 지정 — 상한액을 넘겨 정산하면 비고에 필수, 기본 문구를 넣고 고쳐 쓸 수 있게) — 묻는 칸과 숙박비 내역의 펴진 줄에 선다. */
+.attend .at-ask-row input.at-ask-reason, .attend .at-ask-row input.at-lodge-reason-input { flex: 1 1 180px; min-width: 0; min-height: 28px; padding: 3px 8px; font-size: 12px; }
+.attend .at-ask-reason-label { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: 11px; }
+.attend .at-lodge-reason { margin-top: 6px; }
+.attend .at-lodge-reason .at-after-note.missing { color: var(--danger); }
 .attend .at-ask-row button, .attend .at-after-ask button.at-ask-drop { min-height: 28px; padding: 4px 10px; font-size: 12px; white-space: nowrap; }
 .attend .at-after-ask button.at-ask-drop { margin-top: 8px; color: var(--muted); }
 /* 보관 중인 증빙 — 여비계산서에 붙일 칸이 없어 가지고 있다가 담당자에게 보낼 때 같이 갈 파일들. × 로 뺀다. */
@@ -741,7 +783,7 @@ button.danger:hover { filter: brightness(1.08); }
    달력은 없다 — 끝나는 날은 위의 도착일 칸이 받는다. 맞지 않는다는 글은 그 아래 한 줄이다. */
 .attend .at-days.inline { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 5px 10px; }
 .attend .at-days.inline .at-label { flex: none; }
-.attend .at-days.inline .at-chips { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.attend .at-days.inline .at-chips { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(var(--n, 7), minmax(0, 1fr)); gap: 4px; }
 .attend .at-days.inline .at-chip { padding: 8px 0; font-size: 13px; }
 .attend .at-days.inline .at-msg:not(:empty) { flex-basis: 100%; }
 .attend .at-field.need .at-chip:not(.active) { border-color: var(--pick); }
@@ -777,6 +819,20 @@ button.danger:hover { filter: brightness(1.08); }
    시각 칸은 줄의 오른쪽 3할쯤이되 "도착 20:00" 이 들어갈 폭은 지킨다. 날짜 칸은 평소 한 줄을 다 쓰지만(at-date) 묶음 안에서는 제 칸만 쓴다. */
 .attend .at-group.at-go, .attend .at-group.at-back { grid-template-columns: minmax(0, 1fr) minmax(118px, 28%); align-items: end; }
 .attend .at-group.at-go .at-field, .attend .at-group.at-back .at-field { grid-column: auto; }
+/* 휴가(연차·체력단련)의 두 줄(2026-10-08 사용자 지정) — 시작일 · 종료일 한 줄(lv), 그 아래 며칠간 1D~5D 칩(--n: 5) 오른쪽에 오전·오후(lvdays).
+   전일 칩은 없다(1D 에 오전·오후를 고르지 않으면 전일). 오전·오후 칸은 이름 없이 칩만 오른쪽에 서고(display: contents 로 묶음의 칸이 된다),
+   잠긴 칩(여러 날·체력단련)은 흐리다. 반차 안내·알람(.at-msg)은 그 아래 한 줄을 다 쓴다. */
+.attend .at-group.at-lv { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.attend .at-group.at-lv .at-field { grid-column: auto; }
+.attend .at-group.at-lvdays { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; }
+.attend .at-group.at-lvdays .at-field.at-choice { display: contents; }
+.attend .at-group.at-lvdays .at-choice .at-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.attend .at-group.at-lvdays .at-choice .at-chips { grid-column: 2; grid-row: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.attend .at-group.at-lvdays .at-choice .at-chip { padding: 8px 10px; font-size: 13px; }
+.attend .at-group.at-lvdays .at-choice .at-msg { grid-column: 1 / -1; }
+.attend .at-group.at-lvdays .at-choice .at-msg:empty { display: none; }
+.attend .at-chip:disabled { opacity: .45; cursor: default; }
+.attend .at-chip:disabled:hover { background: var(--surface); border-color: var(--line); }
 /* 차량 조회 — 폼의 날짜·시간에 빈 차량. 머리 줄(기간 · 다시 조회) 아래에 차량마다 한 줄이고, 빈 차량의 줄만 눌린다(누르면 그 자리에서 신청한다). */
 .attend .at-cars { grid-column: 1 / -1; padding: 8px 10px; background: var(--surface-soft); border-radius: 9px; }
 .attend .at-cars-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
@@ -939,6 +995,13 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-kind.active { background: var(--pick); border-color: var(--pick); color: #fff; }
 .gongmun .gm-kind.active small { color: rgb(255 255 255 / 75%); }
 
+/* 갈래 아래의 과제 줄(구매·교육·출장) — "과제" 머리말 뒤에 별칭 칩. 아직 고르지 않았으면 머리말이 고르라고 한다(.need). */
+.gongmun .gm-projbar { display: flex; align-items: flex-start; gap: 8px; margin: -4px 0 12px; }
+.gongmun .gm-projbar-label { flex: none; padding-top: 7px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.gongmun .gm-projbar.need .gm-projbar-label { color: var(--pick); }
+.gongmun .gm-pick-row { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.gongmun .gm-pick-row .gm-noproj { padding-top: 6px; }
+
 /* 채팅 칸 — 근태의 말로 채우기와 같은 모양. 여러 줄 표를 붙여 넣으면 칸이 자란다(gongmunpanel.js 의 growChat). */
 .gongmun .gm-chat { margin-bottom: 12px; padding: 9px 11px; }
 .gongmun .gm-chat .ask-bar { align-items: flex-start; }
@@ -957,9 +1020,7 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-say.ai { margin-right: 8%; background: var(--surface-soft); color: var(--muted); }
 .gongmun .gm-say.error { color: var(--danger); }
 
-.gongmun .gm-soon { margin: 0 0 12px; padding: 12px 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
-
-/* 문서 넣는 곳. 고르는 단추는 감추고(탭으로는 닿는다) 점선 상자 전체가 끌어다 놓는 자리이자 누르는 자리다. */
+/* 문서 넣는 곳(세 갈래가 같다). 고르는 단추는 감추고(탭으로는 닿는다) 점선 상자 전체가 끌어다 놓는 자리이자 누르는 자리다. 안내는 한 줄(gm-drop-how)뿐이다. */
 .gongmun .gm-intake { position: relative; padding: 10px; }
 .gongmun .gm-intake input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .gongmun .gm-drop {
@@ -972,8 +1033,6 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-drop-lead { display: inline-flex; align-items: center; gap: 6px; color: var(--pick); font-size: 14px; font-weight: 650; }
 .gongmun .gm-drop-lead svg { width: 17px; height: 17px; }
 .gongmun .gm-drop-how { color: var(--muted); font-size: 12px; word-break: keep-all; }
-.gongmun .gm-file { color: var(--faint); font-size: 12px; overflow-wrap: anywhere; }
-.gongmun .gm-file:empty { display: none; }
 .gongmun .gm-intake[aria-busy="true"] .gm-drop { opacity: .65; cursor: progress; }
 .gongmun .gm-intake.off .gm-drop { border-color: var(--line); background: var(--surface-soft); }
 .gongmun .gm-intake.off .gm-drop-lead { color: var(--muted); }
@@ -981,13 +1040,11 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-intake-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; margin-top: 6px; }
 .gongmun .gm-intake-actions button { font-size: 12px; }
 /* 웹페이지 캡처 단추 둘(webpick.js) — 공문 탭의 문서 넣는 곳과 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸)이 같은 단추를 쓴다.
-   보고 있는 탭은 아이콘만(이름은 낭독기와 마우스를 올렸을 때), 부분 골라 캡처는 고르는 동안 "고르기 취소"로 바뀌고 파랗게 켜진다. */
+   글자는 전체 · 부분이고, 부분은 고르는 동안 "고르기 취소"로 바뀌고 파랗게 켜진다. */
 .wp-btns { display: inline-flex; align-items: center; gap: 2px; }
 .wp-open { display: inline-flex; align-items: center; gap: 5px; color: var(--pick); font-size: 12px; font-weight: 600; }
 .wp-open svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .wp-open:disabled { opacity: .6; cursor: progress; }
-.wp-front { min-width: 30px; padding-inline: 6px; }
-.wp-front svg { width: 17px; height: 17px; }
 .wp-part.on { background: var(--pick-soft); }
 .gongmun .gm-intake .cli-help { margin: 8px 2px 0; }
 .gongmun .statusline { margin-bottom: 10px; }
@@ -997,6 +1054,16 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-draft { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
 .gongmun .gm-source { display: flex; flex-direction: column; gap: 3px; margin: -4px 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .gongmun .gm-note { display: block; color: color-mix(in srgb, var(--mine) 70%, var(--fg)); font-size: 12px; line-height: 1.5; }
+/* 읽은 문서 — 접어 두는 칸(펴면 읽은 줄·오린 견적서·품목·읽은 칸). 펼쳐 두는 것은 과제·용도·사유·에이전트·결재선이다. */
+.gongmun .gm-more { margin: -4px 0 8px; border-bottom: 1px solid var(--line); }
+.gongmun .gm-more > summary { min-height: 34px; font-size: 13px; }
+.gongmun .gm-more > summary > span:first-of-type { flex: none; color: var(--fg); font-weight: 600; }
+.gongmun .gm-more > summary .summary-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gongmun .gm-more-body { padding: 4px 0 10px; }
+.gongmun .gm-more-body .gm-source { margin-top: 0; }
+.gongmun .gm-label small { margin-left: 4px; color: var(--faint); font-size: 11px; }
+/* 에이전트 칸 — 위의 채팅 칸과 같은 모양을 카드 안에 둔다. */
+.gongmun .gm-agent { margin: 10px 0 0; padding: 0; }
 /* 오린 견적서 — 가격과 그 둘레. 그림은 패널 폭에 맞추고 너무 길면 줄여 보인다. */
 .gongmun .gm-cut { margin: 0 0 10px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
 .gongmun .gm-cut-head { display: flex; align-items: baseline; gap: 8px; margin: 0 2px 6px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -1107,21 +1174,22 @@ button.danger:hover { filter: brightness(1.08); }
 /* 탭이 여섯 개(근태·공문·R&D·회의실·차량·현황)다 — 위의 공문 쪽 간격 그대로 한 줄에 든다. */
 .rnd { margin-bottom: 18px; }
 
-/* 과제 칩 한 줄 — 별명(없으면 과제명). 긴 이름은 잘리고 전체는 툴팁. 끝의 ＋ 는 과제 더하기. */
+/* 과제 칩 한 줄 — 별칭(없으면 과제명을 열네 자 남짓에서 자른다). 전체 과제명은 툴팁. 끝의 ＋ 는 과제 더하기. */
 .rnd .rd-projects { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
-.rnd .rd-proj {
-  display: block; max-width: 100%; min-height: 32px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 9px;
+/* 공문 탭 위의 과제 칩(.gm-pick)도 같은 모양이다. */
+.rnd .rd-proj, .gongmun .gm-pick {
+  display: block; max-width: min(100%, 15em); min-height: 32px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 9px;
   background: var(--surface); font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.rnd .rd-proj:hover { background: var(--pick-soft); border-color: var(--pick); }
-.rnd .rd-proj.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+.rnd .rd-proj:hover, .gongmun .gm-pick:hover { background: var(--pick-soft); border-color: var(--pick); }
+.rnd .rd-proj.active, .gongmun .gm-pick.active { background: var(--pick); border-color: var(--pick); color: #fff; }
 .rnd .rd-proj-add { width: 34px; padding: 4px; color: var(--pick); font-size: 16px; font-weight: 500; }
 .rnd .rd-empty { margin-bottom: 12px; padding: 14px 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .rnd .rd-empty p { margin: 0 0 8px; }
 .rnd .rd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
-/* 연구개발계획서 YAML 넣는 곳 — 공문 탭의 문서 넣는 곳과 같은 점선 상자, 조금 낮다. 탭 어디에 놓아도 여기로 온다. */
-.rnd .rd-intake { position: relative; margin-bottom: 12px; padding: 8px; }
+/* 연구개발계획서 YAML 넣는 곳 — 탭 맨 아래, 공문 탭의 문서 넣는 곳과 같은 점선 상자, 조금 낮다. 탭 어디에 놓아도 여기로 온다. */
+.rnd .rd-intake { position: relative; margin: 10px 0; padding: 8px; }
 .rnd .rd-intake input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .rnd .rd-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
@@ -1135,11 +1203,21 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-drop-how { color: var(--muted); font-size: 11px; word-break: keep-all; }
 .rnd .rd-intake[aria-busy="true"] .rd-drop { opacity: .65; cursor: progress; }
 
-/* 고른 과제의 머리 — 과제명 · 과제번호·책임자·연구기간 · 차년도 칩. 오늘이 든 차년도에 "올해". */
+/* 고른 과제의 머리 — 별칭 한 줄(예산 칸처럼 접힘, 펴면 과제 정보 표와 과제 고치기) · 차년도 칩. 오늘이 든 차년도에 "올해". */
 .rnd .rd-head, .rnd .rd-form { margin-bottom: 12px; padding: 14px 16px; }
-.rnd .rd-head { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
-.rnd .rd-head .booking-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rnd .rd-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: -4px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rnd .rd-head { padding: 0 14px 12px; border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
+.rnd .rd-info > summary > span:first-of-type { flex: 1 1 auto; min-width: 0; color: var(--pick); font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rnd .rd-info > summary .summary-detail { flex: none; }
+.rnd .rd-info[open] { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.rnd .rd-info .rd-actions { margin-top: 6px; }
+.rnd .rd-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; font-size: 12px; line-height: 1.5; }
+.rnd .rd-meta div { display: contents; }
+.rnd .rd-meta dt { color: var(--muted); }
+.rnd .rd-meta dd { margin: 0; overflow-wrap: anywhere; }
+/* 별칭이 없는 과제 — 그 자리에서 정하는 칸. */
+.rnd .rd-alias-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--mine) 12%, var(--surface)); }
+.rnd .rd-alias-ask p { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: 12px; }
+.rnd .rd-alias-ask input[type="text"] { flex: 1 1 140px; width: auto; min-height: 32px; padding: 5px 9px; background: var(--surface); }
 .rnd .rd-years { display: flex; flex-wrap: wrap; gap: 3px; }
 .rnd .rd-year {
   flex: 1 0 auto; min-height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px;
@@ -1200,13 +1278,29 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-bsum:empty { display: none; }
 .rnd .rd-bsum span:nth-child(n+2) { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rnd .rd-box-body .rd-actions { margin-top: 6px; }
-/* 칸마다 복사 — 예산은 표(탭으로 나눈 글), 연구내역·변경이력은 전부. 줄마다는 줄 안의 복사. */
-.rnd .rd-box-tools { display: flex; justify-content: flex-end; margin: -2px 0 4px; }
-.rnd .rd-box-tools button { min-height: 24px; padding: 2px 8px; color: var(--pick); font-size: 12px; }
-.rnd .rd-box-tools button:hover { background: var(--pick-soft); }
+/* 칸마다 복사 아이콘 — 예산·참여연구자는 표(탭으로 나눈 글), 계획은 글 그대로, 진행 기록·변경이력은 전부. 줄마다는 줄 안의 아이콘.
+   누르면 잠깐 체크(못 했으면 ×)로 바뀐다(rndpanel.js 의 iconFlash). 안의 svg 는 누름을 단추로 넘긴다. */
+.rnd .rd-box-tools { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin: -2px 0 4px; }
+.rnd .rd-src { margin-right: auto; color: var(--faint); font-size: 11px; }
+.rnd .rd-icon { width: 28px; min-height: 28px; padding: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.rnd .rd-icon:hover { background: var(--pick-soft); color: var(--pick); }
+.rnd .rd-icon svg { width: 16px; height: 16px; pointer-events: none; }
+.rnd .rd-icon.done { color: var(--pick); }
+.rnd .rd-icon.fail { color: var(--danger); }
 .rnd .rd-list:empty + .rd-box-tools, .rnd .rd-box-tools:has(+ .rd-list:empty) { display: none; }
+.rnd .rd-hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+/* 원노트 공유(선택) — 켜기 · 섹션 고르기 · 지금 맞추기 · 마지막 결과. */
+.rnd .rd-note-how { margin: 6px 0 8px; color: var(--muted); font-size: 12px; line-height: 1.6; word-break: keep-all; }
+.rnd .rd-note-row { display: flex; gap: 6px; align-items: center; }
+.rnd .rd-note-row select { flex: 1; min-width: 0; }
+.rnd .rd-note-row button { flex: none; }
+.rnd .rd-note-open { align-self: center; color: var(--pick); font-size: 13px; font-weight: 600; text-decoration: none; }
+.rnd .rd-note-open:hover { text-decoration: underline; }
+.rnd .rd-note-msg { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rnd .rd-note-msg:empty { display: none; }
+.rnd .rd-note-msg.error { color: var(--danger); }
 
-/* 연구내역·변경이력 — 적는 칸과 목록(늦은 것부터). */
+/* 진행 기록·변경이력 — 적는 칸과 목록(늦은 것부터). */
 .rnd .rd-new { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--pick) 5%, var(--surface)); }
 .rnd .rd-new-row { display: flex; gap: 6px; align-items: center; }
 .rnd .rd-new-row input[type="date"] { flex: 0 0 auto; width: 132px; }
@@ -1225,10 +1319,9 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-title { flex: 1 1 120px; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .rnd .rd-row-btns { flex: none; margin-left: auto; display: inline-flex; gap: 2px; }
 .rnd .rd-row-btns button { min-height: 24px; padding: 2px 6px; font-size: 12px; }
+.rnd .rd-row-btns .rd-icon { width: 26px; padding: 0; }
 .rnd .rd-text { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
-/* 계획서에서 온 연구내역 — 참여연구자는 표, 연구개발 계획은 절 제목(■ 대신 파란 띠)과 번호·점 목록. 글은 그대로고 보일 때만 이 꼴이다. */
-.rnd .rd-list li.rd-file { border-left: 3px solid color-mix(in srgb, var(--pick) 55%, var(--line)); }
-.rnd .rd-list li.rd-file .rd-kind { color: var(--pick); background: var(--pick-soft); }
+/* 참여연구자·연구개발 계획 칸 — 계획서에서 온 글을 참여연구자는 표, 계획은 절 제목(■ 대신 파란 띠)과 번호·점 목록으로. 글은 그대로고 보일 때만 이 꼴이다. */
 .rnd .rd-table { width: 100%; margin: 6px 0 2px; border-collapse: collapse; font-size: 12px; line-height: 1.4; }
 .rnd .rd-table th { padding: 3px 6px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; text-align: left; white-space: nowrap; }
 .rnd .rd-table td { padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); vertical-align: top; }

@@ -9,10 +9,14 @@ import {
   KINDS, KIND_MAIN, KIND_MORE, STATUS, MAX_TRIP_DAYS, blankForm, fieldsFor, missingFields, problems, describe, settle,
   nameOf, timeOptions, spanDays, nextSpan, halfOf, halfPlan, halfFlexForm, workStartOn, itemsIn, isPast, rangeCovering,
   buildJob, buildDocJob, buildCancelJob, listItems, formFromDoc, applyPatch, withSub, attendToday,
-  FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek,
+  FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek, isWelfare, leaveBalance,
   acceptsFile, itemsOfKind, EVIDENCE_ACCEPT, statusLabel, CANCELLING_KEY, CANCELLING_LABEL, CANCELLED_LABEL, cancellingOf, pruneCancelling, isCancelDoc, linkCancel,
 } from './src/attend.js';
-import { hrListDocs, hrGetDoc, hrDeleteDoc, hrRunJob, hrWeekTimes, hrOpenDoc, hrCloseWorker, hrCancelRefs, HR_SSO_URL } from './src/hr.js';
+import { hrListDocs, hrGetDoc, hrDeleteDoc, hrRunJob, hrWeekTimes, hrUserLeaves, hrOpenDoc, hrCloseWorker, hrCancelRefs, HR_SSO_URL } from './src/hr.js';
+import {
+  WFA_LIST_URL, WFA_SAVE_URL, WFA_INTRO_URL, WFA_PER_YEAR, WFA_FILES, welfareFill, parseWelfareList, welfareYearCount, describeWelfare, injected as wfaInjected,
+} from './src/welfare.js';
+import { siteFetch } from './src/net.js';
 import { fillAttendSmart, receiptSmart } from './src/llm.js';
 import {
   settlePlan, describePlan, tripStage, tripDocFor, tripIconState, settleLabel,
@@ -21,7 +25,7 @@ import {
 import { tripList, tripCreate, tripDocUrl, TRIP_SHELL_URL, tripPreDetail, tripPreConfirm, tripPostConfirm, tripAfterSave, tripAfterUrl } from './src/trip.js';
 import { tripPreSave, tripPreUrl, tripDelete } from './src/trip.js';
 import { afterNeed, afterPlan, afterSummary, evidenceOf, needsAfter, TRANS_NAME } from './src/after.js';
-import { lodgeAsk, lodgeCap, lodgeSettle, lodgeSame, lodgeChoices, lodgeDecide, lodgeOver, lodgeKnown } from './src/after.js';
+import { lodgeAsk, lodgeCap, lodgeSettle, lodgeSame, lodgeChoices, lodgeDecide, lodgeOver, lodgeKnown, lodgeComment, lodgeReason, LODGE_OVER_REASON } from './src/after.js';
 import { tripLodgeMax, tripAfterLodges } from './src/trip.js';
 import { createEvidenceStore, MARKS_KEY } from './src/evidence.js';
 import { UP_BUSY_KEY, upBusy } from './src/afterup.js';
@@ -157,6 +161,12 @@ export function createAttendPanel({
     back: BACK_DEFAULT, stages: null,
     // 반차를 올릴 때 보는 근무시간: { week, items } 또는 { error }. 아직 안 읽었으면 null, 읽는 중이면 schedWait 에 약속이 있다.
     sched: null, schedWait: null, checking: false,
+    // 출근이 정시가 아닌 날(08:30)의 반차 — 알람이 뜨고 올리지 못한다. 사람이 "유연근무를 먼저 올리고 반차 쓰기"를 고르면 그 날짜를 적어 둔다(halfOk).
+    halfOk: '',
+    // 연차현황(HR 홈 카드의 연차·체력관리·저축연차 — src/hr.js 의 hrUserLeaves): { data } 또는 { error }. 휴가 폼을 그릴 때 읽고, 탭을 다시 열면 다시 읽는다.
+    leaves: null, leavesWait: null,
+    // 기념일 지원(휴가의 기념일 갈래)의 신청 현황 — eclass 목록 화면에서 읽은 줄들: { rows } 또는 { error }.
+    wfa: null, wfaWait: null,
     // 출장의 근무지. 한 번 적으면 저장해 두고 새 신청서마다 깔아 준다(2026-10-02 사용자 지정). 패널을 새로 열면 show() 가
     // 저장소에서 되읽어 온다. 칸을 지우면 지운 것이 남는다.
     workplace: '',
@@ -333,8 +343,8 @@ export function createAttendPanel({
       + `<div id="atKindMore" class="at-kind-row"${open ? '' : ' hidden'}>${KIND_MORE.map(kindButton).join('')}</div>`;
   }
 
-  const chip = (attr, value, label, on, cls = '') =>
-    `<button type="button" class="at-chip${cls}${on ? ' active' : ''}" ${attr}="${escapeHtml(value)}" aria-pressed="${on}">${escapeHtml(label)}</button>`;
+  const chip = (attr, value, label, on, cls = '', disabled = false) =>
+    `<button type="button" class="at-chip${cls}${on ? ' active' : ''}" ${attr}="${escapeHtml(value)}" aria-pressed="${on}"${disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`;
 
   /**
    * 몇 시간 칩. 1~8시간 가운데 하나와, 오른쪽에 30분을 더하는 칩(다른 색)이 따로 켜진다.
@@ -359,7 +369,8 @@ export function createAttendPanel({
   };
 
   function fieldHtml(f) {
-    const v = st.form[f.key];
+    // 연차의 오전·오후는 하루짜리 연차에서만 산다(halfOf) — 여러 날로 늘리면 적어 둔 값이 있어도 켜 보이지 않는다(칩은 잠긴다).
+    const v = f.key === 'half' ? halfOf(st.form) : st.form[f.key];
     const id = `at_${f.key}`;
     // 날짜·시각 칸은 이름을 칸 안 왼쪽에 적는다(2026-10-02 사용자 지정). 이 칸들과 며칠간은 늘 채워져 있고
     // 필수인 것이 뻔해서 "필수"를 달지 않는다.
@@ -369,18 +380,21 @@ export function createAttendPanel({
     const hint = f.hint ? ` placeholder="${escapeHtml(f.hint)}"` : '';
     // 칩으로 고르는 칸은 누를 것이 여럿이라 label 로 감싸지 않는다(감싸면 어디를 눌러도 첫 칩이 눌린다).
     if (f.type === 'choice' || f.type === 'days' || f.type === 'span') {
+      // 잠긴 칸(locked — 여러 날·체력단련의 오전·오후)은 칩을 그대로 보이되 눌리지 않게 둔다. 까닭은 풍선말(hint)에.
       const chips = f.type === 'choice'
-        ? f.options.map((o) => chip('data-choice', o.value, o.label, (v || '') === o.value)).join('')
+        ? f.options.map((o) => chip('data-choice', o.value, o.label, (v || '') === o.value, '', !!f.locked)).join('')
         : f.type === 'span' ? spanChips(f, v)
           : f.chips.map((c) => chip('data-days', c.days, c.label, v === c.days)).join('')
             // 끝나는 날. 칩에 없는 날 수는 여기서 고르고, 칩을 눌러도 여기에 끝나는 날이 따라 적힌다.
             // inline(출장)이면 달력을 두지 않는다 — 끝나는 날은 따로 선 도착일 칸(dateTo)이 받는다.
             + (f.inline ? '' : `<input type="date" id="${id}" value="${escapeHtml(st.form.dateTo || '')}" min="${escapeHtml(st.form.dateFrom || '')}" `
             + `aria-label="끝나는 날" title="${escapeHtml(f.hint || '')}" />`);
-      // 묶음 안의 칸은 한 줄을 다 쓰지 않는다. inline 은 이름이 칩 왼쪽에 붙는 한 줄이다(출장의 며칠간).
-      return `<div class="at-field${f.group ? '' : ' wide'}${f.inline ? ' inline' : ''} at-${f.type}" data-key="${f.key}" role="group" aria-labelledby="${id}_label">`
+      // 묶음 안의 칸은 한 줄을 다 쓰지 않는다. inline 은 이름이 칩 왼쪽에 붙는 한 줄이다(출장·휴가의 며칠간) — 칩 수(--n)만큼 고르게 나눈다.
+      const style = f.type === 'days' && f.inline ? ` style="--n:${f.chips.length}"` : '';
+      const tip = f.type === 'choice' && f.hint ? ` title="${escapeHtml(f.hint)}"` : '';
+      return `<div class="at-field${f.group ? '' : ' wide'}${f.inline ? ' inline' : ''} at-${f.type}" data-key="${f.key}" role="group" aria-labelledby="${id}_label"${style}>`
         + `<span class="at-label" id="${id}_label">${escapeHtml(f.label)}${req}</span>`
-        + `<div class="at-chips">${chips}</div><span id="${id}_msg" class="at-msg"></span></div>`;
+        + `<div class="at-chips"${tip}>${chips}</div><span id="${id}_msg" class="at-msg"></span></div>`;
     }
     if (f.type === 'icons') {
       // 아이콘으로 고르는 칸(교통편). 칩과 같은 길(data-choice)로 눌린다. 여럿을 함께 켤 수 있고(기차 + 비행기),
@@ -432,7 +446,9 @@ export function createAttendPanel({
     el.form.classList.toggle('hidden', !kind || st.view === 'all');
     if (!kind || st.view === 'all') return;
     seedFlexWeek();
-    el.formTitle.textContent = st.edit ? `${nameOf(st.form)} 수정 · ${st.edit.docNo}` : `${nameOf(st.form)} 신청`;
+    // 연차에 기념일 지원을 붙였으면 제목에도 적는다 — "연차 신청 · 기념일 지원".
+    const plus = isWelfare(st.form) ? ' · 기념일 지원' : '';
+    el.formTitle.textContent = st.edit ? `${nameOf(st.form)} 수정 · ${st.edit.docNo}${plus}` : `${nameOf(st.form)} 신청${plus}`;
     paintFold();
     // 같은 묶음(group)의 칸은 한 줄에 나란히 세운다(출장지·장소 / 근무지·교통편).
     let html = '';
@@ -442,10 +458,16 @@ export function createAttendPanel({
       if (g !== group) html += (group ? '</div>' : '') + (g ? `<div class="at-group at-${g}">` : '');
       group = g;
       html += fieldHtml(f);
+      // 휴가의 종류 칩 아래에 연차현황 한 줄(연차·체력단련·저축연차 — 남은 날 / 부여, HR 에서 읽는다. 2026-10-08 사용자 지정).
+      if (f.key === 'sub' && st.form.kind === 'leave') html += `<div id="atLeaves" class="at-leaves wide" aria-live="polite">${leavesHtml()}</div>`;
     }
     // 차량 조회를 켰으면 칸들 아래에 빈 차량 목록이 선다(내용은 paintCars 가 채운다).
+    // 연차에 기념일 지원을 붙였으면 기념일 칸 아래에 신청 현황(올해 몇 번째인지, 지난 신청)·붙일 파일·"신청 화면만 열기"가 선다(paintWfa).
     el.fields.innerHTML = html + (group ? '</div>' : '')
-      + (wantsCar(st.form) ? '<div id="atCars" class="at-cars" role="group" aria-label="차량 조회"></div>' : '');
+      + (wantsCar(st.form) ? '<div id="atCars" class="at-cars" role="group" aria-label="차량 조회"></div>' : '')
+      + (isWelfare(st.form) ? `<div id="atWfa" class="at-wfa wide" role="group" aria-label="가족 기념일 신청 현황">${wfaHtml()}</div>` : '');
+    if (st.form.kind === 'leave' && !st.leaves) loadLeaves();
+    if (isWelfare(st.form) && !st.wfa) loadWfa();
     el.editCancel.classList.toggle('hidden', !st.edit);
     el.editNote.classList.toggle('hidden', !st.edit);
     if (st.edit) el.editNote.textContent = '임시저장 문서를 고치는 중입니다. 종류는 바꿀 수 없습니다.';
@@ -506,11 +528,15 @@ export function createAttendPanel({
     paintFlexNote();
     // 빈 칸은 윤곽선으로, 맞지 않는 칸은 그 칸에 칠하고 적어 알린다. 여기서는 다 채워졌을 때 무엇이 올라가는지만 한 줄로 말한다
     // (빈 칸 이름을 한 번 더 늘어놓던 줄은 뺐다 — 2026-10-02 사용자 지정).
-    const ready = !miss.size && !bad.size && !!KINDS[st.form.kind];
+    // 출근이 정시가 아닌 날의 반차는 알람이 뜨고 올리지 못한다(구분 칸 아래 — paintHalfNote). "유연근무를 먼저 올리고 반차 쓰기"를 고르면 풀린다.
+    const ready = !miss.size && !bad.size && !!KINDS[st.form.kind] && !halfBlocked();
     el.need.className = 'at-need';
     el.need.textContent = ready ? `올릴 내용 — ${sendSummary()}` : '';
     el.submit.disabled = !ready || st.busy;
     el.save.disabled = !ready || st.busy;
+    // 기념일 상자의 "신청 화면만 열기" — 연차를 이미 올렸을 때 쓴다. 칸이 다 맞으면 반차 알람과 상관없이 열 수 있다(HR 에 올리지 않는다).
+    const wfaOnly = $('atWfaOpen');
+    if (wfaOnly) wfaOnly.disabled = !!miss.size || !!bad.size || st.busy;
     el.chatGo.disabled = st.busy;
     paintCars();
   }
@@ -700,18 +726,25 @@ export function createAttendPanel({
 
   /** 지금 폼이 반차면 그 날 근무시간에서 어떻게 잡히는지. 반차가 아니거나 근무시간을 모르면 null. */
   const planNow = () => (st.sched && !st.sched.error ? halfPlan(st.form, workStartOn(st.form.dateFrom, st.sched)) : null);
+  /** 출근이 정시가 아닌 날의 반차에 "유연근무를 먼저 올리고 반차 쓰기"를 골랐는가 — 그 날짜에만 든다(날짜를 옮기면 다시 묻는다). */
+  const halfAgreed = () => !!st.halfOk && st.halfOk === st.form.dateFrom;
+  /** 반차를 올리지 못하는가 — 출근이 정시가 아닌데(08:30) 유연근무를 먼저 올리기로 하지 않았다. */
+  const halfBlocked = () => !!planNow()?.blocked && !halfAgreed();
+  /** 올릴 때 따르는 반차 계획 — 막혀 있으면(알람) 없다. 유연근무를 먼저 올리기로 했으면 flexStart 가 든 계획이다. */
+  const flexPlan = () => (halfBlocked() ? null : planNow());
 
   const flexSpan = (start) => `${start}~${String(+start.slice(0, 2) + 9).padStart(2, '0')}${start.slice(2)}`;
 
   /** 올릴 것을 한 줄로. 반차 앞에 유연근무를 올려야 하면 그것부터 적는다. */
   function sendSummary() {
     const head = docSummary();
+    if (isWelfare(st.form)) return `${head} → 결재요청 뒤 기념일 지원 신청 화면(채워서): ${describeWelfare(st.form)}`;
     return wantsTrip(st.form) ? `${head} → 결재요청 뒤 여비계산서(사전정산): ${describePlan(settlePlan(st.form, memoOf(st.form)))}` : head;
   }
 
   /** HR 에 올라가는 신청서만 한 줄로(여비계산서는 빼고). 올린 뒤의 말과 기록에 쓴다. */
   function docSummary() {
-    const plan = planNow();
+    const plan = flexPlan();
     return plan?.flexStart
       ? `유연근무 ${md(st.form.dateFrom)} ${flexSpan(plan.flexStart)} → ${describe(st.form)}`
       : describe(st.form);
@@ -745,11 +778,163 @@ export function createAttendPanel({
     }
   }
 
-  /** 구분 칸 아래에 반차가 몇 시부터 몇 시인지, 출근시간을 먼저 옮겨야 하는지 적는다. */
+  /* ---------------------------------------------------------------- 연차현황 · 기념일 지원 */
+
+  /**
+   * 휴가 폼의 종류 칩 아래 **한 줄** — 연차 6/21 · 체력단련 0/6 · 저축연차 0/0 남음/부여(HR 홈의 연차현황 카드와 같은 값, 2026-10-08 사용자 지정).
+   * 칩 셋이 세 줄로 늘어서서 글 한 줄로 바꿨다(같은 날 사용자 지정: "이게 한 줄로 표기 되면 좋겠지") — 6.0 은 6 으로, 2.5 는 그대로 적는다.
+   */
+  function leavesHtml() {
+    if (!st.leaves) return '<span class="at-leaves-wait">연차현황을 읽는 중...</span>';
+    if (st.leaves.error) return `<span class="at-leaves-err">연차현황을 읽지 못했습니다 — ${escapeHtml(st.leaves.error)}</span>`;
+    const num = (n) => (n == null ? '?' : String(Math.round(n * 10) / 10));
+    return leaveBalance(st.leaves.data).map((r) =>
+      `<span class="at-leave" title="${escapeHtml(`${r.label} — 남은 날 ${num(r.left)} / 부여 ${num(r.total)}`)}"><em>${escapeHtml(r.label)}</em>${escapeHtml(r.left == null ? r.text : `${num(r.left)}/${num(r.total)}`)}</span>`)
+      .join('<span class="at-leaves-sep" aria-hidden="true">·</span>') + '<span class="at-leaves-how" title="HR 홈의 연차현황과 같은 값 — 남은 날 / 부여된 날">남음/부여</span>';
+  }
+
+  function paintLeaves() {
+    const box = $('atLeaves');
+    if (box) box.innerHTML = leavesHtml();
+  }
+
+  /** 연차현황을 HR 에서 읽는다(src/hr.js 의 hrUserLeaves). 던지지 않는다 — 못 읽으면 까닭을 그 줄에 적는다. */
+  function loadLeaves() {
+    if (st.leaves || st.leavesWait) return st.leavesWait;
+    st.leavesWait = (async () => {
+      try {
+        st.leaves = { data: await hrUserLeaves() };
+      } catch (err) {
+        st.leaves = { error: err.message };
+      }
+      st.leavesWait = null;
+      paintLeaves();
+    })();
+    return st.leavesWait;
+  }
+
+  /**
+   * 기념일 지원 — 기념일 칸 아래의 신청 현황(올해 몇 번째인지·지난 신청 몇 줄), 하는 법, 준비할 증빙, "신청 화면만 열기"(연차를 이미 올렸을 때).
+   * 목록·소개 화면은 링크로 연다.
+   */
+  function wfaHtml() {
+    const year = attendToday().slice(0, 4);
+    const links = `<a href="${WFA_LIST_URL}" target="_blank" rel="noopener">신청 현황</a><a href="${WFA_INTRO_URL}" target="_blank" rel="noopener">지원 소개</a>`;
+    let rows;
+    if (!st.wfa) rows = '<span class="at-wfa-wait">신청 현황을 읽는 중...</span>';
+    else if (st.wfa.error) rows = `<span class="at-wfa-err">신청 현황을 읽지 못했습니다 — ${escapeHtml(st.wfa.error)}</span>`;
+    else {
+      const n = welfareYearCount(st.wfa.rows, year);
+      const recent = st.wfa.rows.slice(0, 4).map((r) => `<li><span>${escapeHtml(r.applied ? md(r.applied) : '?')}</span>`
+        + `<span>${escapeHtml(`${r.reason}${r.date ? ` ${md(r.date)}` : ''} · ${r.name}(${r.relation})`)}</span>`
+        + `<span>${r.asked != null ? escapeHtml(`${r.asked.toLocaleString('ko-KR')}원`) : ''}</span><span>${escapeHtml(r.status)}</span></li>`).join('');
+      rows = `<span class="at-wfa-count">${year}년 ${n}번 신청 — 연 ${WFA_PER_YEAR}번까지</span>${recent ? `<ul class="at-wfa-rows">${recent}</ul>` : ''}`;
+    }
+    const files = WFA_FILES.map((f) => `<li${f.need ? ' class="need"' : ''}>${escapeHtml(f.label)}</li>`).join('');
+    return `<div class="at-wfa-head"><strong>가족 기념일 지원</strong>${links}</div>${rows}`
+      + '<p class="at-wfa-how">결재요청을 누르면 연차를 HR 에 올린 뒤 eclass 의 기념일 지원 신청 화면이 새 탭에 열리고 위 칸이 채워집니다. 그 화면에서 증빙 파일을 붙이고 '
+      + '<b>저장 및 상신</b>을 누르세요 — 이용일당 150,000원까지, 이용일로부터 20일 안에. 금액·사용구분은 비워 두면 그 화면에서 적습니다.</p>'
+      + `<ul class="at-wfa-files" aria-label="붙일 파일">${files}</ul>`
+      + '<button type="button" id="atWfaOpen" class="ghost small at-wfa-open" data-act="wfaOpen" '
+      + 'title="연차를 이미 올렸으면 — HR 에 올리지 않고 기념일 지원 신청 화면만 열어 위 칸을 채웁니다">신청 화면만 열기 (연차는 이미 올림)</button>';
+  }
+
+  function paintWfa() {
+    const box = $('atWfa');
+    if (!box) return;
+    box.innerHTML = wfaHtml();
+    paintNeed();   // 새로 그린 "신청 화면만 열기" 의 잠금을 맞춘다
+  }
+
+  /** 기념일 지원의 신청 현황을 eclass 목록 화면에서 읽는다(src/welfare.js 의 parseWelfareList). 던지지 않는다. */
+  function loadWfa() {
+    if (st.wfa || st.wfaWait) return st.wfaWait;
+    st.wfaWait = (async () => {
+      try {
+        const { html } = await siteFetch(WFA_LIST_URL);
+        st.wfa = { rows: parseWelfareList(html) };
+      } catch (err) {
+        st.wfa = { error: err.message };
+      }
+      st.wfaWait = null;
+      paintWfa();
+    })();
+    return st.wfaWait;
+  }
+
+  const WFA_WAIT_MS = 30000;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /**
+   * 기념일 지원 — eclass 의 신청 화면(WFA_Application_Save.aspx)을 새 탭에 앞으로 열고 폼의 값을 채운다(src/welfare.js 의 welfareFill·pageFillWelfare).
+   * 올리지는 않는다 — 증빙 파일은 스크립트로 넣을 수 없고, "저장 및 상신"은 사람이 그 화면에서 누른다
+   * (2026-10-08 사용자 지정 "가족 기념을 작성할 수 있도록 준비"). 화면 스크립트가 뜰 때까지 기다렸다가 채운다.
+   * form 은 채울 폼이다 — 결재요청 뒤에는 올린 그대로의 폼(sent), "신청 화면만 열기"면 지금 폼. 던지지 않는다.
+   * @returns {Promise<{ok: boolean, text: string}>} text 는 상태 줄에 붙일 말
+   */
+  async function fillWelfare(form) {
+    const ops = welfareFill(form);
+    const summary = describeWelfare(form);
+    try {
+      const tab = await chrome.tabs.create({ url: WFA_SAVE_URL, active: true });
+      const tabId = tab?.id;
+      if (tabId == null) throw new Error('신청 화면 탭을 열지 못했습니다.');
+      let r = null;
+      const t0 = Date.now();
+      while (Date.now() - t0 < WFA_WAIT_MS) {
+        await sleep(400);
+        let now;
+        try { now = await chrome.tabs.get(tabId); } catch { throw new Error('신청 화면 탭이 닫혔습니다.'); }
+        if (now.status !== 'complete' || !/WFA_Application_Save/i.test(now.url || '')) continue;
+        const got = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: wfaInjected.pageFillWelfare, args: [ops] }).catch(() => null);
+        r = got?.[0]?.result || null;
+        if (r?.ready) break;
+      }
+      if (!r?.ready) throw new Error('신청 화면이 뜨지 않았습니다 — 로그인이 풀렸거나 화면이 바뀌었을 수 있습니다. 열린 탭에서 직접 적어 주세요.');
+      const left = r.missed?.length ? ` · 못 넣은 칸: ${r.missed.join(', ')}` : '';
+      logEvent('attend', true, `기념일 지원 신청 화면 채움: ${summary}${left}`, { kind: 'leave', wfa: true, done: r.done, missed: r.missed, url: r.url });
+      return { ok: !left, text: `기념일 지원 신청 화면에 채웠습니다 — ${summary}${left}. 열린 탭에서 증빙 파일을 붙이고 "저장 및 상신"을 누르세요.` };
+    } catch (err) {
+      logEvent('attend', false, `기념일 지원 신청 화면 실패: ${summary} — ${err.message}`, { kind: 'leave', wfa: true, auth: err instanceof AuthError });
+      return { ok: false, text: `기념일 지원 신청 화면을 열지 못했습니다: ${err.message}` };
+    }
+  }
+
+  /** 기념일 상자의 "신청 화면만 열기" — 연차를 이미 올렸을 때. HR 에는 아무것도 올리지 않고 신청 화면만 채워 연다. */
+  async function openWelfare() {
+    if (st.busy || !isWelfare(st.form)) return;
+    disarm();
+    if (missingFields(st.form).length || problems(st.form).length) return setStatus('비어 있거나 맞지 않는 칸이 있습니다.', 'error');
+    setBusy(true);
+    setStatus('가족 기념일 신청 화면을 여는 중...');
+    try {
+      const r = await fillWelfare({ ...st.form });
+      setStatus(r.text, r.ok ? '' : 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * 칸 안의 단추 — 구분 칸 아래 알람의 "유연근무 … 을 먼저 올리고 반차 쓰기"(그 날짜에 한해 두 건 — 유연근무 → 반차 — 으로 올리기로 한다)와
+   * 기념일 상자의 "신청 화면만 열기".
+   */
+  function onNoteClick(e) {
+    const b = e.target instanceof HTMLElement ? e.target.closest('button[data-act="halfFlex"], button[data-act="wfaOpen"]') : null;
+    if (!b || b.disabled || st.busy) return;
+    if (b.dataset.act === 'wfaOpen') {
+      openWelfare();
+      return;
+    }
+    st.halfOk = st.form.dateFrom;
+    paintNeed();
+  }
+
+  /** 구분 칸 아래에 반차가 몇 시부터 몇 시인지, 출근시간을 먼저 옮겨야 하는지 적는다. 출근이 정시가 아니면 알람이다. */
   function paintHalfNote() {
     const msg = $('at_half_msg');
     if (!msg) return;
-    msg.classList.remove('note');
+    msg.classList.remove('note', 'alarm');
     if (!halfOf(st.form)) return;
     msg.classList.add('note');
     if (!st.sched) {
@@ -761,11 +946,17 @@ export function createAttendPanel({
     const name = halfOf(st.form) === 'am' ? '오전' : '오후';
     const plan = planNow();
     if (st.sched.error) {
-      msg.textContent = `근무시간을 확인하지 못했습니다. 출근이 정시가 아니면(08:30) 유연근무로 09:00 출근으로 먼저 바꿔 주세요.`;
+      msg.textContent = '근무시간을 확인하지 못했습니다. 출근이 정시가 아닌 날(08:30·09:30)에는 오전·오후 반차를 쓸 수 없습니다 — 유연근무로 09:00 출근으로 먼저 바꿔 주세요.';
     } else if (!plan) {
       msg.textContent = '이 날은 근무시간표에 없습니다(주말).';
+    } else if (plan.blocked && !halfAgreed()) {
+      // 알람(2026-10-08 사용자 지정): 출근이 08:30·09:30 이면 반차를 쓸 수 없다. 유연근무를 먼저 올리는 길은 사람이 고를 때만 간다.
+      msg.classList.add('alarm');
+      msg.innerHTML = `<strong>이 날은 출근이 ${escapeHtml(plan.workStart)} 라 ${name} 반차를 쓸 수 없습니다.</strong> 반차는 정시 출근인 날에만 됩니다 — `
+        + `유연근무를 ${escapeHtml(flexSpan(plan.flexStart))} 으로 먼저 바꾸면 ${name} 반차 ${escapeHtml(plan.from)}~${escapeHtml(plan.to)} 가 됩니다. `
+        + `<button type="button" class="small at-halfflex" data-act="halfFlex">유연근무 ${escapeHtml(flexSpan(plan.flexStart))} 을 먼저 올리고 반차 쓰기</button>`;
     } else if (plan.flexStart) {
-      msg.textContent = `이 날 근무가 ${flexSpan(plan.workStart)} 이라, 유연근무 ${flexSpan(plan.flexStart)} 을 먼저 올리고 ${name} 반차(${plan.from}~${plan.to})를 올립니다.`;
+      msg.textContent = `이 날 근무가 ${flexSpan(plan.workStart)} 이라, 유연근무 ${flexSpan(plan.flexStart)} 을 먼저 올리고 ${name} 반차(${plan.from}~${plan.to})를 올립니다(신청서 두 건).`;
     } else {
       msg.textContent = `${name} 반차 ${plan.from}~${plan.to} (이 날 근무 ${flexSpan(plan.workStart)})`;
     }
@@ -949,8 +1140,10 @@ export function createAttendPanel({
     }
     st.filled.delete(key);
     const pick = b.dataset.span;
+    // 연차의 오전·오후는 켜진 것을 다시 누르면 꺼진다 — 전일 칩이 따로 없다(2026-10-08 사용자 지정: "1D 면 전일").
     const value = 'days' in b.dataset ? Number(b.dataset.days)
-      : pick ? nextSpan(st.form, pick === 'half' ? pick : Number(pick)) : b.dataset.choice;
+      : pick ? nextSpan(st.form, pick === 'half' ? pick : Number(pick))
+        : key === 'half' && b.dataset.choice === halfOf(st.form) ? '' : b.dataset.choice;
     // 갈래는 깔아 주는 값이 있을 수 있다(소통을 고르면 13~14시와 목적이 채워진다).
     // 교통편은 여럿을 함께 켜고 끄며, 기차는 일반석 → 특실 → 꺼짐으로 돈다.
     if (key === 'transport') st.transportSet = true;   // 손댄 아이콘은 출장지의 기억으로 덮어쓰지 않는다
@@ -971,7 +1164,7 @@ export function createAttendPanel({
     disarm();
     st.filled.delete(key);
     if (key === 'days' || key === 'dateTo') {
-      // 달력(휴가는 며칠간 줄의 달력, 출장은 도착일 칸)에서 끝나는 날을 골랐다. 시작일부터 며칠인지로 바꿔 담는다.
+      // 달력(휴가·출장은 종료일·도착일 칸, 기념일은 며칠간 줄의 달력)에서 끝나는 날을 골랐다. 시작일부터 며칠인지로 바꿔 담는다.
       // 고르는 중(빈 값)이면 그대로 둔다.
       if (!input.value) return;
       const n = spanDays(st.form.dateFrom, input.value);
@@ -983,13 +1176,14 @@ export function createAttendPanel({
       }
       const was = st.form.days;
       st.form = settle({ ...st.form, days: n });
-      // 구분 칸은 하루짜리 연차에만 있다. 하루와 여러 날 사이를 오갔으면 칸이 생기거나 없어진다.
+      // 오전·오후는 하루짜리 연차에만 산다. 하루와 여러 날 사이를 오갔으면 칩이 잠기거나 풀리니 폼을 새로 그린다.
       if (e.type === 'change' && st.form.kind === 'leave' && (was === 1) !== (n === 1)) return paintForm();
       return paintNeed();
     }
     if (input.type === 'checkbox') {
       st.form[key] = input.checked;
-      if (key === 'allDay' || key === 'settle' || key === 'car') {   // 칸이 생기거나 없어진다(시각 / 근무지·교통편 / 차량 목록)
+      // 칸이 생기거나 없어진다(시각 / 근무지·교통편 / 차량 목록 / 기념일 칸 — 제목에도 "· 기념일 지원"이 붙는다)
+      if (key === 'allDay' || key === 'settle' || key === 'car' || key === 'wfa') {
         st.form = settle(st.form);
         return paintForm();
       }
@@ -1128,12 +1322,14 @@ export function createAttendPanel({
       paintNeed();
       // 방금 읽어 보니 유연근무를 먼저 올려야 한다면, "올릴 내용"에 그것이 적힌 것을 본 뒤에 다시 누르게 한다 —
       // 누를 때 보지 못한 신청서가 나가면 안 된다.
-      if (halfFlexForm(st.form, planNow(), attendToday())) {
+      if (halfFlexForm(st.form, flexPlan(), attendToday())) {
         setStatus(`유연근무를 먼저 올려야 합니다(신청서 두 건). 올릴 내용을 확인하고 다시 눌러 주세요 — ${sendSummary()}`);
         return;
       }
     }
-    const flexForm = halfFlexForm(st.form, planNow(), attendToday());
+    // 출근이 정시가 아닌 날의 반차는 올리지 않는다 — 구분 칸 아래의 알람이 말한다(2026-10-08 사용자 지정).
+    if (halfBlocked()) return setStatus(`이 날은 출근이 ${planNow().workStart} 라 오전·오후 반차를 쓸 수 없습니다 — 구분 칸 아래의 안내를 보세요.`, 'error');
+    const flexForm = halfFlexForm(st.form, flexPlan(), attendToday());
     const summary = docSummary();
     const kind = st.form.kind;
     const editing = st.edit;
@@ -1177,11 +1373,19 @@ export function createAttendPanel({
       // 올라간 것은 확인됐는데 지금 보는 기간 밖의 날짜면 목록에는 없다. 없어진 줄 알지 않게 말해 준다.
       const hidden = seen && !st.items.includes(state) ? ' · 지금 보는 기간 밖의 날짜라 목록에는 보이지 않습니다' : '';
       // 출장이 결재요청으로 올라갔으면 이어서 여비계산서(사전정산)를 만든다. 임시저장에서는 만들지 않는다.
-      const trip = seen && action === 'request' && wantsTrip(sent) ? await makeTripDoc(sent) : '';
+      let trip = seen && action === 'request' && wantsTrip(sent) ? await makeTripDoc(sent) : '';
+      let fine = seen && !/못했습니다/.test(trip);
+      // 연차에 기념일 지원을 붙였으면 결재요청이 올라간 뒤 eclass 의 기념일 지원 신청 화면을 채워 연다(임시저장에서는 열지 않는다).
+      if (seen && action === 'request' && isWelfare(sent)) {
+        setStatus(`${verb}했습니다 — ${summary} · 기념일 지원 신청 화면을 여는 중...`);
+        const w = await fillWelfare(sent);
+        trip += ` · ${w.text}`;
+        fine &&= w.ok;
+      }
       setStatus(seen
         ? `${verb}했습니다 — ${summary} · ${r.docNo} (${state.statusName})${hidden}${trip}`
         : `${verb}했다고 HR 이 답했지만 목록에서 확인하지 못했습니다 — ${r.docNo || '문서번호 없음'}. HR 에서 확인해 주세요.`,
-      seen && !/못했습니다/.test(trip) ? '' : 'error');
+      fine ? '' : 'error');
       onChanged();
       st.sched = null;   // 올린 것이 그 날의 근무시간을 바꿨을 수 있다(유연근무). 다음 반차 때 다시 읽는다.
       logEvent('attend', seen, `${verb}: ${summary} · ${r.docNo}${seen ? '' : ' (목록에서 미확인)'}`,
@@ -2093,7 +2297,8 @@ export function createAttendPanel({
       ['업체명', l.company || '?'], ['사업자등록번호', l.companycode || '문서에 없음'], ['결제일', l.paydate || '?'], ['숙박 일수', `${l.sday ?? '?'}박`],
       ['정산금액', amount], ['공급가액', part(l.samount)], ['부가세', part(l.vat)],
       ...(cap ? [['상한액', `${wonOf(cap.total)} (1일 ${wonOf(cap.day)} × ${l.sday}박)`]] : []),
-      ...(l.comment ? [['비고', l.comment]] : []),
+      // 비고 — 묵은 곳·사업자명 뒤에, 상한액을 넘겨 실제 금액으로 정산하면 상한 초과 사유(필수, 2026-10-08 사용자 지정)가 잇는다(src/after.js lodgeComment).
+      ...(lodgeComment(l) ? [['비고', `${lodgeComment(l)}${lodgeReason(l) ? ' (상한 초과 사유 포함)' : ''}`]] : []),
       ['증빙', `${l.sources.join(' · ')}${site?.oldfile ? ' (첨부됨)' : ''}`],
     ];
   }
@@ -2150,9 +2355,14 @@ export function createAttendPanel({
       // 무엇을 묻고 무엇을 고르는지는 src/after.js 가 정한다(lodgeChoices) — 홈 카드의 출장 줄도 같은 말로 묻는다. 실제 금액이
       // 상한액의 1.5배 안이면 그 버튼에 부서장 승인이라고 적히고, 그 까닭이 버튼 아래에 선다(2026-10-05 사용자 지정).
       const { question, choices } = lodgeChoices(l);
+      // 실제 금액으로 정산하면 비고에 상한 초과 사유가 필수다(2026-10-08 사용자 지정) — 기본 문구가 든 칸을 두어 고쳐 쓸 수 있게 한다.
+      // 적던 글은 ask.reason 에 남겨 카드를 다시 그려도 그대로다. `실제 금액 …으로` 를 누를 때 이 칸의 글이 비고에 들어간다.
+      const reason = ask.reason?.[i] ?? l.reason ?? choices.find((c) => c.reason)?.reason ?? LODGE_OVER_REASON;
       return `<li><p>${escapeHtml(`${name} — ${question}`)}</p><div class="at-ask-row">`
         + choices.map((c) => `<button type="button" class="small at-request" data-act="ask-${c.settle}" data-i="${i}"${dis}>${escapeHtml(c.label)}</button>`).join('')
-        + `</div>${choices.filter((c) => c.note).map((c) => `<p class="at-after-note">${escapeHtml(c.note)}</p>`).join('')}</li>`;
+        + `</div>${choices.filter((c) => c.note).map((c) => `<p class="at-after-note">${escapeHtml(c.note)}</p>`).join('')}`
+        + `<div class="at-ask-row at-ask-reason-row"><label class="at-ask-reason-label" for="at-ask-reason-${i}">비고의 상한 초과 사유 — 실제 금액으로 정산하면 필수입니다(고쳐 쓸 수 있습니다)</label>`
+        + `<input type="text" id="at-ask-reason-${i}" class="at-ask-reason" data-i="${i}" value="${escapeHtml(reason)}" placeholder="${escapeHtml(LODGE_OVER_REASON)}"${dis} /></div></li>`;
     }).join('');
     return `<div class="at-after-ask"><p class="at-after-note"><strong>아직 올리지 않았습니다</strong> — 아래를 정해 주시면 올립니다</p><ul>${items}</ul>`
       + `<button type="button" class="small ghost at-ask-drop" data-act="ask-drop"${dis}>올리지 않기</button></div>`;
@@ -2592,7 +2802,7 @@ export function createAttendPanel({
         }
       }
       if (plan.lodge.some(lodgeAsk)) {
-        a.ask = { plan, row, records: all.filter((r) => /^lodging_/.test(r.docType)), files: fileNames, krw: {} };
+        a.ask = { plan, row, records: all.filter((r) => /^lodging_/.test(r.docType)), files: fileNames, krw: {}, reason: {} };
         setStatus('사후정산을 아직 올리지 않았습니다 — 출장 카드에서 정산금액을 정해 주세요');
         return;
       }
@@ -2643,14 +2853,27 @@ export function createAttendPanel({
   /**
    * `상한` 버튼으로 그 줄의 정산금액을 바꿨다(lodgebox.js 의 toggleCap) — 올린 내용(펴 보는 것)의 정산금액·공급가액·부가세를 바꾼 값으로
    * 맞춘다(lodgeCells 와 같은 말이 되게 같은 길로 짓는다). 적어 둔 줄의 정산금액도 맞춰 화면의 줄과 같은 줄로 알아본다(lodgeSame).
-   * @param {object} l 정한 줄(src/after.js lodgeSettle 의 결과 — actual·maxconv·sday·settle·total·samount·vat·capped·vatFrom)
+   * 비고가 같이 바뀌었으면(상한 초과 사유를 잇거나 걷음), 또는 `비고에 저장` 으로 비고만 바뀌었으면(l 에 comment 만 있다) 비고 칸도 맞춘다.
+   * @param {object} l 정한 줄(src/after.js lodgeSettle 의 결과 — actual·maxconv·sday·settle·total·samount·vat·capped·vatFrom, 비고가 바뀌었으면 comment)
    */
   function patchLodgeInfo(seq, lodgeSeq, l) {
     const info = st.lodgeInfo[seq]?.[lodgeSeq];
     if (!info?.row || !Array.isArray(info.cells)) return;
-    const fresh = Object.fromEntries(lodgeCells({ ...l, company: info.row.company, paydate: info.row.paydate, sources: [] }).filter(([k]) => ['정산금액', '공급가액', '부가세'].includes(k)));
-    const cells = info.cells.map(([k, v]) => [k, fresh[k] ?? v]);
-    st.lodgeInfo = { ...st.lodgeInfo, [seq]: { ...st.lodgeInfo[seq], [lodgeSeq]: { ...info, row: { ...info.row, total: l.total }, cells } } };
+    const fresh = l.total == null ? {}
+      : Object.fromEntries(lodgeCells({ ...l, comment: '', reason: '', company: info.row.company, paydate: info.row.paydate, sources: [] }).filter(([k]) => ['정산금액', '공급가액', '부가세'].includes(k)));
+    let cells = info.cells.map(([k, v]) => [k, fresh[k] ?? v]);
+    if (typeof l.comment === 'string') {
+      // 비고는 사이트에 적힌 글 그대로다(사유가 들어 있으면 그렇다고 덧붙인다). 없던 칸이면 증빙 앞에 세우고, 빈 글이 됐으면 걷는다.
+      const value = l.comment.trim();
+      const text = value ? `${value}${value.includes(LODGE_OVER_REASON) || (l.reason && value.includes(l.reason)) ? ' (상한 초과 사유 포함)' : ''}` : '';
+      cells = cells.filter(([k]) => k !== '비고');
+      if (text) {
+        const at = cells.findIndex(([k]) => k === '증빙');
+        cells.splice(at < 0 ? cells.length : at, 0, ['비고', text]);
+      }
+    }
+    const row = l.total == null ? info.row : { ...info.row, total: l.total };
+    st.lodgeInfo = { ...st.lodgeInfo, [seq]: { ...st.lodgeInfo[seq], [lodgeSeq]: { ...info, row, cells } } };
     chrome.storage.local.set({ attendLodgeInfo: st.lodgeInfo });
   }
 
@@ -2672,7 +2895,8 @@ export function createAttendPanel({
           docs: (plan.docs || []).filter((d) => l.sources.includes(d.name)).map(docLine), notes: [...(l.notes || [])],
         };
         const krw = l.doc?.currency === 'KRW';
-        if (l.actual != null) lodgeBox.noteActual(seq, h.seq, { actual: l.actual, supply: krw ? l.doc.supply ?? null : null, vat: krw ? l.doc.vat ?? null : null });
+        // 비고에 적은 상한 초과 사유도 같이 적어 둔다 — `상한` 을 오갈 때 그 사유로 잇고 걷는다(lodgebox.js).
+        if (l.actual != null) lodgeBox.noteActual(seq, h.seq, { actual: l.actual, supply: krw ? l.doc.supply ?? null : null, vat: krw ? l.doc.vat ?? null : null, reason: lodgeReason(l) || null });
       }
     }
     st.lodgeMine = { ...st.lodgeMine, [seq]: mine };
@@ -2706,8 +2930,10 @@ export function createAttendPanel({
       l.actual = Math.round(n);
       lodgeSettle(l);
     } else {
-      // 실제 금액으로 정산하면 승인이 필요하다는 알림이 그 줄과 결과 글에 붙는다(src/after.js lodgeDecide).
-      lodgeDecide(ask.plan, l, act === 'ask-cap' ? 'cap' : 'real');
+      // 실제 금액으로 정산하면 승인이 필요하다는 알림이 그 줄과 결과 글에 붙고(src/after.js lodgeDecide), 비고에 상한 초과 사유가 들어간다 —
+      // 사유 칸에 적힌 글(비었으면 기본 문구, 2026-10-08 사용자 지정). 상한액으로 정산하면 사유는 적지 않는다.
+      const typed = el.list.querySelector(`.at-ask-reason[data-i="${btn.dataset.i}"]`)?.value ?? ask.reason?.[btn.dataset.i];
+      lodgeDecide(ask.plan, l, act === 'ask-cap' ? 'cap' : 'real', typeof typed === 'string' ? typed : undefined);
     }
     if (ask.plan.lodge.some(lodgeAsk)) {
       setStatus('사후정산을 아직 올리지 않았습니다 — 출장 카드에서 정산금액을 정해 주세요');
@@ -2885,6 +3111,10 @@ export function createAttendPanel({
   async function reload() {
     if (st.busy) return;
     disarm();
+    // 연차현황·기념일 신청 현황도 다시 읽는다(휴가 폼이 보이면 그릴 때 읽는다).
+    st.leaves = null;
+    st.wfa = null;
+    if (st.form.kind === 'leave') paintForm();
     el.listWrap.setAttribute('aria-busy', 'true');
     setStatus('신청 내역을 읽는 중...');
     try {
@@ -3171,9 +3401,10 @@ export function createAttendPanel({
       el.list.querySelector(`button[data-act="lodge-info"][data-lodge="${btn.dataset.lodge}"]`)?.focus();
       return undefined;
     }
-    if (a === 'lodge-refresh' || a === 'lodge-del' || a === 'lodge-cap') {
+    if (a === 'lodge-refresh' || a === 'lodge-del' || a === 'lodge-cap' || a === 'lodge-comment') {
       // 출장 카드의 숙박비 내역 — 다시 읽기는 곧바로, 지우기는 실제 계산서의 줄이 없어지는 일이라 두 번 눌러야 나간다.
       // `상한`은 그 줄의 정산금액을 상한액과 실제 금액 사이에서 바꾼다(2026-10-06 사용자 지정 — 버튼 하나, 되돌릴 수 있어 한 번에 나간다).
+      // `비고에 저장`은 상한액을 넘긴 줄의 비고에 적는 상한 초과 사유를 고쳐 쓴다(2026-10-08 사용자 지정 — 되돌릴 수 있어 한 번에 나간다).
       const row = tripOf(it);
       if (!row) return undefined;
       if (a === 'lodge-refresh') {
@@ -3183,6 +3414,11 @@ export function createAttendPanel({
       if (a === 'lodge-cap') {
         disarm();
         return lodgeBox.toggleCap(lodgeCtx(row), btn.dataset.lodge);
+      }
+      if (a === 'lodge-comment') {
+        disarm();
+        const input = el.list.querySelector(`.at-lodge-reason-input[data-lodge="${btn.dataset.lodge}"]`);
+        return lodgeBox.setReason(lodgeCtx(row), btn.dataset.lodge, input?.value ?? lodgeBox.state.by[row.seq]?.draft?.[btn.dataset.lodge] ?? '');
       }
       if (!armed(`lodge:${row.seq}:${btn.dataset.lodge}`, btn, '지우기')) {
         setStatus(`지울 숙박 줄 — ${lodgeBox.describe(row.seq, btn.dataset.lodge)} · 한 번 더 누르면 사후정산에서 지웁니다`);
@@ -3324,6 +3560,7 @@ export function createAttendPanel({
     el.fields.addEventListener('change', onFieldInput);
     el.fields.addEventListener('click', onChipClick);
     el.fields.addEventListener('click', onCarClick);
+    el.fields.addEventListener('click', onNoteClick);
     el.fields.addEventListener('dragover', onFileDrag);
     el.fields.addEventListener('dragleave', onFileDrag);
     el.fields.addEventListener('drop', onFileDrop);
@@ -3378,6 +3615,25 @@ export function createAttendPanel({
       const input = askInput(e);
       const ask = input ? st.after[input.closest('.at-after[data-seq]')?.dataset.seq]?.ask : null;
       if (ask) ask.krw[input.dataset.i] = input.value;
+    });
+    // 비고의 상한 초과 사유 칸(2026-10-08 사용자 지정) — 묻는 칸의 것은 ask.reason 에, 숙박비 내역의 것은 lodgebox 가 들고 있어 다시 그려도 남는다.
+    // 숙박비 내역의 칸에서 Enter 는 옆의 `비고에 저장` 을 누른 것과 같다.
+    el.list.addEventListener('input', (e) => {
+      const input = e.target instanceof HTMLInputElement ? e.target : null;
+      if (!input) return;
+      if (input.classList.contains('at-ask-reason')) {
+        const ask = st.after[input.closest('.at-after[data-seq]')?.dataset.seq]?.ask;
+        if (ask) (ask.reason ||= {})[input.dataset.i] = input.value;
+      } else if (input.classList.contains('at-lodge-reason-input')) {
+        const seq = input.closest('.at-lodges[data-seq]')?.dataset.seq;
+        if (seq) lodgeBox.draft(seq, input.dataset.lodge, input.value);
+      }
+    });
+    el.list.addEventListener('keydown', (e) => {
+      const input = e.target instanceof HTMLInputElement && e.target.classList.contains('at-lodge-reason-input') ? e.target : null;
+      if (!input || e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      input.parentElement.querySelector('button[data-act="lodge-comment"]')?.click();
     });
     el.list.addEventListener('keydown', (e) => {
       const input = askInput(e);

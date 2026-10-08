@@ -12,9 +12,15 @@
 // CalMaxLodge 에서 읽는다. 실제 금액은 상한액으로 낮출 때 적어 두고(attendLodgeActual — 올릴 때도 적는다), 몰라서 되돌릴 수 없으면
 // 버튼이 켜진 채 잠긴다. 실제 금액으로 되돌리면 승인 규칙(상한액의 1.5배까지 부서장 승인, src/after.js lodgeOver)을 풍선말과 상태 줄에 적는다.
 // 완료된 사후정산의 카드(보여 주기만 — × 가 없다)에도 선다(2026-10-06 사용자 지정).
+//
+// **비고의 상한 초과 사유**(2026-10-08 사용자 지정: "상한액 넘어 가면 '비고' 란에 상한 이유를 넣어야 하거든. 이게 상한액 넘어 가면 필수라서.
+// 기본적으로 '인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움' 라는 내용을 넣어주고, 수정 가능하게 해줘") — 정산금액이 상한액을 넘는 줄의
+// 비고에는 사유가 필수다. `상한` 을 꺼서 실제 금액으로 되돌리면 비고에 사유(적어 둔 것, 없으면 기본 문구 — src/after.js LODGE_OVER_REASON)를
+// 잇고, 켜서 상한액으로 낮추면 그 사유를 걷는다(묵은 곳 같은 나머지 글은 그대로). 그 줄의 내용을 펴면(증빙·손수 작성 표시) 사유를 고쳐 쓰는
+// 칸이 서고, `비고에 저장` 으로 그 줄의 비고만 바꿔 저장한다(src/trip.js 의 tripAfterLodgeComment). 고쳐 쓴 사유는 실제 금액과 같이 적어 둔다.
 
-import { tripAfterRows, tripAfterLodgeDelete, tripAfterLodgeAmount, tripLodgeMax } from './src/trip.js';
-import { LODGE_CURRENCY, lodgeCap, lodgeOver, lodgeSettle, lodgeApproval } from './src/after.js';
+import { tripAfterRows, tripAfterLodgeDelete, tripAfterLodgeAmount, tripAfterLodgeComment, tripLodgeMax } from './src/trip.js';
+import { LODGE_CURRENCY, LODGE_OVER_REASON, lodgeCap, lodgeOver, lodgeSettle, lodgeApproval, lodgeCommentWith, lodgeCommentWithout } from './src/after.js';
 import { LOG_KEY } from './src/logbook.js';
 
 const REFRESH_TITLE = '숙박비 내역 다시 읽기 — 사후정산 화면에서 고친 것을 가져옵니다';
@@ -27,11 +33,15 @@ const HAND_TITLE = '이 패널에서 올린 증빙으로 작성한 줄이 아닙
 /** 표시(증빙·손수 작성)의 풍선말 꼬리 — 누르면 그 줄의 내용이 펴진다. */
 const INFO_HOW = ' · 누르면 내용이 보입니다';
 /**
- * 숙박 줄의 실제 금액 — { [계산서 번호]: { [숙박 줄 번호]: { actual, supply, vat } } }(원). 상한액으로 낮출 때 그 전의 정산금액을,
+ * 숙박 줄의 실제 금액 — { [계산서 번호]: { [숙박 줄 번호]: { actual, supply, vat, reason } } }(원). 상한액으로 낮출 때 그 전의 정산금액을,
  * 올릴 때는 증빙의 실제 금액(문서의 공급가액·부가세가 있으면 그것도)을 적는다 — `상한`을 끌 때 이 값으로 되돌린다.
+ * reason 은 비고에 적은(고쳐 쓴) 상한 초과 사유다 — 없으면 기본 문구(LODGE_OVER_REASON)를 쓴다.
  */
 export const ACTUAL_KEY = 'attendLodgeActual';
 const CAP_LABEL = '상한';
+const REASON_LABEL = '비고의 상한 초과 사유';
+const REASON_SAVE = '비고에 저장';
+const REASON_HOW = '정산금액이 상한액을 넘는 줄은 비고에 사유가 필수입니다 — 고쳐 쓰고 저장하면 그 줄의 비고만 바꿔 저장합니다';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const day = (s) => (DATE_RE.test(s || '') ? `${+s.slice(5, 7)}/${+s.slice(8)}` : '');
@@ -86,6 +96,18 @@ export function lodgeCapTitle(c) {
   return `${now}${approval ? `(${approval})` : ''} — 누르면 ${capText}으로 바꿉니다`;
 }
 
+/**
+ * 화면의 숙박 줄의 비고에서 상한 초과 사유를 가려낸다 — 적어 둔 사유(kept.reason)가 들어 있으면 그것, 기본 문구가 들어 있으면 그것, 없으면 빈 글.
+ * base 는 사유를 뺀 나머지 비고(묵은 곳·사업자명 등)다.
+ * @returns {{reason: string, base: string, known: string[]}} known 은 이 줄에서 사유로 칠 수 있는 글들(적어 둔 것·기본 문구)
+ */
+export function lodgeReasonOf(row, kept = null) {
+  const comment = String(row?.comment ?? '').trim();
+  const known = [...new Set([String(kept?.reason ?? '').trim(), LODGE_OVER_REASON].filter(Boolean))];
+  const reason = known.find((r) => comment.includes(r)) || '';
+  return { reason, base: lodgeCommentWithout(comment, known), known };
+}
+
 /** 정산금액을 화폐와 함께 — 원화는 "125,052원", 외화는 "88.46 USD". */
 export function lodgeAmount(row) {
   const n = num(row?.total);
@@ -130,8 +152,9 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
   // by 는 계산서마다의 사정이다: rows 는 화면에서 읽은 숙박 줄(아직 못 읽었으면 null), trans 는 같이 읽은 교통 줄, mine 은 저장해 둔 표시,
   // actual 은 적어 둔 실제 금액(줄 번호 → { actual, supply, vat }), maxes 는 사이트에서 읽어 둔 상한액(나라·화폐 → 응답),
   // logged 는 활동 기록에 남은 이 계산서의 "사후정산 작성", busy 는 지우거나 금액을 바꾸는 중인 줄 번호, error 는 그러다 난 일이다.
+  // draft 는 사유 칸에 적는 중인 글(줄 번호 → 글) — 카드를 다시 그려도 남게 들고 있다가 저장하면 버린다.
   const box = { by: {} };
-  const of = (seq) => box.by[seq] || (box.by[seq] = { rows: null, trans: [], mine: {}, actual: {}, maxes: {}, logged: [], loading: false, busy: '', error: '' });
+  const of = (seq) => box.by[seq] || (box.by[seq] = { rows: null, trans: [], mine: {}, actual: {}, maxes: {}, logged: [], draft: {}, loading: false, busy: '', error: '' });
   const what = (row) => `${row.company || '업체명 없음'} · ${day(row.paydate) || '결제일 ?'} · ${lodgeAmount(row)}`;
 
   /** 원화 줄인데 화면의 숨은 칸에 상한이 없으면 사이트에서 읽어 둔다(나라·화폐마다 한 번). 못 읽어도 던지지 않는다 — 그 줄에 버튼이 안 설 뿐이다. */
@@ -217,11 +240,22 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
   /**
    * 그 줄의 실제 금액을 적어 둔다 — 올릴 때(attendpanel.js 의 rememberMine)와 상한액으로 낮출 때. `상한`을 끌 때 이 값으로 되돌린다.
    * supply·vat 는 실제 금액일 때의 공급가액·부가세(문서의 것) — 모르면 null(되돌릴 때 정산금액에서 되셈한다).
-   * @param {{actual:number, supply?:number|null, vat?:number|null}} value
+   * reason 은 비고에 적은 상한 초과 사유(고쳐 쓴 것) — 없으면 null(기본 문구를 쓴다). 주지 않으면 적어 둔 것을 그대로 둔다.
+   * @param {{actual:number, supply?:number|null, vat?:number|null, reason?:string|null}} value
    */
   async function noteActual(seq, lodgeSeq, value) {
     if (!(Number(value?.actual) > 0)) return;
-    const v = { actual: Math.round(Number(value.actual)), supply: value.supply ?? null, vat: value.vat ?? null };
+    const had = of(seq).actual[lodgeSeq];
+    const reason = value.reason === undefined ? had?.reason ?? null : String(value.reason ?? '').trim() || null;
+    const v = { actual: Math.round(Number(value.actual)), supply: value.supply ?? null, vat: value.vat ?? null, reason };
+    of(seq).actual[lodgeSeq] = v;
+    await putMark(ACTUAL_KEY, seq, lodgeSeq, v);
+  }
+
+  /** 그 줄에 적어 둔 상한 초과 사유만 바꾼다(실제 금액은 그대로). 실제 금액을 모르는 줄이면 사유만 적어 둔다. */
+  async function noteReason(seq, lodgeSeq, reason) {
+    const had = of(seq).actual[lodgeSeq];
+    const v = { actual: had?.actual ?? null, supply: had?.supply ?? null, vat: had?.vat ?? null, reason: String(reason ?? '').trim() || null };
     of(seq).actual[lodgeSeq] = v;
     await putMark(ACTUAL_KEY, seq, lodgeSeq, v);
   }
@@ -243,17 +277,23 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
     const settle = c.on ? 'real' : 'cap';
     const kept = s.actual[row.seq];
     const l = lodgeSettle({ actual: c.actual, maxconv: c.day, sday: c.sday, settle, doc: { currency: LODGE_CURRENCY, total: c.actual, supply: kept?.supply ?? null, vat: kept?.vat ?? null } });
+    // 비고의 상한 초과 사유 — 실제 금액으로 되돌리면 잇고(적어 둔 사유, 없으면 기본 문구), 상한액으로 낮추면 걷는다. 그대로면 비고는 보내지 않는다.
+    const { reason: had, known } = lodgeReasonOf(row, kept);
+    const before = String(row.comment ?? '').trim();
+    const comment = settle === 'real' ? lodgeCommentWith(before, had || known[0]) : lodgeCommentWithout(before, known);
+    const commented = comment !== before;
     const text = what(row);
     const source = lodgeSource(row, { ...s.mine, ...ctx.mine }, ctx.kept || [], s.logged);
     Object.assign(s, { busy: row.seq, error: '' });
     repaint();
     try {
-      s.rows = await tripAfterLodgeAmount(trip.seq, trseq, row.seq, { total: l.total, samount: l.samount, vat: l.vat });
+      s.rows = await tripAfterLodgeAmount(trip.seq, trseq, row.seq, { total: l.total, samount: l.samount, vat: l.vat, ...(commented ? { comment } : {}) });
       if (settle === 'cap') {
-        // 그 전의 정산금액이 실제 금액이다(적어 둔 것이 없을 때). 공급가액·부가세는 그 금액에 맞을 때만 같이 적는다.
+        // 그 전의 정산금액이 실제 금액이다(적어 둔 것이 없을 때). 공급가액·부가세는 그 금액에 맞을 때만 같이 적는다. 걷은 사유도 적어 둔다(되돌릴 때 다시 잇는다).
         const total = num(row.total);
         const fits = total != null && num(row.samount) != null && num(row.vat) != null && num(row.samount) + num(row.vat) === total;
-        if (!kept) await noteActual(trip.seq, row.seq, { actual: total, supply: fits ? num(row.samount) : null, vat: fits ? num(row.vat) : null });
+        if (!kept) await noteActual(trip.seq, row.seq, { actual: total, supply: fits ? num(row.samount) : null, vat: fits ? num(row.vat) : null, reason: had || null });
+        else if (had && had !== kept.reason) await noteReason(trip.seq, row.seq, had);
       }
       if (source && !s.mine[row.seq]) {
         s.mine[row.seq] = source;
@@ -261,14 +301,61 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
       }
       const approval = settle === 'real' ? lodgeApproval(l) : '';
       const how = settle === 'cap' ? `상한액 ${won(l.total)}으로 바꿨습니다` : `실제 금액 ${won(l.total)}으로 되돌렸습니다`;
-      setStatus(`정산금액을 ${how} — ${text} · 여비계산서 ${trip.seq}${approval ? ` · ${approval}` : ''}`);
-      logEvent('trip', true, `여비계산서(사후정산) 숙박 줄 정산금액 변경: ${trip.seq} · ${text} → ${won(l.total)}(${settle === 'cap' ? '상한액' : '실제 금액'})${approval ? ` · ${approval}` : ''}`,
-        { seq: trip.seq, lodgeSeq: row.seq, settle, total: l.total, samount: l.samount, vat: l.vat });
-      ctx.changed?.(row.seq, l);
+      const remark = !commented ? '' : settle === 'real' ? ` · 비고에 사유를 적었습니다(${had || known[0]})` : ' · 비고의 상한 초과 사유를 걷었습니다';
+      setStatus(`정산금액을 ${how} — ${text} · 여비계산서 ${trip.seq}${approval ? ` · ${approval}` : ''}${remark}`);
+      logEvent('trip', true, `여비계산서(사후정산) 숙박 줄 정산금액 변경: ${trip.seq} · ${text} → ${won(l.total)}(${settle === 'cap' ? '상한액' : '실제 금액'})${approval ? ` · ${approval}` : ''}${remark}`,
+        { seq: trip.seq, lodgeSeq: row.seq, settle, total: l.total, samount: l.samount, vat: l.vat, ...(commented ? { comment } : {}) });
+      ctx.changed?.(row.seq, commented ? { ...l, comment } : l);
     } catch (err) {
       s.error = `정산금액을 바꾸지 못했습니다: ${err.message}`;
       setError(err, '숙박 줄 정산금액 변경 실패');
       logEvent('trip', false, `여비계산서(사후정산) 숙박 줄 정산금액 변경 실패: ${trip.seq} · ${text} — ${err.message}`, { seq: trip.seq, lodgeSeq: row.seq, settle });
+    } finally {
+      s.busy = '';
+      repaint();
+    }
+  }
+
+  /** 사유 칸에 적는 중인 글을 들고 있는다(카드를 다시 그려도 남게). */
+  function draft(seq, lodgeSeq, value) {
+    of(seq).draft[lodgeSeq] = String(value ?? '');
+  }
+
+  /**
+   * 상한액을 넘긴 숙박 줄의 비고에 적힌 상한 초과 사유를 고쳐 쓴다(`비고에 저장`) — 비고의 나머지 글(묵은 곳 등)은 그대로 두고 사유만
+   * 바꿔 그 줄의 비고만 저장한다(src/trip.js 의 tripAfterLodgeComment). 빈 글이면 기본 문구를 적는다(사유는 필수다). 고쳐 쓴 사유는
+   * 실제 금액과 같이 적어 두어 `상한` 을 오갈 때 그 사유로 잇고 걷는다. 바뀐 비고를 ctx.changed(줄 번호, { comment }) 로 카드에 알린다.
+   * @param {string} value 사유 칸에 적힌 글
+   */
+  async function setReason(ctx, lodgeSeq, value) {
+    const { trip, trseq } = ctx;
+    const s = of(trip.seq);
+    const row = s.rows?.find((r) => r.seq === String(lodgeSeq));
+    if (!row || s.busy || s.loading) return;
+    const reason = String(value ?? '').trim() || LODGE_OVER_REASON;
+    const { base, reason: had } = lodgeReasonOf(row, s.actual[row.seq]);
+    const comment = lodgeCommentWith(base, reason);
+    const text = what(row);
+    if (comment === String(row.comment ?? '').trim()) {
+      delete s.draft[row.seq];
+      if (reason !== (s.actual[row.seq]?.reason || '')) await noteReason(trip.seq, row.seq, reason);
+      setStatus(`비고가 이미 그 사유입니다 — ${text} · 여비계산서 ${trip.seq}`);
+      repaint();
+      return;
+    }
+    Object.assign(s, { busy: row.seq, error: '' });
+    repaint();
+    try {
+      s.rows = await tripAfterLodgeComment(trip.seq, trseq, row.seq, comment);
+      delete s.draft[row.seq];
+      await noteReason(trip.seq, row.seq, reason);
+      setStatus(`비고에 상한 초과 사유를 ${had ? '고쳐 ' : ''}적었습니다 — ${text} · 여비계산서 ${trip.seq} · ${reason}`);
+      logEvent('trip', true, `여비계산서(사후정산) 숙박 줄 비고 변경: ${trip.seq} · ${text} → ${comment}`, { seq: trip.seq, lodgeSeq: row.seq, comment, reason });
+      ctx.changed?.(row.seq, { comment });
+    } catch (err) {
+      s.error = `비고를 바꾸지 못했습니다: ${err.message}`;
+      setError(err, '숙박 줄 비고 변경 실패');
+      logEvent('trip', false, `여비계산서(사후정산) 숙박 줄 비고 변경 실패: ${trip.seq} · ${text} — ${err.message}`, { seq: trip.seq, lodgeSeq: row.seq, comment });
     } finally {
       s.busy = '';
       repaint();
@@ -300,6 +387,25 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
   }
 
   /**
+   * 펴진 줄 아래의 **비고의 상한 초과 사유** 칸 — 정산금액이 상한액을 넘는 줄에만 선다(2026-10-08 사용자 지정: 넘으면 비고에 사유가 필수,
+   * 기본 문구를 넣고 고쳐 쓸 수 있게). 칸에는 지금 비고에 적힌 사유(없으면 적어 둔 것, 그것도 없으면 기본 문구)가 들어 있고, 적는 중인 글이
+   * 있으면 그것이다. 비고에 사유가 아직 없으면 그렇다고 적는다. `비고에 저장` 이 그 줄의 비고만 바꿔 저장한다(setReason).
+   */
+  function reasonHtml(r, c, s, off) {
+    const total = num(r.total);
+    if (!c || total == null || !(total > c.cap)) return '';
+    const kept = s.actual[r.seq];
+    const { reason, base } = lodgeReasonOf(r, kept);
+    const value = s.draft[r.seq] ?? (reason || kept?.reason || LODGE_OVER_REASON);
+    const now = reason ? `지금 비고: ${String(r.comment ?? '').trim()}` : `비고에 상한 초과 사유가 없습니다${base ? ` — 지금 비고: ${base}` : ''} · 저장하면 ${base ? '뒤에 ' : ''}사유를 적습니다`;
+    return `<div class="at-lodge-reason" data-lodge="${escapeHtml(r.seq)}"><p class="at-after-label">${REASON_LABEL}</p>`
+      + `<div class="at-ask-row"><input type="text" class="at-lodge-reason-input" data-lodge="${escapeHtml(r.seq)}" value="${escapeHtml(value)}" `
+      + `placeholder="${escapeHtml(LODGE_OVER_REASON)}" aria-label="${escapeHtml(`${REASON_LABEL} — ${what(r)}`)}" title="${REASON_HOW}"${off} />`
+      + `<button type="button" class="small at-request at-lodge-reason-save" data-act="lodge-comment" data-lodge="${escapeHtml(r.seq)}" title="${REASON_HOW}"${off}>${REASON_SAVE}</button></div>`
+      + `<p class="at-after-note${reason ? '' : ' missing'}">${escapeHtml(now)}</p></div>`;
+  }
+
+  /**
    * 출장 카드의 숙박비 내역. 출장자 번호가 없으면(사후정산을 쓸 단계가 아니다) 빈 글이다.
    * @param {{trip:object, trseq:string, kept?:object[], mine?:Record<string,string>, locked?:boolean, lodging?:boolean, readonly?:boolean,
    *          open?:string, detail?:(row:object, source:string) => string}} ctx
@@ -307,7 +413,8 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
    *   locked 는 카드가 다른 일을 하는 중인가, lodging 은 숙박이 있는 출장인가(당일 출장은 줄이 있을 때만 보인다),
    *   readonly 는 보여 주기만 하는가(사후정산이 완료된 출장 — 줄을 지우는 × 가 없다. `상한` 버튼은 선다),
    *   open 은 내용을 펴 둔 줄의 번호, detail 은 그 줄 아래에 펼 내용(HTML — 카드가 짓는다),
-   *   changed 는 `상한` 버튼으로 정산금액을 바꾼 뒤 부르는 길(줄 번호, 정한 줄 — src/after.js lodgeSettle 의 결과)
+   *   changed 는 `상한` 버튼으로 정산금액을 바꾼 뒤(줄 번호, 정한 줄 — src/after.js lodgeSettle 의 결과에 비고가 바뀌었으면 comment 도)와
+   *   `비고에 저장` 으로 비고를 바꾼 뒤(줄 번호, { comment }) 부르는 길
    */
   function html(ctx) {
     const { trip, trseq, kept = [], locked = false, lodging = false, readonly = false } = ctx || {};
@@ -347,11 +454,11 @@ export function createLodgeBox({ escapeHtml, logEvent, setStatus, setError, repa
         + `<span class="at-lodge-company" title="${escapeHtml(`${name}${r.sday ? ` · ${r.sday}박` : ''}`)}">${escapeHtml(name)}</span>`
         + `<span class="at-lodge-total">${escapeHtml(lodgeAmount(r))}</span>${cap}${src}`
         + (readonly ? '' : `<button type="button" class="small ghost at-lodge-del" data-act="lodge-del" data-lodge="${escapeHtml(r.seq)}" title="${escapeHtml(del)}" aria-label="${escapeHtml(del)}"${off}>×</button>`) + '</div>'
-        + (open ? `<div class="at-lodge-info">${ctx.detail(r, sources[i])}</div>` : '');
+        + (open ? `<div class="at-lodge-info">${ctx.detail(r, sources[i])}${reasonHtml(r, c, s, off)}</div>` : '');
     };
     return `<div class="at-lodges" data-seq="${escapeHtml(trip.seq)}">${head}${rows.length ? `<div class="at-lodge-rows">${rows.map(line).join('')}</div>` : ''}`
       + (s.error ? `<p class="at-lodge-note error">${escapeHtml(s.error)}</p>` : '') + '</div>';
   }
 
-  return { html, ensure, reload, remove, toggleCap, noteActual, describe, state: box };
+  return { html, ensure, reload, remove, toggleCap, setReason, draft, noteActual, describe, state: box };
 }

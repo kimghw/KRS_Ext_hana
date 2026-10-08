@@ -7,7 +7,7 @@ import {
   BOOK_KEY, MAX_PROJECTS, MAX_YEARS, BUDGET_ITEMS, CHANGE_KINDS,
   periodOf, periodText, isYmd, amountOf, comma, won, shortWon,
   yearsOf, yearNo, currentYear, yearState, yearLabel,
-  blankYear, normalizeYear, normalizeProject, normalizeBook, viewYear, yearBook,
+  blankYear, normalizeYear, normalizeProject, normalizeBook, viewYear, yearBook, aliasOwner, fileLog, noteLogs,
   budgetTotals, budgetChanges, projectChanges, newestFirst,
   fromGongmun, mergeProjects, exportJson, exportName, importJson, restoreBook, summaryText, parseRoster, parseSections,
   budgetTsv, entryText, logLines, changeLine, changeLines,
@@ -312,7 +312,7 @@ t('들여온 장부를 얹기 — 같은 id 는 파일 것으로, 없던 과제�
 });
 
 console.log('요약');
-t('과제 한 차년도를 붙여 넣을 글로 — 개요 · 예산표 · 연구내역(이른 것부터) · 변경이력', () => {
+t('과제 한 차년도를 붙여 넣을 글로 — 개요 · 예산표 · 진행 기록(이른 것부터) · 변경이력', () => {
   const p = normalizeProject({
     id: 'a', name: 'MVDC 차단기 개발', alias: '차단기 과제', code: 'RND-20-2026', lead: '박기도', start: '2026-04-01', end: '2029-12-31',
     years: { 1: {
@@ -327,7 +327,7 @@ t('과제 한 차년도를 붙여 넣을 글로 — 개요 · 예산표 · 연�
     '', '■ 예산 (1차년도)',
     '- 인건비: 계획 10,000,000원 · 집행 2,500,000원 · 잔액 7,500,000원 · 집행률 25%',
     '- 합계: 계획 10,000,000원 · 집행 2,500,000원 · 잔액 7,500,000원 · 집행률 25%',
-    '', '■ 연구내역 (2건)', '- 2026.05.01 첫째', '- 2026.09.01 둘째', '  여러', '  줄',
+    '', '■ 진행 기록 (2건)', '- 2026.05.01 첫째', '- 2026.09.01 둘째', '  여러', '  줄',
     '', '■ 변경이력 (1건)', '- 2026.08.01 [예산] 인건비: 8,000,000원 → 10,000,000원 (인력 충원)',
   ].join('\n'));
   const empty = summaryText(p, 3, '2026-10-08');
@@ -338,6 +338,32 @@ t('과제 한 차년도를 붙여 넣을 글로 — 개요 · 예산표 · 연�
   assert.match(summaryText(p, 99, '2026-10-08'), /^\[차단기 과제\] 1차년도/, '없는 차년도면 첫 차년도');
   const one = normalizeProject({ name: 'x', years: { 1: { logs: [{ date: '2026-01-02', title: '', text: '제목 없이 한 줄' }, { date: '2026-01-03', title: '제목만', text: '' }] } } });
   assert.match(summaryText(one, 1, '2026-10-08'), /- 2026\.01\.02 제목 없이 한 줄\n- 2026\.01\.03 제목만\n/);
+});
+t('계획서에서 온 두 줄은 진행 기록이 아니라 참여연구자·연구개발 계획 절로 — 계획의 ■ 절은 한 칸 들여', () => {
+  const p = normalizeProject({ name: 'x', alias: 'X', start: '2026-04-01', end: '2026-12-31', years: { 1: { logs: [
+    { id: 'a', date: '2026-05-22', title: '참여연구자 — 1차년도', text: '홍길동 — 수석 · 20% · 9개월 · 인건비 15,000,000원\n성춘향 — 책임 · 10%', key: 'roster' },
+    { id: 'b', date: '2026-05-22', title: '연구개발 계획 — 1차년도', text: '■ 개발목표\n1. 목표 하나', key: 'plan' },
+    { id: 'c', date: '2026-06-01', title: '손으로 적은 것', text: '' },
+  ] } } });
+  const y = p.years[1];
+  assert.equal(fileLog(y, 'roster').id, 'a');
+  assert.equal(fileLog(y, 'plan').id, 'b');
+  assert.equal(fileLog(y, 'none'), null);
+  assert.equal(fileLog(null, 'plan'), null);
+  assert.deepEqual(noteLogs(y).map((l) => l.id), ['c']);
+  const text = summaryText(p, 1, '2026-10-08');
+  assert.match(text, /\n\n■ 참여연구자 \(2명\)\n- 홍길동 — 수석 · 20% · 9개월 · 인건비 15,000,000원\n- 성춘향 — 책임 · 10%\n\n■ 연구개발 계획\n  ■ 개발목표\n  1\. 목표 하나\n\n■ 진행 기록 \(1건\)\n- 2026\.06\.01 손으로 적은 것\n\n■ 변경이력/);
+  assert.doesNotMatch(summaryText(normalizeProject({ name: 'y' }), 1, '2026-10-08'), /참여연구자|연구개발 계획/, '계획서가 없으면 그 절도 없다');
+});
+
+console.log('별칭');
+t('aliasOwner — 별칭이 같은 과제(띄어쓰기·대소문자 무시), 자기는 빼고, 빈 별칭은 null', () => {
+  const b = normalizeBook({ projects: [{ id: 'a', name: 'A', alias: 'SSCB' }, { id: 'b', name: 'B', alias: '' }] });
+  assert.equal(aliasOwner(b, 'sscb').id, 'a');
+  assert.equal(aliasOwner(b, ' S SCB ').id, 'a');
+  assert.equal(aliasOwner(b, 'SSCB', 'a'), null, '자기 별칭은 겹침이 아니다');
+  assert.equal(aliasOwner(b, 'PEMFC'), null);
+  assert.equal(aliasOwner(b, ''), null, '빈 별칭끼리는 겹침이 아니다');
 });
 
 console.log('연구내역 글의 꼴');

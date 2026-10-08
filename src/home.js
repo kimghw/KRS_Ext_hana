@@ -529,7 +529,8 @@ function planHtml(it, i, today) {
   const ask = asks.map((a) => '<span class="krs-mine-ask">'
     + `<span class="krs-mine-ask-q" title="${escapeHtml(a.question)}">${PICK_CUE}${askAll.length > 1 ? ` ${askAll.indexOf(a) + 1}/${askAll.length}` : ''}</span>`
     + a.choices.map((c) => {
-      const tip = escapeHtml(`${c.label}${c.note ? ` — ${c.note}` : ''}`);
+      // 실제 금액으로 올리면 비고에 상한 초과 사유가 들어간다(2026-10-08 사용자 지정 — 기본 문구, 패널의 숙박비 내역에서 고쳐 쓴다) — 풍선말에 적는다.
+      const tip = escapeHtml(`${c.label}${c.note ? ` — ${c.note}` : ''}${c.reason ? ` · 비고에 적는 사유: ${c.reason}` : ''}`);
       return `<button type="button" class="krs-mine-pick" data-act="settle" data-doc="${escapeHtml(it.docNo)}" data-key="${escapeHtml(a.key)}" `
         + `data-settle="${escapeHtml(c.settle)}" title="${tip}" aria-label="${tip}">${PICK_ICON[c.settle] || escapeHtml(c.label)}</button>`;
     }).join('')

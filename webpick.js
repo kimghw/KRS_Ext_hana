@@ -1,11 +1,12 @@
 // 웹페이지 캡처 단추 둘 — 공문 탭의 문서 넣는 곳(gongmunpanel.js)과 출장 카드의 증빙 넣는 곳(attendpanel.js — 사후정산 칸·여비증빙 송부 칸)이
 // **같은 단추**를 쓴다(2026-10-08 사용자 지정: "여기도 웹페이지 카피 공문처럼 하게해줘.. 2개 동일한 기능으로"). 찍는 일은 src/pagecap.js 다.
 //
-//   [보고 있는 탭 아이콘]  보고 있는 탭을 위에서 아래까지 통째로 → 찍은 장·화면 글자 → 그 곳의 읽기
-//   [부분 골라 캡처]       페이지 위에서 프레임(틀·상자)을 눌러 하나 이상 고르고 위쪽 띠의 캡처 → 고른 것만 찍은 장·글자 → 그 곳의 읽기
+//   [전체]  보고 있는 탭을 위에서 아래까지 통째로 → 찍은 장·화면 글자 → 그 곳의 읽기
+//   [부분]  페이지 위에서 프레임(틀·상자)을 눌러 하나 이상 고르고 위쪽 띠의 캡처 → 고른 것만 찍은 장·글자 → 그 곳의 읽기
 //
 // 2026-10-08 사용자 지정: "탭이 아니라 프레임으로 선택할 수 있지 않냐? … 현재 보고 있는 탭 아이콘 하나.. 그리고 부분적으로 선택할 수 있는
 // 버튼 하나" — 그 전에는 이 창의 탭 목록을 펴서 골랐다. 고르는 동안에는 부분 단추가 "고르기 취소"가 되고 탭 단추는 잠긴다.
+// 단추 글자는 "전체 · 부분" 이다(같은 날 사용자 지정: "전체, 부분 이라고 써줘,, 전체는 글자가 안보이잖아" — 그 전에는 보고 있는 탭이 아이콘만이었다).
 // 한 번에 한 곳에서만 고른다(key — 공문 탭은 'gongmun', 출장 카드는 신청서 번호와 칸). 누름은 data-pick 으로 가린다(그 패널의 data-act 와 겹치지 않게).
 //
 // 찍은 장을 무엇으로 쓰는지는 곳마다 다르다 — 공문은 장들을 그대로 읽고 문서마다 첨부 PDF 로 묶는다. 출장 증빙은 페이지(고른 부분) 하나를
@@ -14,15 +15,15 @@
 import { captureFront, startPick, captureTabParts, MAX_SHOTS } from './src/pagecap.js';
 import { buildPdf } from './src/pdf.js';
 
-export const TAB_LABEL = '보고 있는 탭 통째로 캡처해 읽기';
-export const PART_LABEL = '부분 골라 캡처';
+export const TAB_LABEL = '전체';
+export const PART_LABEL = '부분';
 export const PART_STOP = '고르기 취소';
 /** 보고 있는 탭 — 브라우저 창(위에 탭 점 둘). */
 export const TAB_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01"/></svg>';
 /** 부분 고르기 — 고르는 칸의 네 귀와 그 안의 상자. */
 export const PART_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>';
-const TAB_TITLE = `${TAB_LABEL} — 이 창에서 보고 있는 웹페이지를 위에서 아래까지 캡처하고 화면의 글자와 함께 읽습니다. 처음 한 번 사이트 접근 권한을 묻습니다.`;
-const PART_TITLE = '보고 있는 웹페이지 위에서 캡처할 부분(틀·상자 같은 프레임)을 눌러 하나 이상 고르고, 페이지 위쪽 띠의 캡처를 누르면 고른 것만 캡처해 읽습니다. '
+const TAB_TITLE = `전체 캡처 — 이 창에서 보고 있는 웹페이지를 위에서 아래까지 캡처하고 화면의 글자와 함께 읽습니다. 처음 한 번 사이트 접근 권한을 묻습니다.`;
+const PART_TITLE = '부분 캡처 — 보고 있는 웹페이지 위에서 캡처할 부분(틀·상자 같은 프레임)을 눌러 하나 이상 고르고, 페이지 위쪽 띠의 캡처를 누르면 고른 것만 캡처해 읽습니다. '
   + '틀 안이 따로 내려가는 화면(eClass 본문 등)은 틀 안을 끝까지 찍습니다.';
 const PICK_HINT = '웹페이지에서 캡처할 부분(프레임)을 누르세요 — 여러 개 고를 수 있고, ↑ 는 더 큰 칸입니다. 다 고르면 페이지 위쪽 띠의 캡처를 누릅니다.';
 /** 출장 증빙으로 묶는 장의 JPEG 품질 — PNG 그대로면 그림이 많은 예약 화면 한 페이지가 10MB 를 넘는다. */
@@ -111,11 +112,11 @@ export function createWebPick({ front = captureFront, start = startPick, parts =
 }
 
 /**
- * 단추 둘 — 보고 있는 탭(아이콘)과 부분 골라 캡처. 그 곳에서 고르는 중(picking)이면 부분 단추가 "고르기 취소"가 되고(누르면 그만둔다)
+ * 단추 둘 — 전체(보고 있는 탭 통째로)와 부분(골라 캡처). 그 곳에서 고르는 중(picking)이면 부분 단추가 "고르기 취소"가 되고(누르면 그만둔다)
  * 탭 단추는 잠긴다. disabled 는 둘 다 잠그되, 고르는 중의 취소는 남긴다.
  */
 export const pickButton = ({ picking = false, disabled = false } = {}) => '<span class="wp-btns">'
-  + `<button type="button" class="ghost small wp-open wp-front" data-pick="tab" title="${TAB_TITLE}" aria-label="${TAB_LABEL}"${disabled || picking ? ' disabled' : ''}>${TAB_ICON}</button>`
+  + `<button type="button" class="ghost small wp-open wp-front" data-pick="tab" title="${TAB_TITLE}"${disabled || picking ? ' disabled' : ''}>${TAB_ICON}${TAB_LABEL}</button>`
   + `<button type="button" class="ghost small wp-open wp-part${picking ? ' on' : ''}" data-pick="part" aria-pressed="${picking}" `
   + `title="${picking ? '페이지 위의 고르기를 그만둡니다' : PART_TITLE}"${disabled && !picking ? ' disabled' : ''}>${PART_ICON}${picking ? PART_STOP : PART_LABEL}</button></span>`;
 

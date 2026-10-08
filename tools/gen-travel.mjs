@@ -59,6 +59,7 @@ export function checkRules(rules) {
   const over = rules.lodging?.over_cap;
   if (!(typeof over?.approve_rate === 'number' && over.approve_rate >= 1)) at('lodging.over_cap.approve_rate 는 1 이상의 수입니다(상한액의 몇 배까지 승인으로 정산하는가)');
   if (!(typeof over?.approver === 'string' && over.approver.trim())) at('lodging.over_cap.approver 가 없습니다(누구의 승인인가)');
+  if (!(typeof over?.reason === 'string' && over.reason.trim())) at('lodging.over_cap.reason 이 없습니다(상한액을 넘겨 정산할 때 비고에 적는 기본 사유)');
   return errors;
 }
 

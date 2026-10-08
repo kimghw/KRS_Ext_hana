@@ -4,7 +4,7 @@
 // 전자결재에는 올리지 않는다(2026-10-07) — 제목·본문을 만들어 복사하게 하고 새 공문 창을 열어 줄 뿐이다. 본문 편집기(DEXT5)는
 // 스크립트로 넣은 글을 저장하지 않아, 사람이 붙여 넣는 것이 지금은 가장 확실한 길이다(src/gongmun.js 머리말).
 //
-//   갈래(구매·교육·출장) → 문서 넣기(캡처 붙여넣기·끌어다 놓기·고르기·보고 있는 탭 통째로 캡처·웹페이지의 부분 골라 캡처) → 읽은 칸 고치기·과제 고르기 → 제목·본문 복사 → 새 공문 열기
+//   갈래(구매·교육·출장) → 과제 고르기(갈래 아래의 별칭 칩) → 문서 넣기(캡처 붙여넣기·끌어다 놓기·고르기·보고 있는 탭 통째로 캡처·웹페이지의 부분 골라 캡처) → 읽은 칸 고치기 → 제목·본문 복사 → 새 공문 열기
 //
 // 양식(eclass 양식·제목 틀·본문 틀)과 사전 설정(부서·부서장·참조자·과제 다섯 개)은 이 탭 아래의 접힌 칸에서 고친다.
 
@@ -13,8 +13,9 @@ import {
   KIND_KEY, PRESET_KEY, PROJECTS_KEY, TEMPLATES_KEY, DRAFT_KEY,
   templateOf, templateEdited, templatePatch, normalizePreset, normalizeProjects, fromRecord, blankDraft, summaryOf,
   overLimit, approvalLine, lineText, compose, needs, bodyHtml, draftUrl, attachName, won, moneyOf, mergeSetup, ROLE_LABEL,
-  mergeDraft, applyReason, REASON_KEYS, EMPTY_ROW, eduModeOf, spreadParts, attachWithCut,
+  mergeDraft, applyReason, REASON_KEYS, EMPTY_ROW, eduModeOf, spreadParts, attachWithCut, rndProjects, moreLead,
 } from './src/gongmun.js';
+import { BOOK_KEY, normalizeBook } from './src/rnd.js';
 import { gongmunSmart, gongmunSetupSmart, gongmunReasonSmart } from './src/llm.js';
 import { readSlots } from './src/pagecap.js';
 import { cutBoxes, cutDrop, cutName, cutQuote, CUT_PAD, PAD_STEP, MAX_PAD } from './src/quotecut.js';
@@ -25,9 +26,20 @@ const FILE_LIMIT = 10 * 1024 * 1024;
 const MAX_FILES = 5;
 const SAVE_WAIT_MS = 400;
 const VIA_LABEL = { cli: '로컬 CLI', api: 'API 키', local: '규칙 해석' };
+/** 견적서를 오리는 갈래 — 구매(쇼핑몰 화면)와 교육(온라인 강의 페이지의 수강료 칸 — 2026-10-08 사용자 지정). */
+const CUT_KINDS = new Set(['purchase', 'edu']);
 /** 채팅 칸에 남겨 두는 말 수(내 말·답 합쳐서). */
 const CHAT_KEEP = 6;
-const DOC_LABEL = { quote: '견적서', statement: '거래명세서', order: '주문 화면', course: '교육 안내문', other: '문서', unknown: '문서' };
+const DOC_LABEL = { quote: '견적서', statement: '거래명세서', order: '주문 화면', course: '교육 안내문', event: '행사 안내문', request: '요청 공문', other: '문서', unknown: '문서' };
+/** 접힌 읽은 칸이 비었을 때 needs(src/gongmun.js)가 부르는 이름(갈래마다) — 그것이 남았으면 읽은 문서 칸을 펴 둔다. */
+const NEED_OF = {
+  purchase: { gist: '품목', total: '합계' },
+  edu: { course: '교육명', from: '교육기간', fee: '교육비' },
+  trip: { place: '출장지', from: '출장기간', cost: '예상경비' },
+  outside: { org: '요청 기관', subject: '활동명', from: '활동기간', place: '활동장소' },
+};
+/** 과제를 갈래 아래의 별칭 칩(gmProjBar)에서 먼저 고르는 갈래(2026-10-08 사용자 지정). 외부활동은 읽은 내용 카드 안에서 고른다. */
+const PICK_FIRST = ['purchase', 'edu', 'trip'];
 
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -43,10 +55,12 @@ const formLabel = (id) => FORMS.find((f) => f.id === id)?.label || id;
  */
 export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '', copyText = defaultCopy, flash = () => {}, webcap = {} }) {
   const el = {
-    root: $('gongmun'), kinds: $('gmKinds'), chat: $('gmChat'), chatInput: $('gmChatInput'), chatGo: $('gmChatGo'), chatLog: $('gmChatLog'),
+    root: $('gongmun'), kinds: $('gmKinds'), projBar: $('gmProjBar'), pick: $('gmPick'), projLabel: $('gmProjLabel'), chat: $('gmChat'), chatInput: $('gmChatInput'), chatGo: $('gmChatGo'), chatLog: $('gmChatLog'),
     intake: $('gmIntake'), file: $('gmFile'), dropLead: $('gmDropLead'), capture: $('gmCapture'),
-    fileName: $('gmFileName'), manual: $('gmManual'), soon: $('gmSoon'), status: $('gmStatus'),
-    draft: $('gmDraft'), source: $('gmSource'), cut: $('gmCut'), items: $('gmItems'), limit: $('gmLimit'), projects: $('gmProjects'), projInfo: $('gmProjInfo'),
+    manual: $('gmManual'), status: $('gmStatus'),
+    draft: $('gmDraft'), more: $('gmMore'), moreState: $('gmMoreState'), moreFields: $('gmMoreFields'),
+    agent: $('gmAgent'), agentInput: $('gmAgentInput'), agentGo: $('gmAgentGo'), agentLog: $('gmAgentLog'),
+    source: $('gmSource'), cut: $('gmCut'), items: $('gmItems'), limit: $('gmLimit'), projects: $('gmProjects'), projInfo: $('gmProjInfo'),
     fields: $('gmFields'), line: $('gmLine'), need: $('gmNeed'), reset: $('gmReset'),
     doc: $('gmDoc'), formName: $('gmFormName'), title: $('gmTitle'), body: $('gmBody'), edited: $('gmEdited'), regen: $('gmRegen'),
     copyTitle: $('gmCopyTitle'), copyBody: $('gmCopyBody'), open: $('gmOpen'), savePdf: $('gmSavePdf'), steps: $('gmSteps'),
@@ -63,16 +77,21 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     preset: normalizePreset(null),
     // projects 는 저장된(이름이 있는) 과제, rows 는 사전 설정 칸에 펼쳐 둔 줄(아직 이름을 적지 않은 줄도 있다).
     projects: [], rows: [],
+    // 초안에서 고르는 과제는 R&D 탭의 과제다(rndBook — src/gongmun.js 의 rndProjects, 2026-10-08 사용자 지정). book 은 탭을 열 때마다 다시 읽는다.
+    // R&D 탭에 과제가 없으면 사전 설정의 과제를 고른다.
+    book: null, rnd: [],
     // 갈래마다 고친 양식만 담는다(src/gongmun.js 의 templatePatch).
     templates: {},
     // 갈래마다 쓰고 있는 것 — { draft, source, notes, project(과제명), title·body(직접 고쳤으면 그 글, 아니면 null), files(읽은 파일 — 저장하지 않는다),
-    //   parts(읽기가 가린 파일마다의 종류), cut(구매 — 가격과 그 둘레를 오린 견적서, src/quotecut.js — 저장하지 않는다) }
+    //   parts(읽기가 가린 파일마다의 종류), cut(구매·교육 — 가격과 그 둘레를 오린 견적서, src/quotecut.js — 저장하지 않는다) }
     work: {},
     lastProject: '',
   };
 
   const cur = () => st.work[st.kind] || null;
-  const projectOf = (w) => st.projects.find((p) => p.name === w?.project) || null;
+  /** 초안에서 고르는 과제 — R&D 탭의 과제, 없으면 사전 설정의 과제. */
+  const choices = () => (st.rnd.length ? st.rnd : st.projects);
+  const projectOf = (w) => choices().find((p) => p.name === w?.project) || null;
   const ctxOf = (w) => ({ me: me(), preset: st.preset, project: projectOf(w), today: today() });
   const tplOf = () => templateOf(st.kind, st.templates);
 
@@ -106,8 +125,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   function paintKinds() {
     el.kinds.innerHTML = `<div class="gm-kind-row">${KIND_ORDER.map((k) => {
       const on = k === st.kind;
-      const soon = KINDS[k].ready ? '' : '<small>준비 중</small>';
-      return `<button type="button" class="gm-kind${on ? ' active' : ''}" data-kind="${k}" aria-pressed="${on}" title="${escapeHtml(KINDS[k].title)}">${escapeHtml(KINDS[k].label)}${soon}</button>`;
+      return `<button type="button" class="gm-kind${on ? ' active' : ''}" data-kind="${k}" aria-pressed="${on}" title="${escapeHtml(KINDS[k].title)}">${escapeHtml(KINDS[k].label)}</button>`;
     }).join('')}</div>`;
   }
 
@@ -119,29 +137,28 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     paintKinds();
     paintIntake();
     renderFields();
-    paintDraft();
+    paintDraft({ fold: true });
     paintTpl();
   }
 
   /* ---------------------------------------------------------- 문서 넣기 */
 
+  /**
+   * 문서 넣는 곳 — 세 갈래가 같은 곳을 쓴다(2026-10-08 사용자 지정: "구매, 교육, 출장 모두 동일한 캡처/파일 넣기 기능"). 상자 안의 말은 머리말과
+   * 안내 한 줄("드래그 · 붙여넣기 · 캡처 가능")뿐이다 — 넣은 장 수·한도 안내 두 줄은 뺐다(같은 날 사용자 지정: "중간에 3줄이나 있는 건 모두 삭제").
+   * 이미 읽은 초안이 있으면 머리말이 더 넣는 말(KINDS.more — 꼭 드는 첨부가 빠졌으면 그것, moreLead)이 된다 — 넣으면 앞서 넣은 것과 함께 다시 읽고
+   * 같이 첨부한다. 한도(MAX_FILES)는 넘길 때 상태 줄이 말한다.
+   */
   function paintIntake() {
     const k = KINDS[st.kind];
-    el.soon.classList.toggle('hidden', k.ready);
-    el.intake.classList.toggle('hidden', !k.reads);
-    if (!k.reads) return;
     el.intake.classList.toggle('off', !st.ready);
     el.intake.setAttribute('aria-busy', String(st.busy || st.capturing));
-    // 이미 읽은 초안이 있으면 더 넣는 곳이 된다 — 넣으면 앞서 넣은 것과 함께 다시 읽고 같이 첨부한다.
     const w = cur();
-    const had = w?.files?.length || 0;
-    el.dropLead.textContent = st.capturing ? '캡처하는 중…' : st.busy ? '읽는 중…' : w ? k.more : k.ask;
+    el.dropLead.textContent = st.capturing ? '캡처하는 중…' : st.busy ? '읽는 중…' : w ? moreLead(st.kind, w.draft.attach) : k.ask;
     el.file.disabled = st.busy || st.capturing;
     el.capture.innerHTML = pickButton({ picking: pick.picking(PICK_KEY), disabled: st.busy || st.capturing });
     el.manual.disabled = st.busy;
     el.manual.hidden = !!w;
-    el.fileName.textContent = !st.ready ? 'Claude 가 연결되지 않아 문서를 읽을 수 없습니다 — 문서 없이 쓰기는 됩니다'
-      : had ? `넣은 문서 ${had}장 — 더 넣으면 함께 다시 읽고 같이 첨부합니다(${MAX_FILES}장까지). 새로 시작하려면 읽은 내용의 비우기.` : '';
   }
 
   function readFile(file) {
@@ -169,10 +186,11 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
 
   /** 읽을 곳을 정한다 — 쓰던 과제가 아직 있으면 그것, 아니면 마지막에 고른 과제, 과제가 하나뿐이면 그것. */
   function defaultProject(prev) {
-    const has = (name) => !!name && st.projects.some((p) => p.name === name);
+    const list = choices();
+    const has = (name) => !!name && list.some((p) => p.name === name);
     if (has(prev?.project)) return prev.project;
     if (has(st.lastProject)) return st.lastProject;
-    return st.projects.length === 1 ? st.projects[0].name : '';
+    return list.length === 1 ? list[0].name : '';
   }
 
   /** 읽기에 보내는 파일인가 — 웹페이지 캡처의 뒷장(자리가 모자라 첨부에만 넣는 장)은 보내지 않는다. */
@@ -210,7 +228,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   async function intake({ files = [], text = '', capture = null }) {
     const kind = st.kind;
     const k = KINDS[kind];
-    if (!k.reads || st.busy) return;
+    if (st.busy) return;
     const prev = st.work[kind] || null;
     const kept = prev?.files || [];
     const room = Math.max(MAX_FILES - kept.filter(readable).length, 0);
@@ -250,10 +268,11 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       const rec = { ...got.record, parts: spreadParts(got.record.parts, all) };
       if (rec.docType === 'unknown') throw new Error(`품의에 넣을 문서로 보이지 않습니다 — ${rec.summary}`);
       // 구매 — 쇼핑몰 화면이면 읽기가 짚은 가격과 그 둘레(quoteArea)를 오려 견적서 한 장으로 첨부한다(src/quotecut.js, 2026-10-08 사용자 지정).
+      // 교육도 온라인 강의 페이지면 수강료 칸을 오려 교육 견적서로 첨부하고, 강의 소개·커리큘럼 장은 교육 내용으로 남긴다(같은 날 사용자 지정).
       // 앞서 원래 장으로 되돌려 두었으면 더 넣어 다시 읽어도 그대로 둔다.
       const cutNotes = [];
-      const cut = kind === 'purchase'
-        ? await makeCut(all, cutBoxes(rec.quoteArea, all, rec.parts), { on: prev?.cut?.on ?? true, notes: cutNotes }) : null;
+      const cut = CUT_KINDS.has(kind)
+        ? await makeCut(all, cutBoxes(rec.quoteArea, all, rec.parts), { kind, parts: rec.parts, on: prev?.cut?.on ?? true, notes: cutNotes }) : null;
       const { draft: fresh, notes } = fromRecord(kind, rec, { me: me(), files: all.map((f) => f.name), cut });
       notes.push(...cutNotes);
       if (kind === 'purchase' && rec.docType === 'course') notes.push('교육 안내문으로 보입니다 — 교육 품의라면 교육 갈래에 다시 넣어 주세요');
@@ -278,7 +297,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       st.busy = false;
       if (kind === st.kind) {
         renderFields();
-        paintDraft();
+        paintDraft({ fold: done });
       }
       paintIntake();
     }
@@ -288,16 +307,16 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   }
 
   /**
-   * 견적서를 오린다(구매 — src/quotecut.js) — 칸(cutBoxes 가 고른 것)이 없으면 null. 못 오리면 notes 에 까닭을 적고 null 이다(넣은 장 그대로 첨부).
+   * 견적서를 오린다(구매·교육 — src/quotecut.js) — 칸(cutBoxes 가 고른 것)이 없으면 null. 못 오리면 notes 에 까닭을 적고 null 이다(넣은 장 그대로 첨부).
    * name 은 첨부 목록에 쓰는 오린 그림의 이름, drop 은 첨부에서 빠지는 장(오려 낸 화면과 같은 묶음), on 은 오린 것을 첨부하는가(원래 장으로면 false).
    * @returns {Promise<{name: string, file: object, boxes: object[], drop: string[], pad: number, on: boolean}|null>}
    */
-  async function makeCut(files, boxes, { pad = CUT_PAD, on = true, notes = [] } = {}) {
+  async function makeCut(files, boxes, { kind = 'purchase', parts = [], pad = CUT_PAD, on = true, notes = [] } = {}) {
     if (!boxes.length) return null;
     try {
       const blob = await cutQuote(files, boxes, { pad });
       const name = cutName(today(), files.map((f) => f.name));
-      return { name, file: { name, type: 'image/png', size: blob.size, dataUrl: await readFile(blob) }, boxes, drop: cutDrop(boxes, files), pad, on };
+      return { name, file: { name, type: 'image/png', size: blob.size, dataUrl: await readFile(blob) }, boxes, drop: cutDrop(boxes, files, parts, kind), pad, on };
     } catch (err) {
       notes.push(`견적서 부분을 오리지 못했습니다 — 넣은 장 그대로 첨부합니다(${err.message})`);
       return null;
@@ -318,8 +337,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
    * PDF 하나가 된다. 고르는 동안은 잠그지 않는다 — 찍기 시작할 때(onStart) 잠근다.
    */
   async function captureTab(act) {
-    const k = KINDS[st.kind];
-    if (!k.reads || st.busy || st.capturing) return;
+    if (st.busy || st.capturing) return;
     let got = null;
     try {
       got = await pick.shoot(act, {
@@ -346,42 +364,51 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   }
 
   /**
-   * 과제 내용(사전 설정의 과제마다 적어 둔 연구목표·연구내용)으로 사유(구매사유·교육사유)와 용도(교육목적)를 쓴다(2026-10-07 사용자 지정).
-   * auto 는 저절로 부른 것이다 — 과제를 골랐고 사유가 비어 있고 Claude 에 닿을 때만 쓴다. 단추로 부르면 있던 사유를 고쳐 쓴다.
+   * 과제의 연구 내용(R&D 탭의 연구개발 계획·진행 기록 — src/gongmun.js 의 rndProjects. 사전 설정의 과제면 거기 적은 과제 내용)으로
+   * 사유(구매사유·교육사유)와 용도(교육목적)를 쓴다(2026-10-07 사용자 지정, 2026-10-08 R&D 탭의 과제로). auto 는 저절로 부른 것이다 — 과제를
+   * 골랐고 사유가 비어 있고 Claude 에 닿을 때만 쓴다. 단추로 부르면 있던 사유를 고쳐 쓴다. ask 는 에이전트 칸에 적은 말이다 — 그 말대로 고쳐 쓰고
+   * 답 한 줄(reply)을 돌려준다.
+   * @returns {Promise<{reply: string, error?: string}|null>} 쓰지 않았으면(바쁨·초안 없음·auto 의 조건·그 사이 초안이 바뀜) null
    */
-  async function writeReason(kind = st.kind, { auto = false } = {}) {
+  async function writeReason(kind = st.kind, { auto = false, ask = '' } = {}) {
     const w = st.work[kind];
-    if (!w || !REASON_KEYS[kind] || st.reasonBusy) return;
+    if (!w || !REASON_KEYS[kind] || st.reasonBusy) return null;
     const project = projectOf(w);
-    if (auto && (!project || String(w.draft[REASON_KEYS[kind].reason] || '').trim() || !st.ready)) return;
+    if (auto && (!project || String(w.draft[REASON_KEYS[kind].reason] || '').trim() || !st.ready)) return null;
     const { apiKey, cli } = ai();
+    const basis = project?.rnd ? '연구 내용' : '과제 내용';
     st.reasonBusy = true;
     paintReasonBtn();
-    setStatus(`${project ? `「${project.name}」 과제 내용으로 ` : ''}사유를 쓰는 중입니다…`);
+    paintAgent();
+    setStatus(ask ? '에이전트가 용도·사유를 고쳐 쓰는 중입니다…' : `${project ? `「${project.name}」 ${basis}으로 ` : ''}사유를 쓰는 중입니다…`);
     try {
-      const got = await gongmunReasonSmart(kind, w.draft, project, { apiKey, useNative: cli });
-      if (st.work[kind] !== w) return;
-      w.draft = applyReason(kind, w.draft, got.data, { touched: w.touched || [] });
+      const got = await gongmunReasonSmart(kind, w.draft, project, { apiKey, useNative: cli }, { ask });
+      if (st.work[kind] !== w) return null;
+      w.draft = applyReason(kind, w.draft, got.data, { touched: w.touched || [], asked: !!ask });
       saveWork();
       if (st.kind === kind) {
         for (const key of Object.values(REASON_KEYS[kind])) syncField(key);
         paintLive();
       }
-      const hint = project?.content ? '' : ' 사전 설정에서 과제 내용을 넣어 두면 과제에 더 맞게 씁니다.';
-      setStatus(`사유를 썼습니다(${VIA_LABEL[got.via] || got.via}) — 칸에서 고칠 수 있습니다.${hint}`);
-      logEvent('gongmun', true, `${KINDS[kind].title} 사유 작성 · ${project?.name || '과제 없음'} · ${VIA_LABEL[got.via] || got.via}`);
+      const hint = project?.content ? ''
+        : project?.rnd ? ' R&D 탭에 연구개발 계획(계획서 YAML)이나 진행 기록을 넣어 두면 과제에 더 맞게 씁니다.' : ' 사전 설정에서 과제 내용을 넣어 두면 과제에 더 맞게 씁니다.';
+      setStatus(`${ask ? '고쳐 썼습니다' : '사유를 썼습니다'}(${VIA_LABEL[got.via] || got.via}) — 칸에서 고칠 수 있습니다.${hint}`);
+      logEvent('gongmun', true, `${KINDS[kind].title} 사유 ${ask ? '고쳐 쓰기' : '작성'} · ${project?.name || '과제 없음'} · ${VIA_LABEL[got.via] || got.via}`);
+      return { reply: String(got.data.reply || '').trim() };
     } catch (err) {
       if (!auto || st.ready) setStatus(err.message, 'error');
       logEvent('gongmun', false, `${KINDS[kind].title} 사유 작성 실패 · ${err.message}`);
+      return { reply: '', error: err.message };
     } finally {
       st.reasonBusy = false;
       paintReasonBtn();
+      paintAgent();
     }
   }
 
-  /** 칸 하나를 초안 값으로 — 쓰고 있는 칸은 건드리지 않는다. */
+  /** 칸 하나를 초안 값으로 — 쓰고 있는 칸은 건드리지 않는다. 펼친 칸이든 접힌 칸이든. */
   function syncField(key) {
-    const node = el.fields.querySelector(`[data-key="${key}"]`);
+    const node = el.draft.querySelector(`[data-key="${key}"]`);
     const w = cur();
     if (node && w && document.activeElement !== node) node.value = w.draft[key] ?? '';
   }
@@ -389,24 +416,71 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   function paintReasonBtn() {
     const btn = el.fields.querySelector('[data-act="reason"]');
     if (!btn) return;
-    btn.disabled = st.reasonBusy || !projectOf(cur());
-    btn.textContent = st.reasonBusy ? '쓰는 중…' : '과제 내용으로 쓰기';
-    btn.title = projectOf(cur()) ? '고른 과제의 내용(사전 설정)을 근거로 사유를 다시 씁니다' : '과제를 먼저 고르세요';
+    const p = projectOf(cur());
+    btn.disabled = st.reasonBusy || !p;
+    btn.textContent = st.reasonBusy ? '쓰는 중…' : p?.rnd ? '연구 내용으로 쓰기' : '과제 내용으로 쓰기';
+    btn.title = !p ? '과제를 먼저 고르세요'
+      : p.rnd ? '고른 과제의 연구 내용(R&D 탭의 연구개발 계획·진행 기록)을 근거로 사유를 다시 씁니다' : '고른 과제의 내용(사전 설정)을 근거로 사유를 다시 씁니다';
   }
 
-  /** 문서 없이 쓴다 — Claude 가 없거나 문서가 없을 때. */
+  /* ---------------------------------------------------------- 에이전트 칸 */
+
+  /** 에이전트 칸 — 초안마다의 주고받은 말(w.agent)과 보내기 단추. */
+  function paintAgent() {
+    const w = cur();
+    el.agent.classList.toggle('hidden', !w || !REASON_KEYS[st.kind]);
+    el.agentGo.disabled = st.reasonBusy;
+    el.agentLog.innerHTML = (w?.agent || []).map((m) => `<li class="gm-say ${m.who}${m.error ? ' error' : ''}">${escapeHtml(m.text)}</li>`).join('');
+  }
+
+  function growAgent() {
+    el.agentInput.style.height = 'auto';
+    el.agentInput.style.height = `${Math.min(el.agentInput.scrollHeight + 2, 160)}px`;
+  }
+
+  /**
+   * 에이전트 칸에 적은 말대로 고른 과제의 연구 내용(R&D 탭)을 보고 용도·사유를 고쳐 쓴다(2026-10-08 사용자 지정: "에이전트 기능을 이용해서
+   * 대상 rnd 의 연구 내용을 보고 자동으로 입력 … 채팅 기능을 사용할 수 있게"). 쓰는 길은 writeReason(gongmunReasonSmart — 로컬 CLI·API 키)과 같고,
+   * 답 한 줄을 칸 아래에 남긴다(초안마다 CHAT_KEEP 개).
+   */
+  async function runAgent() {
+    const kind = st.kind;
+    const w = cur();
+    const text = el.agentInput.value.trim();
+    if (!text || !w || !REASON_KEYS[kind] || st.reasonBusy) return;
+    const answer = { who: 'ai', text: '고쳐 쓰는 중...' };
+    w.agent = [...(w.agent || []), { who: 'me', text: text.length > 160 ? `${text.slice(0, 160)}…` : text }, answer];
+    el.agentInput.value = '';
+    growAgent();
+    paintAgent();
+    const got = await writeReason(kind, { ask: text });
+    if (!got) answer.text = '그 사이 초안이 바뀌어 넣지 않았습니다.';
+    else if (got.error) Object.assign(answer, { text: got.error, error: true });
+    else answer.text = got.reply || '용도·사유를 고쳐 썼습니다.';
+    w.agent = w.agent.slice(-CHAT_KEEP);
+    saveWork();
+    if (st.kind === kind) paintAgent();
+  }
+
+  function onAgentKey(e) {
+    // 한글은 조합 중에 Enter 가 한 번 더 온다 — 조합이 끝난 Enter 만 받는다. Shift+Enter 는 줄바꿈이다.
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    runAgent();
+  }
+
+  /** 문서 없이 쓴다 — Claude 가 없거나 문서가 없을 때. 읽은 칸(품목·합계…)이 비어 있으니 읽은 문서 칸이 펴진다. */
   function startManual() {
-    const k = KINDS[st.kind];
-    if (!k.ready || cur()) return;
+    if (cur()) return;
     st.work[st.kind] = {
       draft: blankDraft(st.kind, { me: me() }), notes: [], touched: [], project: defaultProject(null), title: null, body: null, files: [],
       text: '', source: { label: '직접 입력', from: '', via: '', summary: '' },
     };
     saveWork();
     renderFields();
-    paintDraft();
+    paintDraft({ fold: true });
     paintIntake();
-    el.fields.querySelector('input, textarea')?.focus();
+    (el.more.open ? el.moreFields : el.fields).querySelector('input, textarea')?.focus();
   }
 
   function resetWork() {
@@ -428,7 +502,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     if (!hasFiles(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    const can = KINDS[st.kind].reads && !st.busy;
+    const can = !st.busy;
     e.dataTransfer.dropEffect = can ? 'copy' : 'none';
     if (e.type === 'dragleave') {
       if (!el.root.contains(e.relatedTarget)) el.intake.classList.remove('over');
@@ -450,7 +524,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
    * 문서로 읽는다(쇼핑몰 화면의 글을 복사해 온 것) — 칸 안의 붙여넣기는 그대로 간다.
    */
   function onPaste(e) {
-    if (el.root.classList.contains('hidden') || !KINDS[st.kind].reads) return;
+    if (el.root.classList.contains('hidden')) return;
     const files = [...(e.clipboardData?.files || [])];
     if (files.length) {
       e.preventDefault();
@@ -466,53 +540,78 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
 
   /* ---------------------------------------------------------- 초안 */
 
-  function paintDraft() {
+  /**
+   * 초안 카드. 읽은 문서(읽은 줄·오린 견적서·품목·읽은 칸)는 "읽은 문서" 한 줄로 접어 두고, 과제(R&D 탭)·용도·사유·에이전트·결재선만 펼쳐 둔다
+   * (2026-10-08 사용자 지정). fold 는 새 초안을 그릴 때다 — 읽은 칸에 채울 것이 남았거나(문서 없이 쓰기·합계를 못 읽음) 한도에 걸렸으면 펴고,
+   * 아니면 접는다. 오린 견적서의 단추처럼 접힌 칸 안에서 다시 그릴 때는 그대로 둔다.
+   */
+  function paintDraft({ fold = false } = {}) {
     const w = cur();
-    const show = !!w && KINDS[st.kind].ready;
+    const show = !!w;
     el.draft.classList.toggle('hidden', !show);
     if (!show) {
       el.doc.classList.add('hidden');
       paintCut();
+      paintAgent();
+      paintProjects();
       return;
     }
-    const src = w.source || {};
-    const head = [src.label, src.from && src.from !== src.label ? src.from : '', VIA_LABEL[src.via] ? `${VIA_LABEL[src.via]}로 읽음` : '']
-      .filter(Boolean).map(escapeHtml).join(' · ');
-    // 첨부가 될 문서 — 문서 종류마다 한 줄(교육이면 교육 견적서·교육 내용).
-    const attach = (w.draft.attach || []).filter((a) => a.files?.length)
-      .map((a) => `${a.label}${a.files.length > 1 ? ` ${a.files.length}장` : ''}`).join(' · ');
-    el.source.innerHTML = `<span>${head}</span>${attach ? `<span class="gm-attach">첨부 · ${escapeHtml(attach)}</span>` : ''}`
-      + (w.notes || []).map((n) => `<span class="gm-note">${escapeHtml(n)}</span>`).join('');
-    paintCut();
+    paintSource();
     const items = st.kind === 'purchase' ? w.draft.items || [] : [];
     el.items.innerHTML = items.map((it) => {
       const meta = [it.spec, it.qty != null ? `${it.qty.toLocaleString('ko-KR')}${it.unit || ''}` : '', won(it.amount)].filter(Boolean).join(' · ');
       return `<li><span class="gm-item-name">${escapeHtml(it.name)}</span>${meta ? `<span class="gm-item-meta">${escapeHtml(meta)}</span>` : ''}</li>`;
     }).join('');
+    if (fold) el.more.open = foldedNeeds(w);
     paintProjects();
+    paintAgent();
     paintLive();
   }
 
+  /** 읽은 문서의 줄 — 무엇을 읽었는지·첨부가 될 문서·알림, 접힌 머리의 한 줄, 오린 견적서. 첨부가 바뀌면(오린 견적서의 단추) 이것만 다시 그린다. */
+  function paintSource() {
+    const w = cur();
+    if (!w) return;
+    const src = w.source || {};
+    const head = [src.label, src.from && src.from !== src.label ? src.from : '', VIA_LABEL[src.via] ? `${VIA_LABEL[src.via]}로 읽음` : '']
+      .filter(Boolean).map(escapeHtml).join(' · ');
+    // 첨부가 될 문서 — 문서 종류마다 한 줄(교육이면 교육 견적서·교육 내용, 오린 견적서면 견적서·강의 내용).
+    const attach = (w.draft.attach || []).filter((a) => a.files?.length)
+      .map((a) => `${a.label}${a.files.length > 1 ? ` ${a.files.length}장` : ''}`).join(' · ');
+    el.source.innerHTML = `<span>${head}</span>${attach ? `<span class="gm-attach">첨부 · ${escapeHtml(attach)}</span>` : ''}`
+      + (w.notes || []).map((n) => `<span class="gm-note">${escapeHtml(n)}</span>`).join('');
+    el.moreState.textContent = [src.label, attach ? `첨부 ${attach}` : ''].filter(Boolean).join(' · ');
+    paintCut();
+  }
+
+  /** 읽은 칸(접힌 칸)에 채울 것이 남았는가 — 한도에 걸렸거나 품목·합계(교육이면 교육명·교육기간·교육비)가 비었다. */
+  function foldedNeeds(w) {
+    const lim = overLimit(st.kind, w.draft);
+    const folded = new Set((FIELDS[st.kind] || []).filter((f) => !f.open).map((f) => NEED_OF[st.kind]?.[f.key]).filter(Boolean));
+    return lim.over || lim.unknown || needs(st.kind, w.draft, { preset: st.preset, project: projectOf(w), projects: choices() }).some((n) => folded.has(n));
+  }
+
   /**
-   * 오린 견적서(구매) — 오린 그림과 어디서 오렸는지. 가격·상품명이 잘렸으면 더 넓게(둘레를 더 넣어 다시 오린다), 마땅치 않으면 원래 장으로
+   * 오린 견적서(구매·교육) — 오린 그림과 어디서 오렸는지. 가격·상품명이 잘렸으면 더 넓게(둘레를 더 넣어 다시 오린다), 마땅치 않으면 원래 장으로
    * (넣은 장 그대로 첨부 — 그러면 가격 부분만으로 돌아가는 단추가 선다).
    */
   function paintCut() {
-    const c = st.kind === 'purchase' ? cur()?.cut : null;
+    const c = CUT_KINDS.has(st.kind) ? cur()?.cut : null;
     el.cut.classList.toggle('hidden', !c);
     if (!c) {
       el.cut.innerHTML = '';
       return;
     }
     const from = [...new Set(c.boxes.map((b) => b.file))].join(', ');
+    const doc = escapeHtml(KINDS[st.kind].doc);
     el.cut.innerHTML = c.on
-      ? `<div class="gm-cut-head"><strong>견적서</strong><span>가격과 그 둘레를 오렸습니다 — ${escapeHtml(from)}</span></div>`
+      ? `<div class="gm-cut-head"><strong>${doc}</strong><span>가격과 그 둘레를 오렸습니다 — ${escapeHtml(from)}</span></div>`
         + `<img src="${escapeHtml(c.file.dataUrl)}" alt="오린 견적서 — 가격과 그 둘레" />`
         + '<div class="gm-cut-acts">'
         + `<button type="button" class="ghost small" data-cut="wide" title="가격이나 상품명이 잘렸으면 둘레를 더 넣어 다시 오립니다"${c.pad >= MAX_PAD ? ' disabled' : ''}>더 넓게</button>`
         + '<button type="button" class="ghost small" data-cut="off" title="오리지 않고 넣은 장 그대로 첨부합니다">원래 장으로</button></div>'
-      : '<div class="gm-cut-head"><strong>견적서</strong><span>넣은 장 그대로 첨부합니다</span></div>'
-        + '<div class="gm-cut-acts"><button type="button" class="ghost small" data-cut="on" title="가격과 그 둘레만 오린 그림을 견적서로 첨부합니다">가격 부분만 첨부</button></div>';
+      : `<div class="gm-cut-head"><strong>${doc}</strong><span>넣은 장 그대로 첨부합니다</span></div>`
+        + `<div class="gm-cut-acts"><button type="button" class="ghost small" data-cut="on" title="가격과 그 둘레만 오린 그림을 ${doc}로 첨부합니다">가격 부분만 첨부</button></div>`;
   }
 
   /** 오린 견적서의 단추 — 더 넓게·원래 장으로·가격 부분만 첨부. 첨부 목록(본문 ※ 첨부·PDF)이 따라 바뀐다. */
@@ -524,7 +623,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     if (btn.dataset.cut === 'wide') {
       btn.disabled = true;
       const notes = [];
-      const next = await makeCut(w.files || [], w.cut.boxes, { pad: Math.min(w.cut.pad + PAD_STEP, MAX_PAD), notes });
+      const next = await makeCut(w.files || [], w.cut.boxes, { kind, parts: w.parts, pad: Math.min(w.cut.pad + PAD_STEP, MAX_PAD), notes });
       if (st.work[kind] !== w) return;   // 그 사이 비웠거나 다시 읽었다
       if (!next) {
         btn.disabled = false;
@@ -537,17 +636,57 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     }
     w.draft.attach = attachWithCut(kind, w.parts, (w.files || []).map((f) => f.name), w.cut);
     saveWork();
-    if (st.kind === kind) paintDraft();
+    if (st.kind === kind) {
+      paintSource();
+      paintLive();
+      paintIntake();   // 교육 견적서가 빠지면 넣는 곳의 말이 그것을 넣으라고 한다(moreLead)
+    }
   }
 
+  const NO_PROJECT = '<p class="gm-noproj">과제가 없습니다. <button type="button" class="ghost small" data-act="rnd">R&amp;D 탭에서 과제 더하기</button></p>';
+
+  /**
+   * 과제 칩 — R&D 탭의 과제(없으면 사전 설정의 과제). 구매·교육·출장은 갈래 아래의 과제 줄(PICK_FIRST — 별칭 칩)에서, 외부활동은 읽은 내용 카드
+   * 안의 목록(과제명과 별칭·책임자)에서 고른다. 초안이 없을 때도 그린다 — 과제 줄은 문서를 넣기 전에 고른다.
+   */
   function paintProjects() {
-    const w = cur();
+    const first = PICK_FIRST.includes(st.kind);
+    el.projBar.classList.toggle('hidden', !first);
+    el.projLabel.classList.toggle('hidden', first);
+    el.projects.classList.toggle('hidden', first);
     paintProjInfo();
-    if (!st.projects.length) {
-      el.projects.innerHTML = '<p class="gm-noproj">등록한 과제가 없습니다. <button type="button" class="ghost small" data-act="preset">과제 등록하기</button></p>';
+    if (first) paintPick();
+    else paintProjList();
+  }
+
+  /**
+   * 갈래 아래의 과제 줄 — 칩은 R&D 탭처럼 별칭(없으면 과제명)이고 과제명·과제번호·책임자는 툴팁이다. 초안이 있으면 그 초안의 과제, 없으면 넣을 문서가
+   * 시작할 과제(defaultProject — 마지막에 고른 과제, 과제가 하나뿐이면 그것)가 켜진다. 아무것도 켜지지 않았으면 머리말이 고르라고 한다.
+   */
+  function paintPick() {
+    const w = cur();
+    const list = choices();
+    const picked = w ? w.project : defaultProject(null);
+    const on = list.some((p) => p.name === picked);
+    el.projBar.classList.toggle('need', !!list.length && !on);
+    el.projBar.querySelector('.gm-projbar-label').textContent = list.length && !on ? '과제를 고르세요' : '과제';
+    el.pick.innerHTML = list.length ? list.map((p, i) => {
+      const active = p.name === picked;
+      const tip = [p.name, p.code, p.lead ? `책임자 ${p.lead}` : ''].filter(Boolean).join(' · ');
+      return `<button type="button" class="gm-pick${active ? ' active' : ''}" role="radio" aria-checked="${active}" data-proj="${i}" title="${escapeHtml(tip)}">`
+        + `${escapeHtml(p.alias || p.name)}</button>`;
+    }).join('') : NO_PROJECT;
+  }
+
+  /** 읽은 내용 카드 안의 과제 목록(외부활동) — 과제명과 별명·책임자. */
+  function paintProjList() {
+    const w = cur();
+    const list = choices();
+    if (!list.length) {
+      el.projects.innerHTML = NO_PROJECT;
       return;
     }
-    el.projects.innerHTML = st.projects.map((p, i) => {
+    el.projects.innerHTML = list.map((p, i) => {
       const on = w?.project === p.name;
       const tip = [p.name, p.alias ? `별명 ${p.alias}` : '', p.code, p.lead ? `책임자 ${p.lead}` : ''].filter(Boolean).join(' · ');
       const meta = [p.alias ? `별명 ${p.alias}` : '', p.lead ? `책임 ${p.lead}` : ''].filter(Boolean).join(' · ');
@@ -557,8 +696,9 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   }
 
   /**
-   * 고른 과제의 기본 내용 — 별명(제목)·과제번호·연구기간(과제 개요)·과제 내용(사유의 근거)이 들어 있는지 한 줄로 보인다(2026-10-07 사용자 지정
-   * "과제 기본 내용을 넣을 수 있는 칸"). 빈 것은 흐리게 적고, 고치기는 사전 설정의 그 과제 줄로 간다.
+   * 고른 과제의 기본 내용 — 별명(제목)·과제번호·연구기간(과제 개요)·책임자(합의자)·내용(사유의 근거)이 들어 있는지 한 줄로 보인다(2026-10-07 사용자 지정
+   * "과제 기본 내용을 넣을 수 있는 칸"). 빈 것은 흐리게 적는다. R&D 탭의 과제면 내용은 연구 내용(연구개발 계획 n차년도·진행 기록 n건)이고
+   * 단추는 R&D 탭으로 간다. 사전 설정의 과제면 고치기는 사전 설정의 그 과제 줄로 간다.
    */
   function paintProjInfo() {
     const p = projectOf(cur());
@@ -568,56 +708,76 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       return;
     }
     const bit = (label, value, empty) => (value ? `<span>${label} <b>${escapeHtml(value)}</b></span>` : `<span class="gm-miss">${empty}</span>`);
+    const research = p.rnd
+      ? bit('연구 내용', [p.rnd.plan ? `연구개발 계획 ${p.rnd.plan}차년도` : '', p.rnd.logs ? `진행 기록 ${p.rnd.logs}건` : ''].filter(Boolean).join(' · ') || (p.content ? `${p.content.length.toLocaleString('ko-KR')}자` : ''),
+        '연구 내용 없음 — R&D 탭에 계획서 YAML·진행 기록을 넣으면 사유가 과제에 맞게 써집니다')
+      : bit('내용', p.content ? `${p.content.length.toLocaleString('ko-KR')}자` : '', '과제 내용 없음 — 사유가 일반적으로 써집니다');
     el.projInfo.innerHTML = '<strong>과제 기본 내용</strong>'
-      + [
-        bit('별명', p.alias, '별명 없음 — 제목에 과제명이 들어갑니다'), bit('번호', p.code, '번호 없음'), bit('기간', p.period, '연구기간 없음'),
-        bit('내용', p.content ? `${p.content.length.toLocaleString('ko-KR')}자` : '', '과제 내용 없음 — 사유가 일반적으로 써집니다'),
-      ].join('')
-      + `<button type="button" class="ghost small" data-act="preset" data-name="${escapeHtml(p.name)}">고치기</button>`;
+      + [bit('별명', p.alias, '별명 없음 — 제목에 과제명이 들어갑니다'), bit('번호', p.code, '번호 없음'), bit('기간', p.period, '연구기간 없음'),
+        bit('책임자', p.lead, '책임자 없음 — 합의자가 빕니다'), research].join('')
+      + (p.rnd ? '<button type="button" class="ghost small" data-act="rnd">R&amp;D 탭</button>'
+        : `<button type="button" class="ghost small" data-act="preset" data-name="${escapeHtml(p.name)}">고치기</button>`);
   }
 
   function onProjectClick(e) {
-    const btn = e.target instanceof Element ? e.target.closest('[data-proj], [data-act="preset"]') : null;
+    const btn = e.target instanceof Element ? e.target.closest('[data-proj], [data-act="preset"], [data-act="rnd"]') : null;
     if (!btn) return;
     if (btn.dataset.act === 'preset') {
       openPreset(btn.dataset.name || '');
       return;
     }
+    // R&D 탭으로 — 과제를 더하거나 연구 내용(계획서 YAML·진행 기록)을 넣는다. 돌아오면 다시 읽는다(show).
+    if (btn.dataset.act === 'rnd') {
+      $('tabRnd')?.click();
+      return;
+    }
     const w = cur();
-    const p = st.projects[+btn.dataset.proj];
-    if (!w || !p) return;
-    w.project = w.project === p.name ? '' : p.name;
+    const p = choices()[+btn.dataset.proj];
+    if (!p) return;
+    const first = PICK_FIRST.includes(st.kind);
+    // 문서를 넣기 전에 과제 줄에서 고른다 — 다음에 넣는 문서(문서 없이 쓰기도)가 이 과제로 시작한다(defaultProject).
+    if (!w) {
+      if (!first) return;
+      st.lastProject = p.name;
+      saveWork();
+      paintProjects();
+      return;
+    }
+    // 과제 줄은 하나를 고르는 곳이라 켜진 칩을 다시 눌러도 그대로다. 카드 안의 목록(외부활동)은 다시 누르면 고른 것을 푼다.
+    const next = first || w.project !== p.name ? p.name : '';
+    if (next === w.project) return;
+    w.project = next;
     if (w.project) st.lastProject = w.project;
     saveWork();
     paintProjects();
     paintLive();
     paintReasonBtn();
-    // 사유가 비어 있으면 고른 과제의 내용으로 쓴다.
+    // 사유가 비어 있으면 고른 과제의 연구 내용으로 쓴다.
     if (w.project) writeReason(st.kind, { auto: true });
   }
 
+  /** 칸 하나. 사유 칸에는 연구 내용(과제 내용)으로 쓰는 단추를 붙인다(2026-10-07 사용자 지정). */
+  function fieldHtml(f, w) {
+    const id = `gmF_${f.key}`;
+    const raw = w.draft[f.key];
+    const value = f.type === 'money' ? (moneyOf(raw) != null ? moneyOf(raw).toLocaleString('ko-KR') : '') : (raw ?? '');
+    const ph = f.placeholder || '';
+    const input = f.type === 'choice'
+      ? `<select id="${id}" data-key="${f.key}">${f.options.map((o) => `<option${o === value ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}</select>`
+      : f.area
+        ? `<textarea id="${id}" data-key="${f.key}" rows="2" placeholder="${escapeHtml(ph)}">${escapeHtml(value)}</textarea>`
+        : `<input id="${id}" data-key="${f.key}" type="${f.type === 'date' ? 'date' : 'text'}"${f.type === 'money' ? ' inputmode="numeric"' : ''}`
+          + ` value="${escapeHtml(value)}" placeholder="${escapeHtml(ph)}" autocomplete="off" />`;
+    const act = REASON_KEYS[st.kind]?.reason === f.key ? '<button type="button" class="ghost small gm-reason" data-act="reason">과제 내용으로 쓰기</button>' : '';
+    return `<div class="gm-field${f.wide ? ' wide' : ''}" data-field="${f.key}"><div class="gm-field-head"><label for="${id}">${escapeHtml(f.label)}</label>${act}</div>${input}</div>`;
+  }
+
+  /** 초안의 칸 — 펼쳐 두는 칸(open: 용도·사유)은 위에, 나머지 읽은 칸은 접힌 읽은 문서 안에 그린다. */
   function renderFields() {
     const w = cur();
     const list = FIELDS[st.kind] || [];
-    if (!w || !list.length) {
-      el.fields.innerHTML = '';
-      return;
-    }
-    el.fields.innerHTML = list.map((f) => {
-      const id = `gmF_${f.key}`;
-      const raw = w.draft[f.key];
-      const value = f.type === 'money' ? (moneyOf(raw) != null ? moneyOf(raw).toLocaleString('ko-KR') : '') : (raw ?? '');
-      const ph = f.placeholder || '';
-      const input = f.type === 'choice'
-        ? `<select id="${id}" data-key="${f.key}">${f.options.map((o) => `<option${o === value ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}</select>`
-        : f.area
-          ? `<textarea id="${id}" data-key="${f.key}" rows="2" placeholder="${escapeHtml(ph)}">${escapeHtml(value)}</textarea>`
-          : `<input id="${id}" data-key="${f.key}" type="${f.type === 'date' ? 'date' : 'text'}"${f.type === 'money' ? ' inputmode="numeric"' : ''}`
-            + ` value="${escapeHtml(value)}" placeholder="${escapeHtml(ph)}" autocomplete="off" />`;
-      // 사유 칸에는 과제 내용으로 쓰는 단추를 붙인다(2026-10-07 사용자 지정).
-      const act = REASON_KEYS[st.kind]?.reason === f.key ? '<button type="button" class="ghost small gm-reason" data-act="reason">과제 내용으로 쓰기</button>' : '';
-      return `<div class="gm-field${f.wide ? ' wide' : ''}" data-field="${f.key}"><div class="gm-field-head"><label for="${id}">${escapeHtml(f.label)}</label>${act}</div>${input}</div>`;
-    }).join('');
+    el.fields.innerHTML = w ? list.filter((f) => f.open).map((f) => fieldHtml(f, w)).join('') : '';
+    el.moreFields.innerHTML = w ? list.filter((f) => !f.open).map((f) => fieldHtml(f, w)).join('') : '';
     paintReasonBtn();
   }
 
@@ -629,7 +789,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     if (f.key === 'gist' && w.draft.summary === summaryOf(w.draft.gist)) {
       // 요약을 손대지 않았으면 품목 요지를 따라간다.
       w.draft.summary = summaryOf(node.value);
-      const s = el.fields.querySelector('[data-key="summary"]');
+      const s = el.draft.querySelector('[data-key="summary"]');
       if (s) s.value = w.draft.summary;
     }
     w.draft[f.key] = f.type === 'money' ? moneyOf(node.value) : node.value;
@@ -659,24 +819,31 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     const blocked = lim.over || lim.unknown;
     el.limit.classList.toggle('hidden', !blocked);
     el.limit.classList.toggle('warn', !lim.over);
+    // 합계 칸은 접힌 읽은 문서 안에 있다 — 한도에 걸리면 펴 둔다.
+    if (blocked) el.more.open = true;
     if (lim.over) {
       el.limit.innerHTML = `합계 <strong>${won(lim.amount)}</strong> — 부서 ${escapeHtml(KINDS[st.kind].title)}는 <strong>${manwon(lim.limit)} 이하</strong>만 작성합니다. `
-        + '합계를 잘못 읽었으면 아래 합계 칸을 고쳐 주세요.';
+        + '합계를 잘못 읽었으면 읽은 문서의 합계 칸을 고쳐 주세요.';
     } else if (lim.unknown) {
-      el.limit.textContent = `합계(원)를 몰라 ${manwon(lim.limit)} 이하인지 가리지 못했습니다 — 아래 합계 칸에 부가세 포함 금액(원)을 적어 주세요.`;
+      el.limit.textContent = `합계(원)를 몰라 ${manwon(lim.limit)} 이하인지 가리지 못했습니다 — 읽은 문서의 합계 칸에 부가세 포함 금액(원)을 적어 주세요.`;
     }
-    const account = el.fields.querySelector('[data-key="account"]');
+    const account = el.draft.querySelector('[data-key="account"]');
     if (account) account.placeholder = projectOf(w)?.account || KINDS[st.kind].account;
-    const line = approvalLine(ctxOf(w));
-    el.line.innerHTML = lineHtml(line);
-    const left = needs(st.kind, w.draft, { preset: st.preset, project: projectOf(w), projects: st.projects });
+    const p = projectOf(w);
+    el.line.innerHTML = lineHtml(approvalLine(ctxOf(w)), { needLead: !!p && !String(p.lead || '').trim() });
+    const left = needs(st.kind, w.draft, { preset: st.preset, project: projectOf(w), projects: choices() });
     el.need.textContent = left.length ? `남은 것: ${left.join(' · ')}` : '';
     paintDoc(blocked);
   }
 
-  function lineHtml(line) {
+  /**
+   * 결재선 한 줄. 과제책임자가 기안자 본인이 아니면 합의자다(src/gongmun.js 의 approvalLine) — 과제를 골랐는데 책임자가 비면(needLead)
+   * 합의 자리를 빈 칸으로 붉게 세워 둔다(2026-10-08 사용자 지정: "과제 책임자가 본인이 아니면 과제 책임자 합의로 들어가야 함").
+   */
+  function lineHtml(line, { needLead = false } = {}) {
     const role = (r) => ROLE_LABEL[r] || r;
     const steps = line.steps.map((s) => `<span class="gm-step"><em>${role(s.role)}</em>${escapeHtml(s.name)}${s.why ? `<small>${s.why}</small>` : ''}</span>`);
+    if (needLead) steps.splice(1, 0, `<span class="gm-step miss"><em>${role('합의')}</em>과제책임자를 정하세요</span>`);
     if (!line.steps.some((s) => s.role === '결재')) steps.push(`<span class="gm-step miss"><em>${role('결재')}</em>부서장을 정하세요</span>`);
     return `<span class="gm-steps">${steps.join('<span class="gm-arrow" aria-hidden="true">→</span>')}</span>`
       + (line.refs.length ? `<span class="gm-refs"><em>${role('참조')}</em>${escapeHtml(line.refs.join(', '))}</span>` : '')
@@ -687,7 +854,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
 
   function paintDoc(blocked = false) {
     const w = cur();
-    const show = !!w && KINDS[st.kind].ready && !blocked;
+    const show = !!w && !blocked;
     el.doc.classList.toggle('hidden', !show);
     if (!show) return;
     const tpl = tplOf();
@@ -899,12 +1066,12 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
 
   function projectsChanged() {
     st.projects = normalizeProjects(st.rows);
+    // R&D 탭의 과제도 사전 설정에서 개요·계정(비면 책임자·별칭)을 받는다.
+    if (st.book) st.rnd = rndProjects(st.book, st.projects, today());
     savePreset();
     paintPresetState();
-    if (cur()) {
-      paintProjects();
-      paintLive();
-    }
+    paintProjects();
+    if (cur()) paintLive();
   }
 
   function onRowInput(e) {
@@ -1035,14 +1202,20 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
     el.chatGo.addEventListener('click', runChat);
     el.chatInput.addEventListener('keydown', onChatKey);
     el.chatInput.addEventListener('input', growChat);
+    el.agentGo.addEventListener('click', runAgent);
+    el.agentInput.addEventListener('keydown', onAgentKey);
+    el.agentInput.addEventListener('input', growAgent);
     el.capture.addEventListener('click', onCaptureClick);
     el.manual.addEventListener('click', startManual);
     el.reset.addEventListener('click', resetWork);
     el.cut.addEventListener('click', onCutClick);
+    el.pick.addEventListener('click', onProjectClick);
     el.projects.addEventListener('click', onProjectClick);
     el.projInfo.addEventListener('click', onProjectClick);
     el.fields.addEventListener('input', onFieldInput);
     el.fields.addEventListener('change', onFieldInput);
+    el.moreFields.addEventListener('input', onFieldInput);
+    el.moreFields.addEventListener('change', onFieldInput);
     el.fields.addEventListener('click', onFieldClick);
     el.title.addEventListener('input', onDocInput);
     el.body.addEventListener('input', onDocInput);
@@ -1087,13 +1260,21 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
       }
       st.loaded = true;
     }
+    await loadBook();
     paintKinds();
     paintChat();
     paintIntake();
     renderFields();
-    paintDraft();
+    paintDraft({ fold: true });
     paintTpl();
     paintPreset();
+  }
+
+  /** R&D 탭의 장부(rndBook)를 읽어 초안에서 고를 과제로 — 탭을 열 때마다(R&D 탭에서 과제·연구 내용을 고치고 돌아온다). */
+  async function loadBook() {
+    const saved = await chrome.storage.local.get([BOOK_KEY]);
+    st.book = normalizeBook(saved?.[BOOK_KEY]);
+    st.rnd = rndProjects(st.book, st.projects, today());
   }
 
   function hide() {
@@ -1109,6 +1290,7 @@ export function createGongmunPanel({ $, escapeHtml, logEvent, ai, me = () => '',
   function paintReady(ready) {
     st.ready = ready;
     el.chat.classList.toggle('off', !ready);
+    el.agent.classList.toggle('off', !ready);
     paintIntake();
   }
 

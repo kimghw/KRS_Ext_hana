@@ -20,7 +20,7 @@
 //
 // 이 파일은 DOM 을 만지지 않는다. 사이트와 말하는 길(site)·배경에 부탁하는 길(given·fileOf·done·log)·저장소는 주입받는다.
 
-import { afterPlan, afterSummary, lodgeAsk, lodgeSettle, lodgeSame, lodgeChoices, lodgeDecide, lodgeKnown, lodgeApproval } from './after.js';
+import { afterPlan, afterSummary, lodgeAsk, lodgeSettle, lodgeSame, lodgeChoices, lodgeDecide, lodgeKnown, lodgeApproval, lodgeReason } from './after.js';
 import { tripStage } from './travel.js';
 import { noteStages } from './settling.js';
 
@@ -201,7 +201,8 @@ async function remember(storage, { docNo, seq, plan, lodgeRows }) {
         const l = plan.lodge.find((x) => lodgeSame(x, h));
         mine[h.seq] = l?.sources.join(' · ') || '';
         const krw = l?.doc?.currency === 'KRW';
-        if (l?.actual != null) actual[h.seq] = { actual: l.actual, supply: krw ? l.doc.supply ?? null : null, vat: krw ? l.doc.vat ?? null : null };
+        // reason 은 비고에 적은 상한 초과 사유(실제 금액으로 올린 줄 — 기본 문구) — 패널의 `상한` 버튼이 잇고 걷을 때 쓴다(lodgebox.js).
+        if (l?.actual != null) actual[h.seq] = { actual: l.actual, supply: krw ? l.doc.supply ?? null : null, vat: krw ? l.doc.vat ?? null : null, reason: lodgeReason(l) || null };
       }
       next[MINE_KEY] = { ...saved?.[MINE_KEY], [seq]: mine };
       if (Object.keys(actual).length) next[ACTUAL_KEY] = { ...saved?.[ACTUAL_KEY], [seq]: actual };

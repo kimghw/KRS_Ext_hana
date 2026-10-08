@@ -6,7 +6,7 @@ import {
   KINDS, KIND_ORDER, KIND_MAIN, KIND_MORE, FORMS, CANCEL_FORMS, STATUS, blankForm, fieldsFor, missingFields, problems, readyToSend,
   contentOf, splitContent, describe, spanHours, buildJob, buildDocJob, buildCancelJob, listItem, listItems, formFromDoc,
   normalizePatch, applyPatch, parseAttendLocal, tripDates, relativeDates, fixRelativeDates, plansIn,
-  workStartOn, halfPlan, halfFlexForm, itemsIn, isPast, rangeCovering,
+  workStartOn, halfPlan, halfFlexForm, itemsIn, isPast, rangeCovering, isWelfare, nameOf, leaveBalance,
   SUBS, codeOf, withSub, halfOf, halfFromTimes, timeStep, timeOptions, spanDays, spanned, spanEnd, settle, nextSpan, SPAN_HOURS,
   FLEX_TIMES, FLEX_MODES, FLEX_DAYS, flexTimesFor, flexModeOf, fillFlexWeek,
   acceptsFile, kindOfItem, itemsOfKind, EVIDENCE_ACCEPT, statusLabel,
@@ -27,9 +27,14 @@ t('여섯 종류가 모두 늘 보이는 첫 줄이고, 접히는 줄은 비어 
 });
 t('종류 줄의 이름은 모두 두 글자다 — 유연·건강으로 줄인다', () =>
   assert.deepEqual(KIND_MAIN.map((k) => KINDS[k].short || KINDS[k].label), ['출장', '외근', '유연', '외출', '휴가', '건강']));
-t('갈래: 외근 안에 교육·소통, 휴가 안에 연차·체력단련. 첫 번째가 기본값이다', () => {
+t('갈래: 외근 안에 교육·소통, 휴가 안에 연차·체력단련. 기념일 지원은 갈래가 아니라 연차 안의 체크박스다. 첫 번째가 기본값이다', () => {
   assert.deepEqual(SUBS.out.map((s) => [s.value, s.label]), [['OD', '외근'], ['TR', '교육'], ['MEET', '소통']]);
   assert.deepEqual(SUBS.leave.map((s) => [s.value, s.label]), [['LY', '연차'], ['LH', '체력단련']]);
+  assert.equal(blankForm('leave', TODAY).wfa, false);
+  assert.equal(isWelfare({ ...blankForm('leave', TODAY), wfa: true }), true);
+  assert.equal(isWelfare(blankForm('leave', TODAY)), false);
+  assert.equal(isWelfare({ ...blankForm('leave', TODAY), sub: 'LH', wfa: true }), false, '체력단련에는 기념일 지원이 없다');
+  assert.equal(nameOf({ ...blankForm('leave', TODAY), wfa: true }), '연차');
   assert.equal(codeOf(blankForm('out', TODAY)), 'OD');
   assert.equal(codeOf(blankForm('leave', TODAY)), 'LY');
   assert.equal(codeOf({ ...blankForm('leave', TODAY), sub: 'LH' }), 'LH');
@@ -141,7 +146,7 @@ t('출장의 날짜·시각은 두 묶음이고 며칠간은 이름이 칩 왼�
     [['dateFrom', 'go', false], ['start', 'go', false], ['dateTo', 'back', false], ['end', 'back', false], ['days', '', true]]);
   assert.deepEqual([fields[2].type, fields[2].required], ['date', true], '도착일은 날짜 칸이다');
   const leaveDays = fieldsFor(blankForm('leave', TODAY)).find((x) => x.key === 'days');
-  assert.deepEqual([leaveDays.group, leaveDays.inline], [undefined, undefined], '휴가의 며칠간은 묶음도 inline 도 아니다 — 달력이 칩 옆에 붙는다');
+  assert.deepEqual([leaveDays.group, leaveDays.inline], ['lvdays', true], '휴가의 며칠간도 inline — 끝나는 날은 위의 종료일 칸이고, 칩 오른쪽에 오전·오후가 선다(2026-10-08)');
 });
 t('출장경비는 묻지 않고 선급 예산으로 보낸다 — 말로도 바꿀 수 없다', () => {
   const form = { ...blankForm('trip', TODAY), purpose: '협의', place: '대전' };
@@ -163,13 +168,18 @@ t('달력에서 고른 끝나는 날은 며칠간으로 바뀐다 (시작일 포
   assert.equal(spanDays('2026-10-20', '2026-10-19'), 0, '시작일보다 이르면 1 보다 작다 — 화면이 받지 않는다');
   assert.ok(Number.isNaN(spanDays('2026-10-20', '')));
 });
-t('휴가: 갈래·시작일·며칠간을 묻고, 구분은 하루짜리 연차에만 묻는다. 사유는 묻지 않는다', () => {
+t('휴가: 갈래, 시작일·종료일 한 줄(lv), 며칠간 1D~5D 오른쪽에 오전·오후(lvdays — 2026-10-08 사용자 지정), 연차면 그 아래 기념일 지원 체크박스. 전일 칩은 없고 사유는 묻지 않는다', () => {
   const f = blankForm('leave', TODAY);
-  assert.deepEqual(fieldsFor(f).map((x) => x.key), ['sub', 'dateFrom', 'days', 'half']);
-  assert.deepEqual(fieldsFor(f).find((x) => x.key === 'half').options.map((o) => o.label), ['전일', '오전', '오후']);
-  assert.deepEqual(fieldsFor({ ...f, days: 2 }).map((x) => x.key), ['sub', 'dateFrom', 'days']);
-  assert.deepEqual(fieldsFor({ ...f, sub: 'LH' }).map((x) => x.key), ['sub', 'dateFrom', 'days'], '체력단련은 HR 이 전일로 잠근다');
-  assert.deepEqual(missingFields(f), [], '기본값만으로 올릴 수 있다(오늘 하루 연차 전일)');
+  assert.deepEqual(fieldsFor(f).map((x) => [x.key, x.group || '']), [['sub', ''], ['dateFrom', 'lv'], ['dateTo', 'lv'], ['days', 'lvdays'], ['half', 'lvdays'], ['wfa', '']]);
+  assert.deepEqual([fieldsFor(f).at(-1).type, fieldsFor(f).at(-1).label], ['check', '기념일 지원']);
+  assert.deepEqual(fieldsFor({ ...f, sub: 'LH' }).map((x) => x.key), ['sub', 'dateFrom', 'dateTo', 'days', 'half'], '체력단련에는 기념일 지원이 없다');
+  const half = (form) => fieldsFor(form).find((x) => x.key === 'half');
+  assert.deepEqual(half(f).options.map((o) => o.label), ['오전', '오후']);
+  assert.equal(half(f).locked, false, '하루짜리 연차 — 오전·오후를 고를 수 있다');
+  assert.equal(half({ ...f, days: 2 }).locked, true, '여러 날이면 잠긴다');
+  assert.equal(half({ ...f, sub: 'LH' }).locked, true, '체력단련은 HR 이 전일로 잠근다');
+  assert.equal(fieldsFor(f).find((x) => x.key === 'dateTo').required, true);
+  assert.deepEqual(missingFields(f), [], '기본값만으로 올릴 수 있다(오늘 하루 연차 전일 — 종료일은 시작일에서 나온다)');
 });
 t('구분은 기본 전일이고, 오전·오후는 하루짜리 연차에서만 산다', () => {
   const f = { ...blankForm('leave', TODAY), half: 'pm' };
@@ -711,15 +721,22 @@ console.log('반차와 근무시간 — 출근이 정시가 아니면 09:00~18:0
     assert.equal(workStartOn('2026-10-06', { week: WEEK, items }), '09:00');
     assert.equal(workStartOn('2026-10-08', { week: WEEK, items }), '08:30', '다른 날의 유연근무는 보지 않는다');
   });
-  t('08:00 출근: 오전 반차 08:00~12:00, 오후 반차 13:00~17:00 — 유연근무를 올리지 않는다', () => {
-    assert.deepEqual(halfPlan(halfDay('2026-10-07', 'am'), '08:00'), { half: 'am', workStart: '08:00', flexStart: '', from: '08:00', to: '12:00' });
-    assert.deepEqual(halfPlan(halfDay('2026-10-07', 'pm'), '08:00'), { half: 'pm', workStart: '08:00', flexStart: '', from: '13:00', to: '17:00' });
+  t('08:00 출근: 오전 반차 08:00~12:00, 오후 반차 13:00~17:00 — 막히지 않고 유연근무도 올리지 않는다', () => {
+    assert.deepEqual(halfPlan(halfDay('2026-10-07', 'am'), '08:00'), { half: 'am', workStart: '08:00', blocked: false, flexStart: '', from: '08:00', to: '12:00' });
+    assert.deepEqual(halfPlan(halfDay('2026-10-07', 'pm'), '08:00'), { half: 'pm', workStart: '08:00', blocked: false, flexStart: '', from: '13:00', to: '17:00' });
     assert.equal(halfFlexForm(halfDay('2026-10-07', 'pm'), halfPlan(halfDay('2026-10-07', 'pm'), '08:00'), TODAY), null);
   });
-  t('08:30 출근: 09:00~18:00 으로 옮긴 뒤 반차 — 오전 09:00~13:00, 오후 14:00~18:00', () => {
+  t('09:00 출근은 오전 09:00~12:00 · 오후 13:00~18:00, 07:00 출근은 오전 07:00~11:00 · 오후 13:00~16:00 (2026-10-08 사용자 지정)', () => {
+    const at = (half, start) => { const p = halfPlan(halfDay('2026-10-07', half), start); return [p.blocked, p.from, p.to]; };
+    assert.deepEqual([at('am', '09:00'), at('pm', '09:00')], [[false, '09:00', '12:00'], [false, '13:00', '18:00']]);
+    assert.deepEqual([at('am', '07:00'), at('pm', '07:00')], [[false, '07:00', '11:00'], [false, '13:00', '16:00']]);
+    assert.deepEqual([at('am', '10:00'), at('pm', '11:00')], [[false, '10:00', '12:00'], [false, '15:00', '20:00']], '늦은 출근은 오후가 퇴근 전 다섯 시간');
+  });
+  t('08:30·09:30 출근: 반차를 쓸 수 없다(blocked — 알람) — 유연근무 09:00~18:00 을 먼저 올리기로 하면 오전 09:00~12:00, 오후 13:00~18:00', () => {
     const am = halfPlan(halfDay('2026-10-06', 'am'), '08:30');
-    assert.deepEqual(am, { half: 'am', workStart: '08:30', flexStart: '09:00', from: '09:00', to: '13:00' });
-    assert.deepEqual(halfPlan(halfDay('2026-10-06', 'pm'), '08:30'), { half: 'pm', workStart: '08:30', flexStart: '09:00', from: '14:00', to: '18:00' });
+    assert.deepEqual(am, { half: 'am', workStart: '08:30', blocked: true, flexStart: '09:00', from: '09:00', to: '12:00' });
+    assert.deepEqual(halfPlan(halfDay('2026-10-06', 'pm'), '08:30'), { half: 'pm', workStart: '08:30', blocked: true, flexStart: '09:00', from: '13:00', to: '18:00' });
+    assert.equal(halfPlan(halfDay('2026-10-06', 'pm'), '09:30').blocked, true);
     const flex = halfFlexForm(halfDay('2026-10-06', 'am'), am, TODAY);
     assert.deepEqual([flex.kind, flex.dateFrom, flex.flexStart, flex.purpose], ['flex', '2026-10-06', '09:00', '오전 반차 사용에 따른 출근시간 변경']);
     assert.equal(readyToSend(flex), true);

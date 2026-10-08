@@ -487,6 +487,21 @@ export function hrWeekTimes(opts) {
   });
 }
 
+/**
+ * 연차현황 — HR 홈의 연차현황 카드가 부르는 것과 같은 조회(/main/main/userleaves, 2026-10-08 실제 화면에서 확인).
+ * 연차·체력관리·저축연차가 "6.0 / 21.0" 꼴의 글로 온다 — 앞이 잔여, 뒤가 부여다(휴가사용종합현황 /empmenu/wrkleav/wrklvestatusemp100 의
+ * stRemainDays 6 · stLveDays 21 과 맞춰 확인). 읽는 쪽은 src/attend.js 의 leaveBalance.
+ * @returns {Promise<{yearLeaves?:string, lhLeaves?:string, lasLeaves?:string}>}
+ */
+export function hrUserLeaves(opts) {
+  return serial(async () => {
+    const s = await hrSession(opts);
+    const { text } = await request(`/main/main/userleaves?${query({ emplNo: s.user.emplNo })}`, null, opts);
+    const data = parseJson(text, '연차현황');
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  });
+}
+
 /** 문서 한 건의 내용. 수정·복사할 때 폼을 채우는 데 쓴다. */
 export function hrGetDoc(item, opts) {
   return serial(async () => {

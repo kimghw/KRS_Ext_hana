@@ -3,7 +3,10 @@
 // 가격과 그 둘레(상품명·옵션·수량·배송비·합계·판매자)만 오려 견적서 한 장으로 첨부한다.
 //
 // 어디를 오릴지는 읽기가 정한다(input.yaml gongmun 의 quoteArea — 그림마다 % 칸). 여기는 그 칸을 고르고(cutBoxes), 넉넉히 넓혀 픽셀 자리로
-// 바꾸고(cutPlan), 그림에서 오려 위아래로 잇는다(cutQuote). 오려 낸 화면(같은 묶음의 장들)은 첨부에서 빠진다(cutDrop → src/gongmun.js 의 attachWithCut).
+// 바꾸고(cutPlan), 그림에서 오려 위아래로 잇는다(cutQuote). 오려 낸 화면(같은 묶음의 장들)은 첨부에서 빠지되, 강의 소개·커리큘럼 장은 강의 내용으로
+// 남는다(cutDrop → src/gongmun.js 의 attachWithCut).
+// 교육도 같다(2026-10-08 사용자 지정: "교육은 첨부로 '견적서' 그리고 '교육내용'") — 온라인 강의 페이지 캡처에서 수강료 칸을 오려 교육 견적서로,
+// 강의 소개·커리큘럼 장은 교육 내용으로 첨부한다.
 // 화면(gongmunpanel.js)은 오린 그림을 보여 주고, 가격이 잘렸으면 "더 넓게"(PAD_STEP), 오린 것이 마땅치 않으면 "원래 장으로" 되돌린다.
 
 import { blobOf } from './pagecap.js';
@@ -17,6 +20,11 @@ export const MAX_PAD = 0.25;
 const MIN_SIDE = 2;
 /** 견적서·거래명세서 양식으로 가린 문서는 통째로 견적서다 — 오리지 않는다. */
 const FORMAL = new Set(['quote', 'statement']);
+/**
+ * 강의 소개·커리큘럼 — 오려 낸 화면 묶음에 있어도 첨부에 남긴다(cutDrop). 교육이면 금액 칸(주문·결제 화면)이 아닌 장은 모두 교육 내용으로
+ * 남는다(src/gongmun.js 의 PART_LABEL.edu).
+ */
+const KEEP = { purchase: new Set(['course', 'content']), edu: new Set(['course', 'content', 'event', 'other']) };
 
 /**
  * 읽기가 준 칸 가운데 오릴 수 있는 것 — 넣은 그림(PDF 는 오리지 못한다)에 있고, 견적서 양식으로 가린 파일이 아니며, 왼쪽<오른쪽·위<아래로
@@ -70,15 +78,20 @@ export function cutPlan(boxes, sizes, pad = CUT_PAD) {
 
 /**
  * 견적서를 오린 뒤 첨부에서 뺄 장 — 오린 그림과, 그 그림과 같은 묶음(웹페이지를 통째로 찍은 장들·고른 부분 하나)의 나머지 장.
- * 따로 넣은 그림·PDF 와 다른 묶음은 둔다.
+ * 따로 넣은 그림·PDF 와 다른 묶음은 둔다. 강의(교육 상품)의 소개·커리큘럼으로 가린 장(course·content)은 묶음 안이어도 남긴다 — 오린 견적서와
+ * 함께 강의 내용으로 첨부한다(2026-10-08 사용자 지정: "공문에는 견적서 랑,, 강의 내용도 첨부파일로 들어 가야함"). 교육이면 그 밖의 장도 교육 내용으로 남는다.
  * @param {{file:string}[]} boxes
  * @param {{name:string, group?:string}[]} files
+ * @param {{file:string, kind:string}[]} [parts] 읽기가 가린 파일마다의 종류(묶음 안에서 이어 받은 것까지 — src/gongmun.js 의 spreadParts)
+ * @param {'purchase'|'edu'} [kind] 갈래
  * @returns {string[]} 파일 이름
  */
-export function cutDrop(boxes, files = []) {
+export function cutDrop(boxes, files = [], parts = [], kind = 'purchase') {
   const from = new Set((boxes || []).map((b) => b.file));
   const groups = new Set((files || []).filter((f) => from.has(f.name) && f.group).map((f) => f.group));
-  return (files || []).filter((f) => from.has(f.name) || (f.group && groups.has(f.group))).map((f) => f.name);
+  const keep = KEEP[kind] || KEEP.purchase;
+  const lecture = (name) => keep.has((parts || []).find((p) => p?.file === name)?.kind);
+  return (files || []).filter((f) => (from.has(f.name) || (f.group && groups.has(f.group))) && !lecture(f.name)).map((f) => f.name);
 }
 
 /** 오린 견적서 그림의 이름 — 견적서_가격부분_2026-10-08.png. 넣은 파일과 겹치면 _2 … 를 붙인다. */

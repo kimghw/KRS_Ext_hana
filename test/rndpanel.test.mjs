@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { JSDOM } from 'jsdom';
 
 import { readZip } from '../src/zip.js';
+import { PAGE_TITLE, blockHtml, findBlock, readBlock } from '../src/rndnote.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
@@ -29,7 +30,32 @@ const logs = [];
 const copied = [];
 const downloads = [];
 const flashed = [];
+// 원노트 흉내(KR_MS365_mcp 의 onenote 서버 자리) — 섹션 하나, 페이지는 글(body)로 둔다. 다른 기기가 고친 것은 body 를 직접 바꿔 흉내 낸다.
+// 목록(list_pages)은 서버 PC 의 저장분이라 sync_onenote_db 뒤에야 다른 데서 만든 페이지가 보인다.
+const one = { up: true, pages: [], listed: [], calls: [], n: 0 };
+const fakeNote = {
+  async tool(name, a) {
+    one.calls.push(`${name}${a.action ? `:${a.action}` : ''}`);
+    const fail = (error) => { throw new Error(error); };
+    if (name === 'read_onenote' && a.action === 'list_sections') return { sections: [{ id: 's1', display_name: 'R&D', parent_notebook_name: '연구' }] };
+    if (name === 'read_onenote' && a.action === 'list_pages') return { pages: one.listed.filter((p) => p.section === a.section_id).map((p) => ({ page_id: p.id, title: p.title, web_url: p.url })) };
+    if (name === 'sync_onenote_db') { one.listed = [...one.pages]; return { success: true }; }
+    if (name === 'write_onenote' && a.action === 'create_page') {
+      const p = { id: `p${++one.n}`, section: a.section_id, title: a.title, url: `https://onenote.example/p${one.n}`, body: a.content };
+      one.pages.push(p);
+      one.listed.push(p);
+      return { success: true, page: { id: p.id, web_url: p.url } };
+    }
+    const p = one.pages.find((x) => x.id === a.page_id) || fail('page not found');
+    // Graph 처럼 생성 id 를 붙여 돌려주고, replace 는 그 id 로만 받는다.
+    if (a.action === 'get_content') return { success: true, content: `<html><head><title>${p.title}</title></head><body>${p.body.replace('<table data-id', '<table id="table:{t1}{1}" data-id')}</body></html>` };
+    if (a.action === 'replace') { if (a.target !== 'table:{t1}{1}') fail('bad target'); p.body = p.body.replace(/<table[\s\S]*<\/table>/, a.content); return { success: true }; }
+    if (a.action === 'append') { p.body += a.content; return { success: true }; }
+    return fail(`모르는 도구 ${name}`);
+  },
+};
 const make = () => createRndPanel({
+  openNote: async () => (one.up ? fakeNote : Promise.reject(new Error('이 PC 의 OneNote MCP 서버(http://localhost:5005/mcp)에 닿지 않습니다'))),
   $: (id) => doc.getElementById(id), escapeHtml,
   logEvent: (kind, ok, text) => logs.push({ kind, ok, text }),
   copyText: async (text) => { copied.push(text); return true; },
@@ -64,16 +90,24 @@ const chItems = () => [...$('rdChanges').querySelectorAll('li')].map((li) => [
 ]);
 const status = () => $('rdStatus').textContent;
 const hidden = (id) => $(id).classList.contains('hidden');
+/** 머리의 접힌 과제 정보 — "과제번호 RND-20-2026 · 책임자 박기도 · …" 처럼 이어서. */
+const metaText = () => [...$('rdMeta').querySelectorAll('div')].map((d) => `${d.querySelector('dt').textContent} ${d.querySelector('dd').textContent}`).join(' · ');
+/** 복사 아이콘을 누른 뒤 — 체크로 바뀌었는가. */
+const copiedIcon = (id) => $(id).classList.contains('done') && !!$(id).querySelector('svg');
 
 console.log('처음 열기 — 공문 탭의 과제를 가져온다');
-t('과제 칩 하나(별명)가 켜져 있고 머리에 과제명·번호·책임자·연구기간(총 4차년도)', () => {
+t('과제 칩 하나(별칭)가 켜져 있고 머리는 별칭 한 줄 — 과제명·번호·책임자·연구기간(총 4차년도)은 접힌 과제 정보 안에', () => {
   assert.deepEqual(chips(), [['차단기 과제', true]]);
   assert.ok(hidden('rdEmpty'));
   assert.ok(!hidden('rdHead'));
   assert.ok(!hidden('rdBody'));
   assert.ok(hidden('rdForm'));
   assert.equal($('rdName').textContent, '차단기 과제');
-  assert.match($('rdMeta').textContent, /MVDC 차단기 개발.*과제번호 RND-20-2026.*책임자 박기도.*연구기간 2026\.04\.01 ~ 2029\.12\.31 \(총 4차년도\)/);
+  assert.equal($('rdName').title, 'MVDC 차단기 개발');
+  assert.ok(!$('rdInfo').open, '과제 정보는 처음엔 접혀 있다');
+  assert.ok($('rdInfo').contains($('rdEdit')), '과제 고치기도 접힌 칸 안에');
+  assert.ok(hidden('rdAliasAsk'), '별칭이 있으면 정하는 칸은 없다');
+  assert.match(metaText(), /MVDC 차단기 개발.*과제번호 RND-20-2026.*책임자 박기도.*연구기간 2026\.04\.01 ~ 2029\.12\.31 \(총 4차년도\)/);
   assert.match(status(), /공문 탭의 과제 1개를 가져왔습니다/);
   assert.ok(logs.some((l) => l.kind === 'rnd' && /처음 열 때/.test(l.text)));
 });
@@ -83,9 +117,17 @@ t('차년도 칩은 넷, 오늘(2026-10-08)이 든 1차년도가 켜져 있고 "
   assert.equal(q('#rdYears [data-year="2"]').title, '2027.04.01 ~ 2028.03.31');
   assert.equal($('rdYearNote').textContent, '1차년도 · 2026.04.01 ~ 2027.03.31 · 진행 중');
 });
-t('기본 비목 여섯 줄, 아직 적은 것 없음 · 변경이력 구분 다섯', () => {
+t('기본 비목 여섯 줄, 아직 적은 것 없음 · 계획서가 없으면 참여연구자·연구개발 계획은 넣는 곳을 짚는다 · 변경이력 구분 다섯', () => {
   assert.deepEqual(rows().map((r) => r[0]), ['인건비', '연구시설·장비비', '연구재료비', '연구활동비', '연구수당', '간접비']);
   assert.equal($('rdBudgetState').textContent, '적은 것 없음');
+  assert.deepEqual([$('rdRosterState').textContent, $('rdPlanState').textContent], ['계획서 없음', '계획서 없음']);
+  assert.match($('rdRoster').textContent, /맨 아래 칸에 연구개발계획서 YAML/);
+  assert.ok(hidden('rdRosterTools') && hidden('rdPlanTools'), '복사할 것이 없으면 복사 아이콘도 없다');
+  assert.ok(!$('rdRosterBox').open && !$('rdPlanBox').open && !$('rdLogBox').open, '참여연구자·연구개발 계획·진행 기록은 접혀 있다');
+  assert.deepEqual([...$('rdBody').querySelectorAll(':scope > details > summary > span:first-of-type')].map((s) => s.textContent), ['예산', '참여연구자', '연구개발 계획', '진행 기록', '변경이력']);
+  assert.ok(!$('rnd').textContent.includes('연구내역'), '"연구내역" 이라는 말은 화면에 없다');
+  assert.equal($('rnd').lastElementChild.id, 'rdSkillBox');
+  assert.equal($('rdSkillBox').previousElementSibling.id, 'rdIntake', '연구개발계획서 넣기는 맨 아래(스킬 칸 바로 위)');
   assert.equal($('rdLogState').textContent, '적은 것 없음');
   assert.equal($('rdChangeState').textContent, '적은 것 없음');
   assert.deepEqual([...$('rdChKind').options].map((o) => o.value), ['예산', '연구내용', '연구기간', '연구진', '기타']);
@@ -162,7 +204,7 @@ t('비목 더하기 → 이름 적기. 빈 줄은 바로 빼고 금액 있는 �
   assert.equal($('rdChangeState').textContent, '2건 · 사유 없음 1');
 });
 
-console.log('연구내역');
+console.log('진행 기록(손으로 적는 것)');
 t('제목을 적고 기록 — 늦은 것부터, 내용은 여러 줄, 칸은 비운다', () => {
   type($('rdLogTitle'), '차단기 시제품 1차 시험');
   type($('rdLogText'), '10kV 인가\n차단 성공');
@@ -211,7 +253,7 @@ t('지우기는 두 번', () => {
   assert.equal(del.textContent, '정말 지우기');
   del.click();
   assert.equal(logItems().length, 1);
-  assert.match(status(), /연구내역을 지웠습니다/);
+  assert.match(status(), /진행 기록을 지웠습니다/);
 });
 
 console.log('변경이력 — 손으로');
@@ -279,28 +321,39 @@ t('＋ → 폼이 서고 머리·몸통은 숨는다. 과제명 없이는 저장
   assert.equal($('rdFNeed').textContent, '과제명을 적으세요.');
   assert.ok(!hidden('rdForm'));
 });
-t('종료일이 시작일보다 앞서면 안 됨', () => {
+t('별칭은 필수이고 다른 과제와 겹치면 안 된다(띄어쓰기·대소문자 무시)', () => {
   type($('rdFName'), '수소 추진');
+  $('rdFSave').click();
+  assert.match($('rdFNeed').textContent, /^별칭을 적으세요/);
+  assert.ok(!hidden('rdForm'));
+  type($('rdFAlias'), '차단기  과제');
+  $('rdFSave').click();
+  assert.equal($('rdFNeed').textContent, '같은 별칭의 과제가 있습니다 — MVDC 차단기 개발');
+  assert.ok(!hidden('rdForm'));
+});
+t('종료일이 시작일보다 앞서면 안 됨', () => {
+  type($('rdFAlias'), '수소');
   type($('rdFStart'), '2027-01-01');
   type($('rdFEnd'), '2026-12-31');
   $('rdFSave').click();
   assert.equal($('rdFNeed').textContent, '종료일이 시작일보다 앞섭니다.');
 });
-t('저장하면 칩이 둘이고 새 과제가 켜진다 — 연구기간 없는 과제는 1차년도 하나·미정', () => {
+t('저장하면 칩이 둘(별칭)이고 새 과제가 켜진다 — 연구기간 없는 과제는 1차년도 하나·미정', () => {
   type($('rdFStart'), '');
   type($('rdFEnd'), '');
   $('rdFSave').click();
-  assert.deepEqual(chips(), [['차단기 과제', false], ['수소 추진', true]]);
+  assert.deepEqual(chips(), [['차단기 과제', false], ['수소', true]]);
+  assert.equal(q('#rdProjects .active').title, '수소 추진', '칩의 툴팁은 과제명');
   assert.ok(hidden('rdForm'));
   assert.ok(!hidden('rdHead'));
   assert.deepEqual(years(), ['1차년도*']);
-  assert.match($('rdMeta').textContent, /연구기간 미정/);
+  assert.match(metaText(), /연구기간 미정/);
   assert.equal($('rdYearNote').textContent, '1차년도 · 연구기간 미정');
   assert.ok(logs.some((l) => l.kind === 'rnd' && /과제 더함: 수소 추진/.test(l.text)));
 });
 t('칩을 누르면 그 과제로', () => {
   q('#rdProjects [data-proj]').click();
-  assert.deepEqual(chips(), [['차단기 과제', true], ['수소 추진', false]]);
+  assert.deepEqual(chips(), [['차단기 과제', true], ['수소', false]]);
   assert.equal(chItems().length, 2);
 });
 t('과제 고치기 — 책임자·연구기간을 바꾸면 변경이력에 저절로 두 줄', () => {
@@ -313,7 +366,7 @@ t('과제 고치기 — 책임자·연구기간을 바꾸면 변경이력에 저
   type($('rdFLead'), '김철수');
   type($('rdFEnd'), '2030-03-31');
   $('rdFSave').click();
-  assert.match($('rdMeta').textContent, /책임자 김철수.*2026\.04\.01 ~ 2030\.03\.31 \(총 4차년도\)/);
+  assert.match(metaText(), /책임자 김철수.*2026\.04\.01 ~ 2030\.03\.31 \(총 4차년도\)/);
   assert.deepEqual(chItems().slice(0, 2).map((c) => c.slice(1, 4)), [
     ['연구기간', '연구기간', '2026.04.01 ~ 2029.12.31→2026.04.01 ~ 2030.03.31'], ['연구진', '과제책임자', '박기도→김철수'],
   ]);
@@ -325,7 +378,7 @@ t('Enter 로 저장 · Esc 로 닫기 · 과제 지우기는 두 번', () => {
   type($('rdFNote'), '산업부');
   $('rdFNote').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   assert.ok(hidden('rdForm'));
-  assert.match($('rdMeta').textContent, /산업부/);
+  assert.match(metaText(), /산업부/);
   assert.equal(chItems().length, 4, '비고는 이력이 아니다');
   doc.querySelectorAll('#rdProjects [data-proj]')[1].click();
   $('rdEdit').click();
@@ -338,7 +391,7 @@ t('Enter 로 저장 · Esc 로 닫기 · 과제 지우기는 두 번', () => {
   $('rdFDel').click();
   assert.deepEqual(chips(), [['차단기 과제', true]]);
   assert.ok(hidden('rdForm'));
-  assert.match(status(), /과제를 지웠습니다 — 수소 추진/);
+  assert.match(status(), /과제를 지웠습니다 — 수소/);
 });
 
 console.log('요약 복사 · JSON 저장·불러오기 · 공문 탭의 과제 가져오기');
@@ -388,7 +441,7 @@ await ta('공문 탭의 과제 가져오기 — 이미 있으면 그대로(빈 �
   await wait(20);
   assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구']);
   assert.match(status(), /공문 탭의 과제를 가져왔습니다 — 더함 1$/);
-  assert.match($('rdMeta').textContent, /책임자 김철수/, '있는 칸은 공문 탭 것으로 덮지 않는다');
+  assert.match(metaText(), /책임자 김철수/, '있는 칸은 공문 탭 것으로 덮지 않는다');
   $('rdImportGm').click();
   await wait(20);
   assert.match(status(), /이미 다 있습니다/);
@@ -417,14 +470,17 @@ await ta('스냅샷을 탭 어디에나 끌어다 놓으면 과제가 생기고(
   assert.equal(chips().at(-1)[1], true, '넣은 과제가 켜진다');
   assert.deepEqual(years(), ['1차년도올해*', '2차년도', '3차년도', '4차년도']);
   assert.equal($('rdYearNote').textContent, '1차년도 · 2026.04.01 ~ 2026.12.31 · 진행 중');
-  assert.match($('rdMeta').textContent, /과제번호 RS-2026-00000001.*책임자 홍길동.*연구기간 2026\.04\.01 ~ 2029\.12\.31 \(총 4차년도 · 1월 1일 기준\).*산업통상부/);
+  assert.match(metaText(), /과제번호 RS-2026-00000001.*책임자 홍길동.*연구기간 2026\.04\.01 ~ 2029\.12\.31 \(총 4차년도 · 1월 1일 기준\).*산업통상부/);
   assert.deepEqual(rows().map((r) => [r[0], r[1]]), [['인건비', '30,000,000'], ['연구시설·장비비', ''], ['연구재료비', ''], ['연구활동비', '50,000,000'], ['연구수당', '6,000,000'], ['간접비', '20,000,000']]);
   assert.equal($('rdBudgetState').textContent, '계획 1.1억 · 집행 0원 (0%)');
-  assert.deepEqual(logItems().map((l) => [l[0], l[1]]), [['2026.05.22', '참여연구자 — 1차년도'], ['2026.05.22', '연구개발 계획 — 1차년도']]);
-  // 계획서에서 온 줄은 "계획서" 딱지가 붙고, 참여연구자는 표로, 계획은 절 제목과 번호·점 목록으로 보인다(글은 그대로).
-  const [roster, plan] = $('rdLogs').querySelectorAll(':scope > li');
-  assert.ok(roster.classList.contains('rd-file') && plan.classList.contains('rd-file'));
-  assert.equal(roster.querySelector('.rd-kind').textContent, '계획서');
+  // 계획서에서 온 두 줄은 진행 기록이 아니라 저마다의 칸에 — 참여연구자는 표로, 계획은 절 제목과 번호·점 목록으로(글은 그대로).
+  assert.deepEqual(logItems(), [], '진행 기록에는 없다');
+  const roster = $('rdRoster');
+  const plan = $('rdPlan');
+  assert.equal($('rdRosterState').textContent, '3명 · 인건비 3,000만');
+  assert.equal($('rdPlanState').textContent, '목표 2개 · 9개월');
+  assert.deepEqual([$('rdRosterSrc').textContent, $('rdPlanSrc').textContent], ['연구개발계획서 r0 기준', '연구개발계획서 r0 기준']);
+  assert.ok(!hidden('rdRosterTools') && !hidden('rdPlanTools'));
   assert.deepEqual([...roster.querySelectorAll('.rd-table th')].map((th) => th.textContent), ['성명', '직위', '계상률', '참여', '계상인건비']);
   assert.deepEqual(rosterTable(roster), [['이몽룡', '수석', '15%', '9개월', '11,250,000원'], ['홍길동', '수석', '20%', '9개월', '15,000,000원'], ['성춘향', '책임', '10%', '9개월', '3,750,000원']]);
   assert.deepEqual(sectionHeads(plan), ['개발목표', '개발내용', '성능목표', '주요결과물', '수행일정9개월']);
@@ -435,6 +491,22 @@ await ta('스냅샷을 탭 어디에나 끌어다 놓으면 과제가 생기고(
   assert.equal(chItems().length, 0, '처음 넣는 것은 기준선');
   assert.match(status(), /^연구개발계획서 스냅샷\(KR_test\.yaml\): 과제 만듦: 시험용 직류 차단기 개발 · 1차년도 · 비목 4개/);
   assert.ok(logs.some((l) => l.kind === 'rnd' && /YAML 넣음 — 연구개발계획서 스냅샷/.test(l.text)));
+  assert.ok(!hidden('rdAliasAsk'), '계획서로 만든 과제는 별칭이 없어 정하는 칸이 선다');
+});
+t('머리에서 별칭 정하기 — 겹치면 안 되고, 정하면 칩·머리가 별칭으로 바뀌고 칸은 걷힌다(Enter 로도)', () => {
+  $('rdAliasSet').click();
+  assert.match(status(), /별칭을 적으세요/);
+  type($('rdAliasIn'), '차단기 과제');
+  $('rdAliasSet').click();
+  assert.equal(status(), '같은 별칭의 과제가 있습니다 — MVDC 차단기 개발');
+  assert.ok(!hidden('rdAliasAsk'));
+  type($('rdAliasIn'), 'TEST');
+  $('rdAliasIn').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.equal(chips().at(-1)[0], 'TEST');
+  assert.equal($('rdName').textContent, 'TEST');
+  assert.ok(hidden('rdAliasAsk'));
+  assert.equal(status(), '별칭을 정했습니다 — TEST');
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /별칭: 시험용 직류 차단기 개발 → TEST/.test(l.text)));
 });
 await ta('과제 고치기 폼에 1월 1일 기준이 켜져 있다 — 끄면 차년도가 시작일 기준으로 바뀌고 변경이력에 남는다', async () => {
   $('rdEdit').click();
@@ -468,25 +540,38 @@ await ta('r2 재생성본과 history 세 파일을 한꺼번에 넣으면 차례
   assert.ok(items.some((c) => c[1] === '연구진' && c[2] === '참여연구자' && c[3] === '이몽룡 15% · 홍길동 20% · 성춘향 10%→홍길동 27.45% · 성춘향 20%'));
   assert.match(status(), /^연구개발계획서 스냅샷\(KR_test_r2\.yaml\): .* \/ 개정 레지스트리\(revisions\.yaml\): .* \/ 예산 이력\(budget_history\.yaml\): .*2건에 사유 붙임.* \/ 참여연구원 이력\(researchers_history\.yaml\): .*2건 넣음$/);
   assert.equal($('rdChangeState').textContent, '10건 · 사유 없음 2', '사유가 빈 것은 앞서 손으로 바꾼 차년도 기준 두 줄뿐 — 파일에서 온 줄은 사유가 있다');
-  assert.deepEqual(rosterTable(q('#rdLogs li')), [['홍길동', '수석', '27.45%', '9개월', '20,900,000원'], ['성춘향', '책임', '20%', '9개월', '9,100,000원']]);
-  // 고치기로 글을 열면 꼴이 아니라 글 그대로가 칸에 올라온다
-  q('#rdLogs li [data-edit]').click();
-  assert.equal($('rdLogText').value.split('\n')[0], '홍길동 — 수석 · 27.45% · 9개월 · 인건비 20,900,000원');
-  $('rdLogCancel').click();
+  assert.deepEqual(rosterTable($('rdRoster')), [['홍길동', '수석', '27.45%', '9개월', '20,900,000원'], ['성춘향', '책임', '20%', '9개월', '9,100,000원']]);
+  assert.equal($('rdRosterState').textContent, '2명 · 인건비 3,000만');
+  assert.equal($('rdRosterSrc').textContent, '연구개발계획서 r2 기준');
+  assert.equal(chips().at(-1)[0], 'TEST', '레지스트리의 project: TEST 는 이미 그 별칭인 과제로 찾았다');
 });
-await ta('칸마다 복사 — 예산은 탭으로 나눈 표, 참여연구자 줄도 표, 연구내역·변경이력은 전부·한 줄', async () => {
+await ta('스냅샷을 섞어 놓아도(r2 다음 r0) 판 차례로 넣어 최종본이 남는다 — 오래된 r0 는 넣지 않고 알려 준다', async () => {
+  const n = chItems().length;
+  dropFiles([new window.File([fx('snapshot_r2.yaml')], 'KR_test_r2.yaml'), new window.File([fx('snapshot_r0.yaml')], 'KR_test.yaml')]);
+  await until(() => /오래된 r0/.test(status()));
+  assert.equal(status(), '연구개발계획서 스냅샷(KR_test.yaml): TEST 1차년도에는 이미 r2 가 들어 있어 더 오래된 r0 는 넣지 않았습니다 — 최종본(KR_<과제>_rN.yaml)을 넣으세요'
+    + ' / 연구개발계획서 스냅샷(KR_test_r2.yaml): 과제 찾음: TEST · 1차년도 · 비목 5개');
+  assert.deepEqual(rosterTable($('rdRoster')).map((r) => [r[0], r[2]]), [['홍길동', '27.45%'], ['성춘향', '20%']]);
+  assert.equal($('rdRosterSrc').textContent, '연구개발계획서 r2 기준');
+  assert.equal(chItems().length, n, '되돌린 변경이력이 생기지 않는다');
+});
+await ta('칸마다 복사 아이콘 — 예산·참여연구자는 탭으로 나눈 표, 계획은 글 그대로, 변경이력은 전부·한 줄. 누르면 아이콘이 체크로', async () => {
   const n = copied.length;
+  for (const id of ['rdBudgetCopy', 'rdRosterCopy', 'rdPlanCopy', 'rdLogsCopy', 'rdChangesCopy']) {
+    assert.ok($(id).classList.contains('rd-icon') && $(id).querySelector('svg') && $(id).textContent === '', `${id} 는 글 없는 아이콘`);
+    assert.match($(id).getAttribute('aria-label'), /복사$/);
+  }
   $('rdBudgetCopy').click();
   await until(() => copied.length === n + 1);
   assert.equal(copied[n], ['비목\t계획(원)\t집행(원)\t잔액(원)\t집행률', '인건비\t30,000,000\t0\t30,000,000\t0%', '연구시설·장비비\t10,000,000\t0\t10,000,000\t0%', '연구활동비\t40,000,000\t0\t40,000,000\t0%', '연구수당\t6,000,000\t0\t6,000,000\t0%', '간접비\t20,000,000\t0\t20,000,000\t0%', '합계\t106,000,000\t0\t106,000,000\t0%'].join('\n'));
-  assert.deepEqual(flashed.at(-1), ['rdBudgetCopy', '복사됨 ✓']);
-  q('#rdLogs li [data-copy]').click();
+  assert.ok(copiedIcon('rdBudgetCopy'), '체크로 바뀐다');
+  assert.ok(!flashed.some((f) => f[0] === 'rdBudgetCopy'), '아이콘은 글자를 바꾸는 flash 를 쓰지 않는다');
+  $('rdRosterCopy').click();
   await until(() => copied.length === n + 2);
   assert.equal(copied[n + 1], ['참여연구자 — 1차년도', '성명\t직위\t계상률\t참여\t계상인건비', '홍길동\t수석\t27.45%\t9개월\t20,900,000원', '성춘향\t책임\t20%\t9개월\t9,100,000원'].join('\n'));
-  $('rdLogsCopy').click();
+  $('rdPlanCopy').click();
   await until(() => copied.length === n + 3);
-  assert.match(copied[n + 2], /^- 2026\.05\.22 연구개발 계획 — 1차년도\n  ■ 개발목표\n  1\. 규정 공백 분석/);
-  assert.match(copied[n + 2], /\n- 2026\.05\.22 참여연구자 — 1차년도\n  홍길동 — 수석 · 27\.45%/);
+  assert.match(copied[n + 2], /^연구개발 계획 — 1차년도\n■ 개발목표\n1\. 규정 공백 분석/);
   $('rdChangesCopy').click();
   await until(() => copied.length === n + 4);
   const lines = copied[n + 3].split('\n');
@@ -496,9 +581,24 @@ await ta('칸마다 복사 — 예산은 탭으로 나눈 표, 참여연구자 �
   q('#rdChanges li [data-copy]').click();
   await until(() => copied.length === n + 5);
   assert.match(copied[n + 4], /^2026\.10\.08 \[연구진\] 참여연구자: 이몽룡 15% · 홍길동 20% · 성춘향 10% → 홍길동 27\.45% · 성춘향 20% \(/, '맨 위 줄(같은 날짜면 뒤에 넣은 것)');
-  assert.ok(logs.some((l) => l.kind === 'rnd' && /R&D 복사 — 예산 표 \(시험용 직류 차단기 개발 1차년도\)/.test(l.text)));
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /R&D 복사 — 예산 표 \(TEST 1차년도\)/.test(l.text)));
 });
-await ta('붙여 넣은 YAML 글도 읽는다 — 주석의 과제명으로 과제를 찾고, 칸에 적는 중이면 가로채지 않는다', async () => {
+await ta('진행 기록에는 손으로 적은 것만 — 전부 복사도 그것만, 줄의 복사도 아이콘', async () => {
+  type($('rdLogTitle'), '시제품 설계 검토');
+  $('rdLogAdd').click();
+  assert.deepEqual(logItems().map((l) => l[1]), ['시제품 설계 검토']);
+  assert.equal($('rdLogState').textContent, '1건');
+  const n = copied.length;
+  $('rdLogsCopy').click();
+  await until(() => copied.length === n + 1);
+  assert.equal(copied[n], '- 2026.10.08 시제품 설계 검토');
+  const rowCopy = q('#rdLogs li [data-copy]');
+  assert.ok(rowCopy.classList.contains('rd-icon') && rowCopy.querySelector('svg'));
+  rowCopy.querySelector('svg').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));   // 아이콘의 그림을 눌러도
+  await until(() => copied.length === n + 2);
+  assert.equal(copied[n + 1], '시제품 설계 검토');
+});
+await ta('붙여 넣은 YAML 글도 읽는다 — project: 값(별칭)으로 과제를 찾고, 칸에 적는 중이면 가로채지 않는다', async () => {
   q('#rdProjects [data-proj]').click();   // 다른 과제를 보고 있어도
   const ev = paste(fx('revisions.yaml').replace('rev: r2', 'rev: r3'));
   assert.ok(ev.defaultPrevented);
@@ -580,17 +680,104 @@ await ta('목록을 못 읽으면 버튼을 잠그고 까닭을 보인다', asyn
   $('rdSkillBox').open = false;
 });
 
+console.log('원노트 공유(선택) — 과제 정보만 원노트의 한 페이지에 두고 다른 기기와 맞춘다');
+const pageData = () => readBlock(findBlock(one.pages[0].body).inner);
+const change = (node, value) => { if (value !== undefined) node.value = value; node.dispatchEvent(new window.Event('change', { bubbles: true })); };
+const pickChip = (label) => [...doc.querySelectorAll('#rdProjects [data-proj]')].find((b) => b.textContent === label).click();
+t('꺼져 있는 것이 기본 — 아무 데도 닿지 않는다. 칸은 YAML 넣는 곳 위에, 과제가 없어도 보인다(rdBody 밖)', () => {
+  assert.equal($('rdNoteState').textContent, '꺼짐');
+  assert.ok(!$('rdNoteOn').checked);
+  assert.ok($('rdNoteSync').disabled && $('rdNoteSection').disabled);
+  assert.deepEqual(one.calls, []);
+  assert.equal($('rdNoteBox').nextElementSibling.id, 'rdIntake');
+  assert.ok(!$('rdBody').contains($('rdNoteBox')));
+});
+await ta('켜면 섹션을 불러와 고르게 한다', async () => {
+  $('rdNoteOn').checked = true;
+  change($('rdNoteOn'));
+  await until(() => $('rdNoteSection').options.length === 2);
+  assert.deepEqual([...$('rdNoteSection').options].map((o) => o.textContent), ['섹션 고르기 — 1개', '연구 › R&D']);
+  assert.equal($('rdNoteState').textContent, '섹션을 고르세요');
+  assert.match($('rdNoteMsg').textContent, /다른 기기에서도 같은 노트북의 같은 섹션/);
+  assert.ok($('rdNoteSync').disabled, '섹션을 고르기 전에는 맞출 수 없다');
+  assert.ok(logs.some((l) => l.kind === 'rnd' && l.text === 'R&D 원노트 공유 켬'));
+});
+await ta('섹션을 고르면 페이지를 찾고(없으면 목록을 새로 받은 뒤) 만들어 과제 정보 넷을 표로 쓴다 — 차년도 내용은 올리지 않는다', async () => {
+  change($('rdNoteSection'), 's1');
+  await until(() => /^맞춤 /.test($('rdNoteState').textContent));
+  assert.deepEqual(one.calls, ['read_onenote:list_sections', 'read_onenote:list_pages', 'sync_onenote_db', 'read_onenote:list_pages', 'write_onenote:create_page']);
+  assert.equal(one.pages[0].title, PAGE_TITLE);
+  assert.deepEqual(pageData().projects.map((p) => p.alias || p.name), ['차단기 과제', '파일 과제', '수소전기추진 연구', 'TEST']);
+  assert.ok(!/인건비|시제품 설계 검토|참여연구자/.test(one.pages[0].body), '예산·기록·참여연구자는 원노트에 없다');
+  assert.equal($('rdNoteMsg').textContent, '맞췄습니다 — 원노트에 씀 (과제 4개)');
+  assert.ok(!hidden('rdNoteOpen'));
+  assert.equal($('rdNoteOpen').href, 'https://onenote.example/p1');
+  await wait(10);
+  assert.deepEqual([store.rndNote.on, store.rndNote.sectionId, store.rndNote.sectionLabel, store.rndNote.pageId], [true, 's1', '연구 › R&D', 'p1']);
+});
+await ta('다른 기기에서 고친 것(별칭)과 더한 과제를 지금 맞추기로 받는다 — 달라진 것이 원노트 쪽뿐이면 페이지는 그대로', async () => {
+  const d = pageData();
+  const later = Date.now() + 1000;
+  const projects = d.projects.map((p) => (p.name === '파일 과제' ? { ...p, alias: '파일', ts: later } : p));
+  projects.push({ id: 'other1', name: '다른 기기 과제', alias: 'OTHER', code: '', lead: '', start: '', end: '', calendar: false, note: '', ts: later });
+  one.pages[0].body = blockHtml({ projects, del: d.del });
+  const n = one.calls.length;
+  $('rdNoteSync').click();
+  await until(() => chips().some((c) => c[0] === 'OTHER'));
+  await until(() => !$('rdNoteSync').disabled);
+  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일', '수소전기추진 연구', 'TEST', 'OTHER']);
+  assert.equal($('rdNoteMsg').textContent, '맞췄습니다 — 원노트에서 더함 1 · 받아 고침 1 (과제 5개)');
+  assert.deepEqual(one.calls.slice(n), ['read_onenote:get_content'], '기억해 둔 페이지를 바로 읽고, 쓸 것은 없다');
+});
+await ta('이 기기에서 과제를 지우면 잠깐 뒤 저절로 맞춰 원노트에 묘비가 선다', async () => {
+  pickChip('OTHER');
+  $('rdEdit').click();
+  $('rdFDel').click();
+  $('rdFDel').click();
+  assert.ok(!chips().some((c) => c[0] === 'OTHER'));
+  await until(() => pageData().del.other1 > 0);
+  assert.ok(!pageData().projects.some((p) => p.id === 'other1'));
+  assert.ok(one.calls.at(-1) === 'write_onenote:replace', '있던 표를 생성 id 로 통째로 바꾼다');
+  assert.ok(logs.some((l) => l.kind === 'rnd' && /R&D 원노트 맞춤\(고침\)/.test(l.text)));
+});
+await ta('서버가 없으면 까닭을 보이고 장부는 그대로', async () => {
+  one.up = false;
+  $('rdNoteSync').click();
+  await until(() => $('rdNoteState').textContent === '못 맞춤');
+  assert.match($('rdNoteMsg').textContent, /^원노트와 맞추지 못했습니다 — 이 PC 의 OneNote MCP 서버/);
+  assert.ok($('rdNoteMsg').classList.contains('error'));
+  assert.equal(chips().length, 4);
+  one.up = true;
+});
+await ta('끄면 더는 닿지 않는다 — 과제 정보를 고쳐도', async () => {
+  $('rdNoteOn').checked = false;
+  change($('rdNoteOn'));
+  assert.equal($('rdNoteState').textContent, '꺼짐');
+  const n = one.calls.length;
+  pickChip('파일');
+  $('rdEdit').click();
+  type($('rdFAlias'), '파일 과제');
+  $('rdFSave').click();
+  await wait(1500);
+  assert.equal(one.calls.length, n);
+  pickChip('TEST');
+});
+
 console.log('다시 열기');
 await ta('저장된 것으로 다시 선다 — 공문 탭에서 다시 가져오지 않는다', async () => {
   await wait(500);
   panel.hide();
   assert.ok(hidden('rnd'));
   panel = make();
+  $('rdNoteSection').innerHTML = '';   // 새로 연 화면에는 섹션 목록이 없다
   await panel.show();
   assert.ok(!hidden('rnd'));
-  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구', '시험용 직류 차단기 개발']);
+  assert.deepEqual([...$('rdNoteSection').options].map((o) => [o.value, o.textContent]), [['s1', '연구 › R&D']], '고른 섹션은 이름으로 다시 선다');
+  assert.equal($('rdNoteState').textContent, '꺼짐');
+  assert.deepEqual(chips().map((c) => c[0]), ['차단기 과제', '파일 과제', '수소전기추진 연구', 'TEST']);
   assert.equal(chips().at(-1)[1], true);
-  assert.equal(logItems().length, 2);
+  assert.equal(logItems().length, 1);
+  assert.equal(rosterTable($('rdRoster')).length, 2);
   assert.equal(chItems().length, 11);
   assert.equal(rows().find((r) => r[0] === '인건비')[1], '30,000,000');
   assert.equal(panel.book().projects.length, 4);

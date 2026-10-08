@@ -71,6 +71,7 @@ export const TRAVEL_RULES = {
     "over_cap": {
       "approve_rate": 1.5,
       "approver": "부서장",
+      "reason": "인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움",
       "source": "사용자 지정(2026-10-05) — 규정 원문은 확인하지 못함",
       "checked": null
     }

@@ -5,11 +5,12 @@
 // - 스냅샷: 과제(과제명·과제번호·책임자·연구기간·차년도 끊는 기준)와 그 차년도의 예산(비목별, 천원 → 원), 연구개발 계획(목표·내용·성능목표·
 //   결과물·일정)과 참여연구자를 연구내역 두 줄로. 같은 차년도에 다시 넣으면(r1·r2 재생성본) 달라진 비목·계획·참여연구자를 변경이력에
 //   남긴다 — 처음 넣는 것은 기준선이라 남기지 않는다(손으로 적어 둔 계획이 있던 줄은 빼고). 사유는 파일 머리의 "변경분:" 주석.
-// - 이력 파일: 과제명이 없어 보고 있는 과제에 넣는다(project: 줄의 주석에 과제명이 있으면 그것으로 찾는다). rev 마다 변경이력 한 줄.
+// - 이력 파일: `project: SSCB   # 과제명` 줄의 값(과제 약어)이 별칭인 과제, 아니면 주석의 과제명으로 찾고, 없으면 보고 있는 과제에 넣는다.
+//   과제명으로 찾은 과제에 별칭이 없으면 그 약어를 별칭으로 붙인다. rev 마다 변경이력 한 줄.
 // 들여온 줄에는 key 가 붙어 같은 파일을 다시 넣어도 겹치지 않는다.
 
 import {
-  MAX_PROJECTS, isYmd, yearNo, amountOf, won, todayStr, newId, normalizeProject, projectChanges, yearBook,
+  MAX_PROJECTS, isYmd, yearNo, amountOf, won, todayStr, newId, normalizeProject, projectChanges, yearBook, aliasOwner,
 } from './rnd.js';
 
 export const UNIT = Object.freeze({ 천원: 1000, 원: 1, 백만원: 1e6 });
@@ -43,11 +44,20 @@ export function headerOf(text) {
   return { lines, tag, changed: changed.trim() };
 }
 
-/** 이력 파일의 `project: SSCB   # MW급 … 개발` 줄 — 주석에 적힌 과제명. 없으면 빈 글. */
+/**
+ * 이력 파일의 `project: SSCB   # MW급 … 개발` 줄 — 주석에 적힌 과제명. 없으면 빈 글.
+ * "과제 약어(…)" · "과제 약어 — …" 로 감싼 것은 벗기고, 끝의 "(3차년도)" 도 뗀다.
+ */
 export function projectHint(text) {
   const m = String(text ?? '').match(/^project:[^#\n]*#\s*(.+)$/m);
-  return m ? m[1].trim() : '';
+  if (!m) return '';
+  let s = m[1].trim().replace(/^과제\s*약어\s*(?:[—–-]\s*)?/, '');
+  if (/^\(.*\)$/.test(s)) s = s.slice(1, -1);
+  return s.replace(/\s*\(\d+\s*차년도\)$/, '').trim();
 }
+
+/** 이력 파일의 `project:` 값 — RND 프로젝트가 쓰는 과제 약어(SSCB · PEMFC …). R&D 탭은 이것을 별칭으로 쓴다. 없으면 빈 글. */
+export const projectAbbr = (obj) => (['string', 'number'].includes(typeof obj?.project) ? str(obj.project).slice(0, 60) : '');
 
 /**
  * 연구기간 글 → 시작일·종료일. 달까지만 적은 것("2026-04 ~ 2029-12")은 그 달의 첫날·마지막 날로, 날까지 적은 것은 그대로.
@@ -64,6 +74,14 @@ export function periodOfLoose(s) {
   const end = b ? `${b.y}-${pad(b.m)}-${pad(b.d || lastDay(b.y, b.m))}` : '';
   return { start, end: end && end >= start ? end : '' };
 }
+
+/** "r2" → 2. 판 번호가 없거나 못 읽으면 -1. */
+export const revNo = (rev) => { const m = String(rev ?? '').trim().match(/^r(\d+)$/i); return m ? Number(m[1]) : -1; };
+/**
+ * YAML 객체의 판 번호 — 스냅샷의 meta.rev(KR_<과제>.yaml 은 r0, 재생성본 KR_<과제>_rN.yaml 은 rN). 이력 파일은 -1.
+ * 여러 파일을 한꺼번에 넣을 때 같은 종류끼리 판 차례(r0 → r1 → r2)로 넣는 데 쓴다 — 놓인 차례와 상관없이 최종본이 남는다.
+ */
+export const revOf = (obj) => revNo(obj?.meta?.rev);
 
 /** 무슨 파일인가 — 'snapshot' · 'revisions' · 'budget' · 'researchers' · ''(모르는 파일). */
 export function kindOf(obj) {
@@ -228,13 +246,21 @@ const rosterOf = (text) => String(text ?? '').split('\n').map((l) => { const m =
 /**
  * 스냅샷을 장부에 넣는다 — 과제를 찾거나(과제번호·과제명) 만들고, 그 차년도의 예산 계획·연구개발 계획·참여연구자를 넣는다.
  * 같은 차년도에 두 번째로 넣는 것(y.snapshot 이 있음)은 달라진 것을 전부 변경이력에 남긴다. 처음은 기준선 — 손으로 적어 둔 계획이 있던 줄만 남긴다.
- * @returns {{ project: object, created: boolean, n: number, budget: number, changes: object[], logs: string[] }}
+ * 그 차년도에 이미 넣은 판보다 **오래된 판**(r2 를 넣은 뒤의 r0 — 판 번호 없는 KR_<과제>.yaml 이 r0 라 헷갈리기 쉽다)은 아무것도 바꾸지 않고
+ * older 에 이미 넣은 판을 적어 돌려준다 — 최종본을 되돌리고 엉뚱한 변경이력을 남기지 않게(2026-10-08).
+ * @returns {{ project: object, created: boolean, n: number, rev: string, older: string, budget: number, changes: object[], logs: string[] }}
  */
 export function applySnapshot(book, snap, { today = todayStr(), header = { tag: '', changed: '' }, file = '' } = {}) {
   if (!snap?.project?.name) throw new Error('스냅샷에 과제명(meta.과제명)이 없습니다.');
   const reason = header.changed || (snap.rev ? `${snap.rev} 스냅샷 반영` : '스냅샷 반영');
-  const report = { project: null, created: false, n: snap.n, budget: 0, changes: [], logs: [] };
+  const report = { project: null, created: false, n: snap.n, rev: snap.rev, older: '', budget: 0, changes: [], logs: [] };
   let p = findProject(book, snap.project);
+  const had = p?.years[snap.n]?.snapshot?.rev || '';
+  if (p && revNo(snap.rev) >= 0 && revNo(snap.rev) < revNo(had)) {
+    book.current.project = p.id;
+    book.current.year[p.id] = snap.n;
+    return { ...report, project: p, older: had };
+  }
   if (!p) {
     if (book.projects.length >= MAX_PROJECTS) throw new Error(`과제는 ${MAX_PROJECTS}개까지입니다 — 하나를 지우고 다시 넣으세요.`);
     p = normalizeProject(snap.project);
@@ -461,20 +487,32 @@ export function applyYaml(book, obj, { text = '', file = '', current = null, n =
   if (kind === 'snapshot') {
     const snap = readSnapshot(obj);
     const r = applySnapshot(book, snap, { today, header: headerOf(text), file });
-    const bits = [`${r.created ? '과제 만듦' : '과제 찾음'}: ${r.project.alias || r.project.name}`, `${r.n}차년도`, r.budget ? `비목 ${r.budget}개` : '', ...r.logs, r.changes.length ? `변경이력 ${r.changes.length}건` : ''];
+    if (r.older) {
+      return { kind, label, project: r.project, summary: `${r.project.alias || r.project.name} ${r.n}차년도에는 이미 ${r.older} 가 들어 있어 더 오래된 ${r.rev} 는 넣지 않았습니다 — 최종본(KR_<과제>_rN.yaml)을 넣으세요` };
+    }
+    const bits =[`${r.created ? '과제 만듦' : '과제 찾음'}: ${r.project.alias || r.project.name}`, `${r.n}차년도`, r.budget ? `비목 ${r.budget}개` : '', ...r.logs, r.changes.length ? `변경이력 ${r.changes.length}건` : ''];
     return { kind, label, summary: bits.filter(Boolean).join(' · '), project: r.project };
   }
+  // 약어가 별칭인 과제 → 주석의 과제명으로 찾은 과제 → 보고 있는 과제.
+  // 과제명으로 찾았는데 별칭이 없으면 약어를 별칭으로 붙인다(보고 있는 과제로 떨어진 것에는 — 엉뚱한 과제일 수 있어 — 붙이지 않는다).
+  const abbr = projectAbbr(obj);
   const hint = projectHint(text);
-  const project = (hint && findProject(book, { name: hint })) || current;
+  const named = (hint && findProject(book, { name: hint })) || null;
+  const project = aliasOwner(book, abbr) || named || current;
+  let tail = '';
+  if (project && project === named && !project.alias && abbr) {
+    project.alias = abbr;
+    tail = ` · 별칭 ${abbr} 붙임`;
+  }
   const opts = { project, n, today };
   if (kind === 'revisions') {
     const r = applyRevisions(book, obj, opts);
-    return { kind, label, summary: `${project.alias || project.name} ${r.n}차년도 · 변경이력 ${r.added}건 넣음${r.updated ? ` · ${r.updated}건 고침` : ''}`, project };
+    return { kind, label, summary: `${project.alias || project.name} ${r.n}차년도 · 변경이력 ${r.added}건 넣음${r.updated ? ` · ${r.updated}건 고침` : ''}${tail}`, project };
   }
   if (kind === 'budget') {
     const r = applyBudgetHistory(book, obj, opts);
-    return { kind, label, summary: `${project.alias || project.name} ${r.n}차년도 · 변경이력 ${r.added}건 넣음${r.updated ? ` · ${r.updated}건에 사유 붙임` : ''} · 비목 ${r.budget}개`, project };
+    return { kind, label, summary: `${project.alias || project.name} ${r.n}차년도 · 변경이력 ${r.added}건 넣음${r.updated ? ` · ${r.updated}건에 사유 붙임` : ''} · 비목 ${r.budget}개${tail}`, project };
   }
   const r = applyResearchersHistory(book, obj, opts);
-  return { kind, label, summary: `${project.alias || project.name} ${r.n}차년도 · 변경이력 ${r.added}건 넣음`, project };
+  return { kind, label, summary: `${project.alias || project.name} ${r.n}차년도 · 변경이력 ${r.added}건 넣음${tail}`, project };
 }

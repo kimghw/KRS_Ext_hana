@@ -7,10 +7,12 @@
 // 보여 주고, 새 공문 창을 열어 붙여 넣게 한다. 본문 편집기(DEXT5)는 실제 키 입력·붙여넣기만 저장한다(스크립트로 넣은 것은
 // 저장되지 않는다 — 원본 KRS_ECLASS_APPROVAL.md §4). 사용자의 Ctrl+V 는 저장된다.
 //
-// 갈래는 구매·교육·출장 셋이다(2026-10-07 사용자 지정). 출장은 아직 빈 껍데기 — 양식만 보고 고칠 수 있다.
+// 갈래는 구매·교육·출장 셋이다(2026-10-07 사용자 지정). 셋 다 같은 문서 넣기(캡처·끌어다 놓기·붙여넣기·웹페이지 캡처)로 읽는다(2026-10-08 사용자 지정) —
+// 출장은 행사·회의·학회 안내문·초청장(출장지·기간·목적)과 교통·숙박 견적서(예상경비)를 읽는다.
 // 갈래마다 양식(eclass 양식·제목 틀·본문 틀)은 패널에서 보고 고친다(2026-10-07 사용자 지정 — "어떤 양식으로 할지는 거기서 보고 수정").
 
 import { ORIGIN } from './config.js';
+import { currentYear, fileLog, noteLogs, logLines, periodText, yearLabel } from './rnd.js';
 
 /* ------------------------------------------------------------ 저장소 키 */
 
@@ -30,23 +32,44 @@ export const MAX_PROJECTS = 5;
 export const PURCHASE_LIMIT = 1_000_000;
 
 /**
- * 갈래. limit 는 합계 한도(원, 없으면 null), reads 는 문서를 넣어 읽는 갈래인가, account 는 계정의 기본값이다
- * (과제에 계정을 적어 두면 그것이 이긴다). 출장은 아직 읽지 않는다(ready: false — 빈 껍데기).
+ * 갈래. limit 는 합계 한도(원, 없으면 null), account 는 계정의 기본값이다(과제에 계정을 적어 두면 그것이 이긴다).
+ * 세 갈래 모두 같은 문서 넣기로 읽는다(2026-10-08 사용자 지정: "구매, 교육, 출장 모두 동일한 캡처/파일 넣기 기능을 사용하도록").
  */
 // doc 은 문서 없이 쓸 때의 첨부 한 줄, ask 는 문서 넣는 곳의 말, more 는 이미 읽은 초안에 더 넣을 때의 말이다.
 // 교육은 교육 견적서와 교육 내용(커리큘럼) 캡처를 같이 넣어 둘 다 첨부한다(2026-10-07 사용자 지정).
+// 첨부에 꼭 드는 문서(needDocs)는 본문 ※ 첨부에 늘 적고, 읽은 파일에 빠졌으면 "남은 것"과 넣는 곳의 말(more)이 그것을 짚는다
+// (2026-10-08 사용자 지정: "교육은 첨부로 '견적서' 그리고 '교육내용' 의 첨부가 들어 가야함").
+// 출장은 행사·회의·학회 안내문이나 초청장(출장지·기간·목적)에 교통·숙박 견적서(예상경비)를 더 넣는다.
 export const KINDS = {
   purchase: {
-    label: '구매', title: '구매품의', ready: true, reads: true, limit: PURCHASE_LIMIT, account: '연구활동비(연구실운용비)',
+    label: '구매', title: '구매품의', limit: PURCHASE_LIMIT, account: '연구활동비(연구실운용비)',
     doc: '견적서', ask: '견적서를 넣으세요', more: '견적서 다음 쪽·거래명세서 더 넣기',
   },
   edu: {
-    label: '교육', title: '교육품의', ready: true, reads: true, limit: null, account: '연구활동비(교육훈련비)',
+    label: '교육', title: '교육품의', limit: null, account: '연구활동비(교육훈련비)',
     doc: '교육 견적서', ask: '교육 견적서·교육 내용을 넣으세요', more: '교육 내용(커리큘럼) 캡처 더 넣기',
+    needDocs: [
+      { label: '교육 견적서', more: '교육 견적서(수강료 화면) 더 넣기' },
+      { label: '교육 내용', more: '교육 내용(커리큘럼) 캡처 더 넣기' },
+    ],
   },
-  trip: { label: '출장', title: '출장품의', ready: false, reads: false, limit: null, account: '연구활동비(국내여비)', doc: '', ask: '', more: '' },
+  trip: {
+    label: '출장', title: '출장품의', limit: null, account: '연구활동비(국내여비)',
+    doc: '행사 안내문', ask: '행사·회의 안내문이나 초청장을 넣으세요', more: '교통·숙박 견적서 더 넣기',
+  },
+  // 외부활동 허가 신청서 — 강의·자문·심사·발표·위원 활동 같은 외부활동을 하기 전에 허가를 받는 글(2026-10-08 사용자 지정 "출장 옆에 외부활동 허가 신청서").
+  // 요청 공문·초청장·위촉 요청 메일을 넣으면 요청 기관·활동명·기간·장소·사례비를 읽는다. 예산을 쓰지 않아 계정은 없다.
+  outside: {
+    label: '외부활동', title: '외부활동 허가 신청서', limit: null, account: '',
+    doc: '요청 공문', ask: '외부활동 요청 공문·메일(강의·자문·심사·발표 의뢰)을 넣으세요', more: '행사 안내·일정표 더 넣기',
+  },
 };
-export const KIND_ORDER = ['purchase', 'edu', 'trip'];
+export const KIND_ORDER = ['purchase', 'edu', 'trip', 'outside'];
+
+/** 외부활동 구분 — 제목과 본문의 활동구분 칸. 읽기(input.yaml gongmun 의 activityType)의 코드를 이 이름으로 바꾼다(outsideTypeOf). */
+export const OUTSIDE_TYPES = ['강의', '자문', '심사·평가', '발표', '위원 활동', '집필', '기타'];
+const OUTSIDE_OF = { lecture: '강의', advisory: '자문', review: '심사·평가', talk: '발표', committee: '위원 활동', writing: '집필', other: '기타' };
+export const outsideTypeOf = (code) => OUTSIDE_OF[String(code ?? '').trim()] || (OUTSIDE_TYPES.includes(code) ? code : '');
 
 /**
  * eclass 전자결재 양식. 본문을 붙여 넣는 양식만 둔다 — 구매요청서(KR_Purchase_Order)는 칸이 정해진 폼이라 이 틀로 채울 수 없다.
@@ -148,8 +171,41 @@ export const DEFAULT_TEMPLATES = {
       '    {세부차례} 출장기간 : {출장기간}',
       '    {세부차례} 출 장 자 : {출장자}',
       '    {세부차례} 출장목적 : {출장목적}',
+      '    {세부차례} 출장사유 : {출장사유}',
       '    {세부차례} 예상경비 : {예상경비}',
-      '    {세부차례} 예산계정 : {계정}  끝.',
+      '    {세부차례} 예산계정 : {계정}',
+      '',
+      '※ 첨 부',
+      '{첨부}',
+    ].join('\n'),
+  },
+  // 외부활동 허가 신청서 — 제목은 "[요청 기관] [활동구분] 외부활동 허가 신청"(과제 별명을 쓰지 않는다 — 활동이 과제 수행 자체는 아니다).
+  // 본문은 과제 개요 뒤에 '나. 외부활동 내용'(구분·요청기관·활동명·기간·시간·장소·내용·활동자·사례비·목적·사유)이다. 사례비가 없으면 그 줄은 빠진다.
+  outside: {
+    form: DEFAULT_FORM,
+    title: '{요청기관} {활동구분} 외부활동 허가 신청',
+    body: [
+      '1. {부서:은} {과제개요}.',
+      '2. 이와 관련하여 {요청기관}의 요청으로 아래와 같이 외부활동({활동구분})을 하고자 하오니 허가하여 주시기 바랍니다.',
+      '',
+      SEP,
+      '',
+      ...OVERVIEW,
+      '{차례}. 외부활동 내용',
+      '    {세부차례} 활동구분 : {활동구분}',
+      '    {세부차례} 요청기관 : {요청기관}',
+      '    {세부차례} 활 동 명 : {활동명}',
+      '    {세부차례} 활동기간 : {활동기간}',
+      '    {세부차례} 활동시간 : {활동시간?}',
+      '    {세부차례} 활동장소 : {활동장소}',
+      '    {세부차례} 활동내용 : {활동내용?}',
+      '    {세부차례} 활 동 자 : {활동자}',
+      '    {세부차례} 사 례 비 : {사례비?}',
+      '    {세부차례} 활동목적 : {활동목적}',
+      '    {세부차례} 신청사유 : {신청사유}',
+      '',
+      '※ 첨 부',
+      '{첨부}',
     ].join('\n'),
   },
 };
@@ -170,7 +226,11 @@ export const VARS = {
     ['교육기관', '교육기관'], ['교육기간', '시작 ~ 끝(며칠)'], ['교육시간', '교육시간'],
     ['교육장소', '교육장소'], ['교육내용', '교육 내용(커리큘럼)'], ['참석자', '참석자'], ['교육비', '교육비(원)'], ['교육목적', '교육목적'],
     ['교육사유', '교육사유(과제 내용으로 쓴다)']])],
-  trip: [...COMMON_VARS, ...tokens([['출장지', '출장지'], ['출장기간', '출장기간'], ['출장자', '출장자'], ['출장목적', '출장목적'], ['예상경비', '예상경비']])],
+  trip: [...COMMON_VARS, ...tokens([['출장지', '출장지'], ['출장기간', '시작 ~ 끝(며칠)'], ['출장자', '출장자'], ['출장목적', '출장목적'],
+    ['출장사유', '출장사유(과제 내용으로 쓴다)'], ['예상경비', '예상경비(원)']])],
+  outside: [...COMMON_VARS, ...tokens([['활동구분', '강의·자문·심사·평가·발표·위원 활동·집필·기타 — 활동 구분 칸'], ['요청기관', '요청 기관'],
+    ['활동명', '활동명(강의 제목·자문 주제)'], ['활동기간', '시작 ~ 끝(며칠)'], ['활동시간', '활동시간'], ['활동장소', '활동장소'],
+    ['활동내용', '활동 내용'], ['활동자', '활동자'], ['사례비', '사례비(원)'], ['활동목적', '활동목적'], ['신청사유', '신청사유(과제 내용으로 쓴다)']])],
 };
 /** 틀의 꾸밈 — 이름 뒤에 붙인다. */
 export const VAR_MARKS = [
@@ -247,6 +307,50 @@ export function normalizeProjects(raw) {
     }))
     .filter((p) => p.name)
     .slice(0, MAX_PROJECTS);
+}
+
+/** 사유를 쓰는 근거로 넘기는 R&D 연구 내용의 한도 — 다리는 입력을 2만 자에서 자른다(native/host.mjs). */
+const RND_CONTENT_MAX = 6000;
+
+/**
+ * R&D 과제(src/rnd.js 의 장부 rndBook)의 연구 내용 — 품의 사유를 쓰는 근거. 오늘이 든 차년도의 연구개발 계획(계획서에서 온 개발목표·개발내용·
+ * 성능목표·주요결과물·수행일정 — 그 차년도에 없으면 계획서가 있는 앞 차년도, 그것도 없으면 가장 늦은 것)과 그 차년도의 진행 기록, 과제 비고.
+ * @returns {{text: string, year: number, plan: number, logs: number}} plan 은 계획을 가져온 차년도(없으면 0), logs 는 진행 기록 수
+ */
+export function rndContent(project, today = '') {
+  const years = project?.years || {};
+  const now = currentYear(project, today || undefined);
+  const have = Object.keys(years).map(Number).filter((n) => fileLog(years[n], 'plan')).sort((a, b) => b - a);
+  const n = have.includes(now) ? now : have.find((k) => k < now) || have[0] || 0;
+  const plan = n ? fileLog(years[n], 'plan').text : '';
+  const notes = noteLogs(years[now]);
+  const text = [
+    plan ? `[연구개발 계획 — ${yearLabel(n)}]\n${plan}` : '',
+    notes.length ? `[진행 기록 — ${yearLabel(now)}]\n${logLines(notes).join('\n')}` : '',
+    project?.note ? `[비고]\n${project.note}` : '',
+  ].filter(Boolean).join('\n\n');
+  return { text: text.slice(0, RND_CONTENT_MAX), year: now, plan: n, logs: notes.length };
+}
+
+/**
+ * R&D 탭의 과제를 공문의 과제로(2026-10-08 사용자 지정: "rnd 탭에 있는 어떤 과제로 할건지 … 대상 rnd 의 연구 내용을 보고 자동으로 입력").
+ * 별칭(제목)·과제번호·책임자(합의자)·연구기간(과제 개요)은 그 과제의 것이고, 과제 내용은 연구 내용(rndContent)이다. 공문 사전 설정에 같은 과제
+ * (과제번호·과제명·별칭)가 있으면 거기 적어 둔 개요·계정을 쓰고, R&D 쪽에 비어 있는 별칭·번호·책임자·연구기간·내용도 거기서 채운다.
+ * rnd 는 화면이 보여 줄 근거의 형편(과제 id·올해 차년도·계획을 가져온 차년도·진행 기록 수)이다.
+ * @param {{projects?: object[]}} book src/rnd.js 의 normalizeBook 을 지난 장부
+ * @param {object[]} [preset] 공문 사전 설정의 과제(gongmunProjects)
+ */
+export function rndProjects(book, preset = [], today = '') {
+  const pre = normalizeProjects(preset);
+  return (book?.projects || []).filter((p) => p?.name).map((p) => {
+    const same = pre.find((x) => (p.code && keyOf(x.code) === keyOf(p.code)) || keyOf(x.name) === keyOf(p.name) || (p.alias && keyOf(x.alias) === keyOf(p.alias)));
+    const got = rndContent(p, today);
+    return {
+      name: p.name, alias: p.alias || same?.alias || '', code: p.code || same?.code || '', lead: p.lead || same?.lead || '',
+      period: periodText(p) || same?.period || '', about: same?.about || '', content: got.text || same?.content || '', account: same?.account || '',
+      rnd: { id: p.id, year: got.year, plan: got.plan, logs: got.logs },
+    };
+  });
 }
 
 /* ------------------------------------------------------------ 글 다듬기 */
@@ -357,15 +461,17 @@ const ORDER = [...'가나다라마바사아자차카타파하'];
 
 /**
  * 초안의 칸 — 화면이 이 차례로 그린다. type: money(원, 쉼표로 보인다)·date·choice(options 중 하나), 그 밖은 글.
- * area 는 여러 줄, wide 는 한 줄을 다 쓴다. 출장은 아직 칸이 없다(빈 껍데기).
+ * area 는 여러 줄, wide 는 한 줄을 다 쓴다.
+ * open 은 펼쳐 두는 칸이다 — 용도(교육목적)·사유만 늘 보이고, 읽은 칸은 "읽은 문서" 아래에 접혀 있다(2026-10-08 사용자 지정:
+ * "이건 접힌 상태로 두고, 용도, 구매사유, 결재선.. 그리고 rnd 탭에 있는 어떤 과제로 할건지에 대해서만 펼쳐서 작성/선택").
  */
 export const FIELDS = {
   purchase: [
     { key: 'gist', label: '품목 요지 (제목)', wide: true },
     { key: 'vendor', label: '구매처' },
     { key: 'total', label: '합계 (VAT 포함, 원)', type: 'money' },
-    { key: 'use', label: '용도', wide: true },
-    { key: 'reason', label: '구매사유', wide: true, area: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
+    { key: 'use', label: '용도', wide: true, open: true },
+    { key: 'reason', label: '구매사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
     { key: 'summary', label: '요약 (2. 이와 관련하여 …)', wide: true },
     { key: 'account', label: '구매계정', wide: true },
   ],
@@ -381,11 +487,35 @@ export const FIELDS = {
     { key: 'hours', label: '교육시간', wide: true },
     { key: 'topics', label: '교육내용', wide: true, area: true },
     { key: 'attendees', label: '참석자', wide: true },
-    { key: 'purpose', label: '교육목적', wide: true },
-    { key: 'reason', label: '교육사유', wide: true, area: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
+    { key: 'purpose', label: '교육목적', wide: true, open: true },
+    { key: 'reason', label: '교육사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
     { key: 'account', label: '예산계정', wide: true },
   ],
-  trip: [],
+  trip: [
+    { key: 'place', label: '출장지', wide: true },
+    { key: 'from', label: '시작일', type: 'date' },
+    { key: 'to', label: '종료일', type: 'date' },
+    { key: 'who', label: '출장자', wide: true },
+    { key: 'cost', label: '예상경비 (원)', type: 'money' },
+    { key: 'purpose', label: '출장목적', wide: true, open: true },
+    { key: 'reason', label: '출장사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
+    { key: 'account', label: '예산계정', wide: true },
+  ],
+  // 외부활동 허가 신청서 — 예산 계정이 없다. 활동 구분은 제목에 들어간다.
+  outside: [
+    { key: 'type', label: '활동 구분 (제목)', type: 'choice', options: OUTSIDE_TYPES },
+    { key: 'org', label: '요청 기관' },
+    { key: 'subject', label: '활동명 (주제)', wide: true },
+    { key: 'from', label: '시작일', type: 'date' },
+    { key: 'to', label: '종료일', type: 'date' },
+    { key: 'hours', label: '활동시간' },
+    { key: 'place', label: '활동장소' },
+    { key: 'fee', label: '사례비 (원, 없으면 비움)', type: 'money' },
+    { key: 'topics', label: '활동내용', wide: true, area: true },
+    { key: 'who', label: '활동자', wide: true },
+    { key: 'purpose', label: '활동목적', wide: true, open: true },
+    { key: 'reason', label: '신청사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
+  ],
 };
 
 /** 구매의 요약 줄 — "모니터 외 1건을 구매하고자". 품목 요지를 고치면 요약도 따라간다(요약을 손대지 않았을 때). */
@@ -414,22 +544,30 @@ export function gistOf(items, fallback = '') {
   return items.length > 1 ? `${first} 외 ${items.length - 1}건` : first;
 }
 
-/** 첨부 목록에 적는 문서 이름 — 읽은 파일의 종류(input.yaml gongmun 의 parts.kind)마다. */
+/**
+ * 첨부 목록에 적는 문서 이름 — 읽은 파일의 종류(input.yaml gongmun 의 parts.kind)마다. 구매로 강의(인프런 같은 교육 상품)를 사면 강의 소개·커리큘럼
+ * 화면은 강의 내용이다 — 오린 견적서와 함께 첨부한다(2026-10-08 사용자 지정: "공문에는 견적서 랑,, 강의 내용도 첨부파일로").
+ * 교육의 첨부는 교육 견적서와 교육 내용 둘이다(2026-10-08 사용자 지정) — 금액이 든 문서(견적서·청구서·신청·결제 화면)는 교육 견적서, 그 밖의
+ * 장(교육 안내문·커리큘럼·강의 소개)은 교육 내용이다.
+ */
 const PART_LABEL = {
-  purchase: { quote: '견적서', statement: '거래명세서', order: '주문 내역', course: '안내문', content: '참고 자료', other: '참고 자료' },
-  edu: { quote: '교육 견적서', statement: '교육비 청구서', order: '교육 신청 내역', course: '교육 안내문', content: '교육 내용', other: '참고 자료' },
+  purchase: { quote: '견적서', statement: '거래명세서', order: '주문 내역', course: '강의 내용', content: '강의 내용', other: '참고 자료' },
+  edu: { quote: '교육 견적서', statement: '교육 견적서', order: '교육 견적서', course: '교육 내용', content: '교육 내용', event: '교육 내용', other: '교육 내용' },
+  trip: { event: '행사 안내문', course: '행사 안내문', content: '행사 일정', quote: '견적서', statement: '청구서', order: '예약 내역', other: '참고 자료' },
+  outside: { request: '요청 공문', event: '행사 안내문', course: '행사 안내문', content: '활동 자료', quote: '견적서', statement: '청구서', order: '예약 내역', other: '참고 자료' },
 };
 
 /**
  * 첨부 목록 — 읽은 파일을 문서 종류로 묶는다. 교육이면 교육 견적서·교육 내용이 따로 한 줄씩이 된다(2026-10-07 사용자 지정).
- * 파일이 없으면(글을 붙여 넣었거나 손으로 쓴다) 갈래의 기본 문서(견적서·교육 안내문) 한 줄이다.
+ * 파일이 없으면(글을 붙여 넣었거나 손으로 쓴다) 갈래의 기본 문서(견적서) 한 줄이다. 꼭 드는 문서(KINDS.needDocs — 교육 견적서·교육 내용)는
+ * 읽은 파일에 없어도 그 차례로 앞에 세운다(파일 없이) — 본문 ※ 첨부에 늘 적히고, 빠진 것은 missingDocs 가 짚는다.
  * @param {{file:string, kind:string}[]} parts 읽기가 가린 파일마다의 종류
  * @param {string[]} files 읽은 파일 이름(넣은 차례)
  * @returns {{label: string, files: string[]}[]}
  */
 export function attachList(kind, parts = [], files = []) {
   const names = PART_LABEL[kind] || PART_LABEL.purchase;
-  const out = [];
+  const out = (KINDS[kind]?.needDocs || []).map((d) => ({ label: d.label, files: [] }));
   for (const file of files) {
     const part = (parts || []).find((p) => p?.file === file);
     const label = names[part?.kind] || KINDS[kind]?.doc || '첨부';
@@ -439,6 +577,20 @@ export function attachList(kind, parts = [], files = []) {
   }
   return out.length ? out : [{ label: KINDS[kind]?.doc || '첨부', files: [] }];
 }
+
+/**
+ * 꼭 드는 첨부(KINDS.needDocs) 가운데 읽은 파일에 없는 것 — 파일을 하나도 넣지 않았으면(손으로 쓰거나 글만 붙여 넣었다) 짚지 않는다.
+ * @param {{label: string, files?: string[]}[]} attach 초안의 첨부 목록(attachList)
+ * @returns {{label: string, more: string}[]}
+ */
+export function missingDocs(kind, attach = []) {
+  const list = attach || [];
+  if (!list.some((a) => a?.files?.length)) return [];
+  return (KINDS[kind]?.needDocs || []).filter((d) => !list.find((a) => a?.label === d.label)?.files?.length);
+}
+
+/** 이미 읽은 초안에 더 넣을 때 넣는 곳의 말 — 꼭 드는 첨부가 빠졌으면 그것을 넣으라고 한다(교육 내용만 넣었으면 교육 견적서). */
+export const moreLead = (kind, attach) => missingDocs(kind, attach)[0]?.more || KINDS[kind]?.more || '';
 
 /**
  * 견적서를 오렸으면(구매 — 쇼핑몰 화면에서 가격과 그 둘레만, src/quotecut.js) 첨부는 오린 그림이 견적서로 앞에 오고, 오려 낸 화면(같은 묶음의
@@ -502,6 +654,27 @@ export function fromRecord(kind, rec, { me = '', files = [], cut = null } = {}) 
     };
     return { draft: { ...draft, mode: eduModeOf(draft) }, notes };
   }
+  if (kind === 'trip') {
+    // 출장 — 행사·회의 안내문·초청장에서 출장지·기간·목적(없으면 행사명)을, 교통·숙박 견적서에서 예상경비(total)를 읽는다. 출장자는 나.
+    return {
+      draft: {
+        place: r.tripPlace || '', from: r.tripFrom || '', to: r.tripTo || '', who: me, purpose: r.use || r.gist || '', reason: '',
+        cost: Number.isFinite(r.total) ? r.total : null, currency: r.currency || 'KRW', account: '', attach,
+      },
+      notes,
+    };
+  }
+  if (kind === 'outside') {
+    // 외부활동 — 요청 공문·초청장·위촉 요청 메일에서 요청 기관(vendor)·활동명(gist)·구분(activityType)·기간·시간·장소·내용·사례비(total)를 읽는다. 활동자는 나.
+    return {
+      draft: {
+        type: outsideTypeOf(r.activityType) || OUTSIDE_TYPES[0], org: r.vendor || '', subject: r.gist || '', from: r.actFrom || '', to: r.actTo || '',
+        hours: r.actHours || '', place: r.place || '', topics: r.topics || '', who: me, fee: Number.isFinite(r.total) ? r.total : null,
+        currency: r.currency || 'KRW', purpose: r.use || '', reason: '', attach,
+      },
+      notes,
+    };
+  }
   const items = (r.items || []).map((it) => ({
     name: it.name || '', spec: it.spec || '', qty: it.qty ?? null, unit: it.unit || '', unitPrice: it.unitPrice ?? null, amount: it.amount ?? null,
   }));
@@ -541,8 +714,8 @@ export function blankDraft(kind, { me = '' } = {}) {
   return fromRecord(kind, {}, { me }).draft;
 }
 
-/** 초안의 합계(원). 구매는 total, 교육은 fee. */
-export const amountOf = (kind, draft) => (kind === 'edu' ? draft?.fee : kind === 'purchase' ? draft?.total : null);
+/** 초안의 합계(원). 구매는 total, 교육은 fee, 출장은 cost(예상경비). */
+export const amountOf = (kind, draft) => (kind === 'edu' ? draft?.fee : kind === 'trip' ? draft?.cost : kind === 'purchase' ? draft?.total : null);
 
 /**
  * 한도를 넘었는가. 원화가 아니면 가리지 못한다(unknown) — 합계를 원화로 고치면 다시 본다.
@@ -684,7 +857,8 @@ const same = (a, b) => !!a && !!b && String(a).replace(/\s/g, '') === String(b).
 /**
  * 결재선. 부서 품의라 부서장이 결재(전결)하고, 과제 예산을 쓰므로 과제책임자가 합의한다(2026-10-07 사용자 지정).
  * 합의는 마지막 자리에 둘 수 없다(전자결재 결재선 화면의 제약 — 원본 appline.py) — 그래서 기안 → 합의 → 결재 순이다.
- * 과제책임자가 기안자이거나 부서장이면 합의는 뺀다(원본 rules.py 의 resolve_internal_agreement 와 같다).
+ * 과제책임자가 기안자 본인이면 합의는 뺀다. 본인이 아니면 언제나 합의자다 — 부서장이 과제책임자여도 합의에 넣고 그렇다고 적는다
+ * (2026-10-08 사용자 지정: "과제 책임자가 본인이 아니면 과제 책임자 합의로 들어가야 함". 원본 rules.py 의 resolve_internal_agreement 는 부서장이면 뺐다).
  * @returns {{steps: {role:string, name:string, why?:string}[], refs: string[], notes: string[]}}
  */
 export function approvalLine({ me = '', preset = {}, project = null } = {}) {
@@ -693,8 +867,10 @@ export function approvalLine({ me = '', preset = {}, project = null } = {}) {
   const steps = [{ role: '기안', name: me || '나' }];
   const lead = String(project?.lead || '').trim();
   if (lead && same(lead, me)) notes.push('과제책임자가 기안자라 합의는 뺐습니다');
-  else if (lead && same(lead, p.head)) notes.push('과제책임자가 부서장이라 합의는 뺐습니다');
-  else if (lead) steps.push({ role: '합의', name: lead, why: '과제책임자' });
+  else if (lead) {
+    steps.push({ role: '합의', name: lead, why: '과제책임자' });
+    if (same(lead, p.head)) notes.push('과제책임자가 부서장이라 합의와 결재가 같은 사람입니다');
+  }
   if (p.head) steps.push({ role: '결재', name: p.head, why: '부서장' });
   return { steps, refs: p.refs.filter((n) => !steps.some((s) => same(s.name, n))), notes };
 }
@@ -741,10 +917,16 @@ export function varsFor(kind, draft = {}, { me = '', preset = {}, project = null
       교육장소: draft.place || '', 교육내용: draft.topics || '', 참석자: draft.attendees || me, 교육비: won(moneyOf(draft.fee)),
       교육목적: draft.purpose || '', 교육사유: draft.reason || '',
     });
+  } else if (kind === 'outside') {
+    Object.assign(vars, {
+      활동구분: draft.type || '', 요청기관: draft.org || '', 활동명: draft.subject || '', 활동기간: span(draft.from, draft.to), 활동시간: draft.hours || '',
+      활동장소: draft.place || '', 활동내용: draft.topics || '', 활동자: draft.who || me, 사례비: won(moneyOf(draft.fee)),
+      활동목적: draft.purpose || '', 신청사유: draft.reason || '',
+    });
   } else {
     Object.assign(vars, {
       출장지: draft.place || '', 출장기간: span(draft.from, draft.to), 출장자: draft.who || me, 출장목적: draft.purpose || '',
-      예상경비: won(moneyOf(draft.cost)),
+      출장사유: draft.reason || '', 예상경비: won(moneyOf(draft.cost)),
     });
   }
   return vars;
@@ -774,12 +956,12 @@ export function compose(kind, draft, ctx = {}, tpl = templateOf(kind, null)) {
  */
 export function needs(kind, draft, { preset = {}, project = null, projects = [] } = {}) {
   const out = [];
-  if (!projects.length) out.push('과제 등록(사전 설정)');
+  if (!projects.length) out.push('과제 등록(R&D 탭)');
   else if (!project) out.push('과제 선택');
   else {
     if (!String(project.lead || '').trim()) out.push('합의자(과제책임자)');
-    // 교육·출장 제목은 과제 별명으로 쓴다 — 비면 과제명이 그대로 들어가 길어진다(막지는 않는다).
-    if (kind !== 'purchase' && !String(project.alias || '').trim()) out.push('과제 별명(사전 설정 — 제목)');
+    // 교육·출장 제목은 과제 별명으로 쓴다 — 비면 과제명이 그대로 들어가 길어진다(막지는 않는다). 구매·외부활동 제목에는 별명이 없다.
+    if (['edu', 'trip'].includes(kind) && !String(project.alias || '').trim()) out.push('과제 별명(사전 설정 — 제목)');
   }
   if (!normalizePreset(preset).head) out.push('부서장(사전 설정)');
   if (!normalizePreset(preset).dept) out.push('부서(사전 설정)');
@@ -795,49 +977,81 @@ export function needs(kind, draft, { preset = {}, project = null, projects = [] 
     if (moneyOf(d.fee) == null) out.push('교육비');
     if (!String(d.purpose || '').trim()) out.push('교육목적');
     if (!String(d.reason || '').trim()) out.push('교육사유');
+    for (const doc of missingDocs(kind, d.attach)) out.push(`${doc.label}(첨부)`);
+  } else if (kind === 'trip') {
+    if (!String(d.place || '').trim()) out.push('출장지');
+    if (!d.from) out.push('출장기간');
+    if (moneyOf(d.cost) == null) out.push('예상경비');
+    if (!String(d.purpose || '').trim()) out.push('출장목적');
+    if (!String(d.reason || '').trim()) out.push('출장사유');
+  } else if (kind === 'outside') {
+    if (!String(d.org || '').trim()) out.push('요청 기관');
+    if (!String(d.subject || '').trim()) out.push('활동명');
+    if (!d.from) out.push('활동기간');
+    if (!String(d.place || '').trim()) out.push('활동장소');
+    if (!String(d.purpose || '').trim()) out.push('활동목적');
+    if (!String(d.reason || '').trim()) out.push('신청사유');
   }
   return out;
 }
 
 /* ------------------------------------------------------------ 과제 내용으로 사유 쓰기 */
 
-/** 사유 칸과 용도(교육목적) 칸 — 갈래마다 이름이 다르다. */
-export const REASON_KEYS = { purchase: { reason: 'reason', use: 'use' }, edu: { reason: 'reason', use: 'purpose' } };
+/** 사유 칸과 용도(교육목적·출장목적·활동목적) 칸 — 갈래마다 이름이 다르다. */
+export const REASON_KEYS = {
+  purchase: { reason: 'reason', use: 'use' }, edu: { reason: 'reason', use: 'purpose' }, trip: { reason: 'reason', use: 'purpose' }, outside: { reason: 'reason', use: 'purpose' },
+};
+/** 사유 칸을 사람에게 부르는 이름. */
+export const REASON_LABEL = { purchase: '구매사유', edu: '교육사유', trip: '출장사유', outside: '신청사유' };
 
 /**
- * 사유를 쓰라고 Claude 에 줄 글(input.yaml 의 gongmunReason). 과제 내용이 근거이고, 품의할 것은 품목·교육이다.
+ * 사유를 쓰라고 Claude 에 줄 글(input.yaml 의 gongmunReason). 과제 내용이 근거이고(R&D 탭의 과제면 연구 내용 — rndProjects), 품의할 것은 품목·교육·출장이다.
  * 금액·업체는 넣지 않는다 — 사유에 쓰지 말라는 것을 굳이 보여 주지 않는다.
+ * ask 는 초안의 에이전트 칸에 사용자가 적은 말이다("사유를 시험 장비 쪽으로 다시") — 있으면 지금 적힌 사유와 함께 넘겨 그 말대로 고쳐 쓰게 한다.
  */
-export function reasonInput(kind, draft = {}, project = null) {
+export function reasonInput(kind, draft = {}, project = null, { ask = '' } = {}) {
   const p = project || {};
+  const keys = REASON_KEYS[kind] || REASON_KEYS.purchase;
+  const said = String(ask || '').trim().slice(0, 1000);
   const what = kind === 'edu'
     ? [`교육명: ${draft.course || '?'}`, draft.provider ? `교육기관: ${draft.provider}` : '', draft.topics ? `교육 내용: ${draft.topics}` : '',
       draft.purpose ? `지금 적힌 교육목적: ${draft.purpose}` : '']
-    : [...(draft.items || []).map((it) => `품목: ${it.name}${it.spec ? ` (${it.spec})` : ''}${it.qty != null ? ` × ${it.qty}${it.unit || ''}` : ''}`),
-      !draft.items?.length && draft.gist ? `품목: ${draft.gist}` : '', draft.use ? `지금 적힌 용도: ${draft.use}` : ''];
+    : kind === 'trip'
+      ? [`출장지: ${draft.place || '?'}`, draft.from ? `출장기간: ${span(draft.from, draft.to)}` : '', draft.purpose ? `지금 적힌 출장목적: ${draft.purpose}` : '']
+      : kind === 'outside'
+        ? [`외부활동: ${draft.type || '?'} — ${draft.subject || '?'}`, draft.org ? `요청 기관: ${draft.org}` : '', draft.from ? `활동기간: ${span(draft.from, draft.to)}` : '',
+          draft.topics ? `활동 내용: ${draft.topics}` : '', draft.purpose ? `지금 적힌 활동목적: ${draft.purpose}` : '']
+        : [...(draft.items || []).map((it) => `품목: ${it.name}${it.spec ? ` (${it.spec})` : ''}${it.qty != null ? ` × ${it.qty}${it.unit || ''}` : ''}`),
+          !draft.items?.length && draft.gist ? `품목: ${draft.gist}` : '', draft.use ? `지금 적힌 용도: ${draft.use}` : ''];
   return [
     `품의 종류: ${KINDS[kind]?.title || kind}`,
     `과제명: ${p.name || '(없음)'}`,
     p.code ? `과제번호: ${p.code}` : '',
     p.about ? `과제 개요: ${p.about}` : '',
-    `과제 내용:\n<<<\n${p.content || '(없음)'}\n>>>`,
+    `과제 내용${p.rnd ? '(R&D 탭의 연구 내용 — 연구개발 계획·진행 기록)' : ''}:\n<<<\n${p.content || '(없음)'}\n>>>`,
     '',
     '품의할 것:',
     ...what.filter(Boolean),
+    ...(said ? [
+      draft[keys.reason] ? `지금 적힌 ${REASON_LABEL[kind] || '구매사유'}: ${draft[keys.reason]}` : '',
+      `사용자의 말:\n<<<\n${said}\n>>>`,
+    ] : []),
   ].filter((l) => l !== '').join('\n');
 }
 
 /**
  * 써 온 사유·용도를 초안에 넣는다. 사유는 넣고(누른 사람이 원한 것이다), 용도(교육목적)는 사용자가 고치지 않았을 때만 바꾼다.
+ * 에이전트 칸에 적은 말로 쓴 것(asked)이면 용도도 넣는다 — 고쳐 달라고 한 사람이 원한 것이다.
  * @param {{reason: string, use?: string|null}} data 관문을 지난 답
- * @param {{touched?: string[]}} [opts] touched 는 사용자가 고친 칸
+ * @param {{touched?: string[], asked?: boolean}} [opts] touched 는 사용자가 고친 칸
  */
-export function applyReason(kind, draft, data, { touched = [] } = {}) {
+export function applyReason(kind, draft, data, { touched = [], asked = false } = {}) {
   const keys = REASON_KEYS[kind];
   if (!keys) return { ...draft };
   const out = { ...draft };
   if (String(data?.reason || '').trim()) out[keys.reason] = String(data.reason).trim();
-  if (String(data?.use || '').trim() && !(touched.includes(keys.use) && String(draft?.[keys.use] || '').trim())) out[keys.use] = String(data.use).trim();
+  const kept = !asked && touched.includes(keys.use) && String(draft?.[keys.use] || '').trim();
+  if (String(data?.use || '').trim() && !kept) out[keys.use] = String(data.use).trim();
   return out;
 }
 
@@ -873,7 +1087,8 @@ export function draftUrl(formId = DEFAULT_FORM) {
 
 /** 첨부로 저장할 파일 이름 — 견적서_업체_2026-10-07.pdf. label 은 첨부 목록의 문서 이름(교육 견적서·교육 내용 …). */
 export function attachName(kind, draft, today, label = '') {
-  const who = String((kind === 'edu' ? draft?.provider : draft?.vendor) || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 30);
+  const who = String((kind === 'edu' ? draft?.provider : kind === 'trip' ? draft?.place : kind === 'outside' ? draft?.org : draft?.vendor) || '')
+    .replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 30);
   const doc = (label || KINDS[kind]?.doc || '첨부').replace(/[\\/:*?"<>|\s]+/g, '');
   return `${doc}${who ? `_${who}` : ''}_${today || ''}.pdf`.replace(/_\.pdf$/, '.pdf');
 }

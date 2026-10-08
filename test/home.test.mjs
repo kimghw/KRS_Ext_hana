@@ -1126,7 +1126,9 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
   // 2026-10-05 사용자 지정: "홈 줄에서 바로 고르기: 넣은 자리에서 상한액/실제 금액 버튼이 뜹니다. 그리고 상한액의 1.5배는 부서장 승인"
   const CAP_ASK = { key: 'hotel.png', question: '실제 금액 150,000원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?',
     choices: [{ settle: 'cap', label: '상한액 120,000원으로' },
-      { settle: 'real', label: '실제 금액 150,000원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다' }] };
+      // reason 은 실제 금액으로 올릴 때 비고에 들어가는 상한 초과 사유다(2026-10-08 사용자 지정 — 아이콘의 풍선말에 적힌다).
+      { settle: 'real', label: '실제 금액 150,000원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다',
+        reason: '인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움' }] };
   const ASKING = '사후정산은 아직 올리지 않았습니다 — 아래에서 정산금액을 골라 주세요';
   /** 상한액을 넘는 숙박 — 고르기 전에는 묻고, 고른 것을 들고 오면 그 금액으로 올린다. */
   const capUp = (storage, asks = [CAP_ASK]) => fakeUp((trip) => (asks.every((a) => trip.settle?.[a.key])
@@ -1148,8 +1150,8 @@ console.log('근태(출장·외근·휴가)도 예약과 같은 모양으로 섞
     assert.equal(askOf(li).querySelector('.krs-mine-ask-note'), null);
     assert.deepEqual(picks(li).map((b) => [pickTip(b), b.title, b.textContent, !!b.querySelector('svg'), b.dataset.act, b.dataset.doc, b.dataset.key, b.dataset.settle]), [
       ['상한액 120,000원으로', '상한액 120,000원으로', '', true, 'settle', 'X-4', 'hotel.png', 'cap'],
-      ['실제 금액 150,000원으로 · 부서장 승인 — 상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다',
-        '실제 금액 150,000원으로 · 부서장 승인 — 상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다', '', true, 'settle', 'X-4', 'hotel.png', 'real'],
+      ['실제 금액 150,000원으로 · 부서장 승인 — 상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다 · 비고에 적는 사유: 인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움',
+        '실제 금액 150,000원으로 · 부서장 승인 — 상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다 · 비고에 적는 사유: 인근 숙소비 상승으로 인해 숙박비 내에 숙박이 어려움', '', true, 'settle', 'X-4', 'hotel.png', 'real'],
     ]);
     assert.notEqual(picks(li)[0].innerHTML, picks(li)[1].innerHTML, '두 아이콘은 다른 그림이다');
     assert.deepEqual([m.up.calls.length, m.up.calls[0].settle, storage.data[UP_BUSY_KEY]], [1, {}, {}], '묻는 동안에는 올리는 중이 아니다');

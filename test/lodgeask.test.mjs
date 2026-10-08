@@ -35,7 +35,7 @@ globalThis.chrome = {
   scripting: { executeScript: async () => [{ result: null }] },
 };
 
-const { afterPlan, afterFields, afterSummary, lodgeOf, lodgeAsk, lodgeCap, lodgeSettle, lodgeRowsOf, lodgeSame, LODGE_CURRENCY } = await import('../src/after.js');
+const { afterPlan, afterFields, afterSummary, lodgeOf, lodgeAsk, lodgeCap, lodgeSettle, lodgeRowsOf, lodgeSame, LODGE_CURRENCY, LODGE_OVER_REASON } = await import('../src/after.js');
 
 const TRIP = { seq: '145580', from: '2026-09-09', to: '2026-09-10', location: '서울' };
 const blank = { docType: null, vendor: null, seller: null, sellerBiz: null, bizNo: null, payDate: null, payPlace: null, atDestination: null, checkIn: null, checkOut: null, nights: null,
@@ -337,6 +337,10 @@ await ta('원화 금액을 적으면(쉼표가 있어도) 그것이 실제 금�
   // 실제 금액이 상한액의 1.5배(180,000원) 안이라 부서장 승인으로 정산할 수 있다 — 버튼과 그 아래에 그렇게 적힌다(2026-10-05 사용자 지정).
   assert.deepEqual([...ask().querySelectorAll('.at-ask-row button')].map((b) => b.textContent), ['상한액 120,000원으로', '실제 금액 125,052원으로 · 부서장 승인']);
   assert.deepEqual([...ask().querySelectorAll(':scope > ul li > .at-after-note')].map((p) => p.textContent), ['상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다']);
+  // 실제 금액으로 정산하면 비고에 상한 초과 사유가 필수다(2026-10-08 사용자 지정) — 기본 문구가 든 칸이 서고 고쳐 쓸 수 있다.
+  const reason = ask().querySelector('input.at-ask-reason');
+  assert.deepEqual([reason.value, reason.placeholder, ask().querySelector('.at-ask-reason-label').textContent],
+    [LODGE_OVER_REASON, LODGE_OVER_REASON, '비고의 상한 초과 사유 — 실제 금액으로 정산하면 필수입니다(고쳐 쓸 수 있습니다)']);
   const [l] = lodgeCells();
   assert.deepEqual([l['정산금액'], l['공급가액'], l['부가세']], ['정하지 않음 — 실제 125,052원이 상한액 120,000원을 넘습니다 · 문서의 금액 88.46 USD', '?', '?'], '고르기 전에는 정산금액이 정해진 것처럼 적지 않는다');
   assert.equal(status(), '사후정산을 아직 올리지 않았습니다 — 출장 카드에서 정산금액을 정해 주세요', '앞의 잘못 적었다는 말이 남아 있지 않다');
@@ -398,15 +402,42 @@ t('같은 줄이 이미 있으면 다시 올리지 않고 그렇게 말한다 �
 console.log('실제 금액으로 정산 · 올리지 않기 · 묻지 않는 경우');
 await open();
 await drop('image.png', { ...AGODA, totalKRW: 125052 });
-await ta('문서에 원화 금액이 있으면 원화는 묻지 않고 상한액만 묻는다 — 실제 금액으로 고르면 그 금액으로 올라간다', async () => {
+await ta('문서에 원화 금액이 있으면 원화는 묻지 않고 상한액만 묻는다 — 실제 금액으로 고르면 그 금액으로 올라가고, 비고에 묵은 곳 뒤로 상한 초과 사유(기본 문구)가 붙는다', async () => {
   assert.equal(ask().querySelector('input.at-ask-krw'), null);
+  assert.equal(ask().querySelector('input.at-ask-reason').value, LODGE_OVER_REASON);
   await press('ask-real');
   await until(() => site.calls.length === 1, '사후정산 저장');
-  assert.deepEqual(site.saves[0].map((x) => [x.company, x.total, x.samount, x.vat]), [['아고다', '125052', '113684', '11368']]);
+  assert.deepEqual(site.saves[0].map((x) => [x.company, x.total, x.samount, x.vat, x.comment]), [['아고다', '125052', '113684', '11368', `Toyoko INN Gangnam Seoul · ${LODGE_OVER_REASON}`]]);
   chip('81561').click();
   assert.equal(cellsOf(info())[0]['정산금액'], '125,052원 · 실제 금액으로 정산(상한액 120,000원 초과 · 부서장 승인 필요) · 문서의 금액 88.46 USD');
+  assert.equal(cellsOf(info())[0]['비고'], `Toyoko INN Gangnam Seoul · ${LODGE_OVER_REASON} (상한 초과 사유 포함)`);
   assert.ok([...info().querySelectorAll('.at-after-notes li')].some((li) => li.textContent === 'Toyoko INN Gangnam Seoul: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내'),
     '실제 금액으로 정산한 줄에는 승인이 필요하다는 알림이 남는다');
+  assert.equal(store.attendLodgeActual[145580][81561].reason, LODGE_OVER_REASON, '비고에 적은 사유를 적어 둔다 — 숙박비 내역의 상한 버튼이 쓴다');
+  // 숙박비 내역의 펴진 줄에도 사유를 고쳐 쓰는 칸이 선다(정산금액이 상한액을 넘는 줄).
+  assert.equal(info().querySelector('.at-lodge-reason input.at-lodge-reason-input').value, LODGE_OVER_REASON);
+});
+await open();
+await drop('image.png', { ...AGODA, totalKRW: 125052 });
+await ta('사유 칸을 고쳐 쓰고 실제 금액으로 고르면 그 글이 비고에 들어간다 — 적던 글은 카드를 다시 그려도 남는다', async () => {
+  const input = ask().querySelector('input.at-ask-reason');
+  input.value = '행사 기간이라 인근 숙소가 다 찼음';
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(st.after[145580].ask.reason[0], '행사 기간이라 인근 숙소가 다 찼음');
+  await press('ask-real');
+  await until(() => site.calls.length === 1, '사후정산 저장');
+  assert.deepEqual(site.saves[0].map((x) => [x.total, x.comment]), [['125052', 'Toyoko INN Gangnam Seoul · 행사 기간이라 인근 숙소가 다 찼음']]);
+  assert.equal(store.attendLodgeActual[145580][81561].reason, '행사 기간이라 인근 숙소가 다 찼음');
+  chip('81561').click();
+  assert.equal(cellsOf(info())[0]['비고'], 'Toyoko INN Gangnam Seoul · 행사 기간이라 인근 숙소가 다 찼음 (상한 초과 사유 포함)');
+});
+await open();
+await drop('image.png', { ...AGODA, totalKRW: 125052 });
+await ta('사유 칸을 비우고 실제 금액으로 고르면 기본 문구가 들어간다(사유는 필수다) — 상한액으로 고르면 사유를 적지 않는다(앞의 상한액 시험)', async () => {
+  ask().querySelector('input.at-ask-reason').value = '   ';
+  await press('ask-real');
+  await until(() => site.calls.length === 1, '사후정산 저장');
+  assert.equal(site.saves[0][0].comment, `Toyoko INN Gangnam Seoul · ${LODGE_OVER_REASON}`);
 });
 await open();
 await drop('image.png', AGODA);

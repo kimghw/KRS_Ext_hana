@@ -7,7 +7,7 @@ import { parse } from 'yaml';
 
 import { normalizeBook, yearsOf } from '../src/rnd.js';
 import {
-  KIND_LABEL, KIND_ORDER, headerOf, projectHint, periodOfLoose, kindOf, itemName, sameItem, readSnapshot, findProject,
+  KIND_LABEL, KIND_ORDER, headerOf, projectHint, projectAbbr, revNo, revOf, periodOfLoose, kindOf, itemName, sameItem, readSnapshot, findProject,
   applySnapshot, applyRevisions, applyBudgetHistory, applyResearchersHistory, applyYaml,
 } from '../src/rndyaml.js';
 
@@ -27,10 +27,17 @@ t('머리 주석 — 꼬리표와 변경분', () => {
   assert.deepEqual(headerOf('meta:\n  a: 1\n# 뒤의 주석은 머리가 아니다'), { lines: [], tag: '', changed: '' });
   assert.deepEqual(headerOf(''), { lines: [], tag: '', changed: '' });
 });
-t('이력 파일의 project 줄 주석에서 과제명', () => {
+t('이력 파일의 project 줄 — 값은 과제 약어(별칭), 주석은 과제명("과제 약어(…)"·"과제 약어 — …" 로 감싼 것과 끝의 차년도는 벗김)', () => {
   assert.equal(projectHint(fx('revisions.yaml')), '시험용 직류 차단기 개발');
   assert.equal(projectHint('project: X\n'), '');
   assert.equal(projectHint(null), '');
+  assert.equal(projectHint('project: "PEMFC"   # 과제 약어(친환경 선박용 PEMFC 시스템 개발)\n'), '친환경 선박용 PEMFC 시스템 개발');
+  assert.equal(projectHint('project: "수소(KR)"   # 과제 약어 — 선박용 수소 추진 시스템(1차년도)\n'), '선박용 수소 추진 시스템');
+  assert.equal(projectHint('project: "MMC"   # 대용량 고압 드라이브 시제품 개발 (3차년도)\n'), '대용량 고압 드라이브 시제품 개발');
+  assert.equal(projectAbbr(parse(fx('revisions.yaml'))), 'TEST');
+  assert.equal(projectAbbr({ project: ' SSCB ' }), 'SSCB');
+  assert.equal(projectAbbr({ project: { a: 1 } }), '');
+  assert.equal(projectAbbr(null), '');
 });
 t('연구기간 — 달까지만 적은 것은 그 달의 첫날·마지막 날', () => {
   assert.deepEqual(periodOfLoose('2026-04 ~ 2029-12'), { start: '2026-04-01', end: '2029-12-31' });
@@ -152,17 +159,19 @@ console.log('장부에 넣기 — 스냅샷');
     assert.equal(y.logs.find((l) => l.key === 'plan').text.split('\n')[1], '1. 규정 공백 분석 및 평가 기준 도출', '계획은 그대로');
     assert.equal(y.snapshot.rev, 'r2');
   });
-  t('r0 를 다시 넣으면(되돌림) 빠진 비목은 비워지고 그것도 변경이력에', () => {
+  t('r2 를 넣은 뒤 r0(판 번호 없는 KR_<과제>.yaml)를 넣으면 넣지 않는다 — 최종본·변경이력 그대로, 이미 넣은 판을 알려 준다', () => {
+    const y = book.projects[0].years[1];
+    const before = JSON.stringify(y);
     const rep = applySnapshot(book, readSnapshot(r0), { today: TODAY, header: headerOf(fx('snapshot_r0.yaml')) });
-    assert.deepEqual(rep.changes.map((c) => [c.item, c.before, c.after, c.reason]), [
-      ['연구활동비', '40,000,000원', '50,000,000원', 'r0 스냅샷 반영'],
-      ['연구시설·장비비', '10,000,000원', '(비목 뺌)', 'r0 스냅샷 반영'],
-      ['참여연구자', '홍길동 27.45% · 성춘향 20%', '이몽룡 15% · 홍길동 20% · 성춘향 10%', 'r0 스냅샷 반영'],
-    ]);
-    assert.equal(book.projects[0].years[1].budget.find((r) => r.item === '연구시설·장비비').plan, null);
+    assert.deepEqual([rep.older, rep.rev, rep.changes, rep.logs, rep.created], ['r2', 'r0', [], [], false]);
+    assert.equal(JSON.stringify(y), before, '아무것도 바꾸지 않았다');
+    assert.match(y.logs.find((l) => l.key === 'roster').text, /^홍길동 — 수석 · 27\.45%/);
+    const r = applyYaml(book, r0, { text: fx('snapshot_r0.yaml'), file: 'KR_test.yaml', today: TODAY });
+    assert.equal(r.summary, '시험용 직류 차단기 개발 1차년도에는 이미 r2 가 들어 있어 더 오래된 r0 는 넣지 않았습니다 — 최종본(KR_<과제>_rN.yaml)을 넣으세요');
+    assert.deepEqual([revNo('r2'), revNo('R10'), revNo(''), revNo('v1'), revOf(r0), revOf({ revisions: [] })], [2, 10, -1, -1, 0, -1]);
   });
   t('계획의 목표가 바뀐 재생성본 — 연구내용 변경이력에 전·후 목표', () => {
-    const obj = parse(fx('snapshot_r0.yaml'));
+    const obj = parse(fx('snapshot_r2.yaml'));
     obj.meta.rev = 'r3';
     obj.연구개발내용.목표[0].개발목표[1] = '용어 사전 편찬';
     const rep = applySnapshot(book, readSnapshot(obj), { today: TODAY });
@@ -257,11 +266,12 @@ console.log('한 번에 — applyYaml');
     assert.equal(a.kind, 'snapshot');
     assert.equal(a.summary, '과제 만듦: 시험용 직류 차단기 개발 · 1차년도 · 비목 4개 · 연구개발 계획 — 1차년도 넣음 · 참여연구자 — 1차년도 넣음');
     const b = applyYaml(book, parse(fx('revisions.yaml')), { text: fx('revisions.yaml'), current: null, today: TODAY });
-    assert.equal(b.summary, '시험용 직류 차단기 개발 1차년도 · 변경이력 3건 넣음');
+    assert.equal(b.summary, 'TEST 1차년도 · 변경이력 3건 넣음 · 별칭 TEST 붙임', '주석의 과제명으로 찾은 과제에 별칭이 없으면 project: 값(과제 약어)을 별칭으로');
+    assert.equal(book.projects[0].alias, 'TEST');
     const c = applyYaml(book, parse(fx('snapshot_r2.yaml')), { text: fx('snapshot_r2.yaml'), file: 'KR_test_r2.yaml', today: TODAY });
-    assert.equal(c.summary, '과제 찾음: 시험용 직류 차단기 개발 · 1차년도 · 비목 5개 · 참여연구자 — 1차년도 고침 · 변경이력 3건');
+    assert.equal(c.summary, '과제 찾음: TEST · 1차년도 · 비목 5개 · 참여연구자 — 1차년도 고침 · 변경이력 3건');
     const d = applyYaml(book, parse(fx('budget_history.yaml')), { current: book.projects[0], today: TODAY });
-    assert.equal(d.summary, '시험용 직류 차단기 개발 1차년도 · 변경이력 0건 넣음 · 2건에 사유 붙임 · 비목 5개');
+    assert.equal(d.summary, 'TEST 1차년도 · 변경이력 0건 넣음 · 2건에 사유 붙임 · 비목 5개');
     const y = book.projects[0].years[1];
     const up = y.changes.filter((ch) => ch.key?.startsWith('budget:'));
     assert.deepEqual(up.map((ch) => [ch.item, ch.before, ch.after, ch.reason, ch.date]), [
@@ -272,6 +282,19 @@ console.log('한 번에 — applyYaml');
     assert.equal(e.label, '참여연구원 이력');
     assert.equal(y.changes.length, 3 + 3 + 2);
     assert.throws(() => applyYaml(book, { foo: 1 }), /아는 모양의 YAML/);
+  });
+  t('이력 파일은 약어가 별칭인 과제로 간다 — 주석이 안 맞아도. 보고 있는 과제로 떨어진 것에는 별칭을 붙이지 않는다', () => {
+    const other = normalizeBook({ projects: [{ id: 'o', name: '다른 과제' }] }).projects[0];
+    book.projects.push(other);
+    const text = fx('revisions.yaml').replace('# 시험용 직류 차단기 개발', '# 주석이 바뀐 과제명').replace('rev: r2', 'rev: r9');
+    const r = applyYaml(book, parse(text), { text, current: other, today: TODAY });
+    assert.equal(r.project.id, book.projects[0].id, '별칭 TEST 인 과제');
+    assert.equal(other.years[1], undefined, '보고 있는 과제에는 넣지 않았다');
+    const loose = fx('revisions.yaml').replace('project: TEST', 'project: NEW').replace('# 시험용 직류 차단기 개발', '# 없는 과제명');
+    const r2 = applyYaml(book, parse(loose), { text: loose, current: other, today: TODAY });
+    assert.equal(r2.project, other, '찾지 못하면 보고 있는 과제');
+    assert.equal(other.alias, '', '엉뚱한 과제일 수 있어 별칭은 붙이지 않는다');
+    assert.doesNotMatch(r2.summary, /별칭/);
     assert.throws(() => applyYaml(normalizeBook(null), parse(fx('budget_history.yaml')), { current: null }), /먼저 그 과제의 스냅샷/);
   });
 }

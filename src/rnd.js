@@ -1,7 +1,9 @@
 // R&D 과제 관리의 순수 로직 — 화면은 rndpanel.js 가 그리고, 저장은 패널이 chrome.storage(rndBook)에 한다.
 //
 // 과제마다 연구기간을 **차년도**(1차년도·2차년도 … — 시작일부터 한 해씩, 마지막은 종료일까지)로 자르고, 차년도마다
-// **예산**(비목별 계획·집행)·**연구내역**(날짜·제목·내용)·**변경이력**(날짜·구분·항목·변경 전·후·사유)을 둔다.
+// **예산**(비목별 계획·집행)·**연구내역**(logs — 날짜·제목·내용)·**변경이력**(날짜·구분·항목·변경 전·후·사유)을 둔다.
+// 연구내역 가운데 연구개발계획서(YAML)에서 온 두 줄(key 'roster'·'plan')은 화면에서 참여연구자·연구개발 계획 칸으로 따로 보이고,
+// 나머지(손으로 적은 줄)는 진행 기록 칸에 보인다. 과제는 칩·머리에 별칭으로 보이니 별칭은 과제끼리 겹치지 않게 한다(aliasOwner).
 // 예산 **계획**을 고치거나 비목을 빼면, 과제의 책임자·연구기간을 고치면 변경이력에 저절로 한 줄이 남는다(auto) — 사유만 사람이 적는다.
 // 집행액은 쓰는 대로 바뀌는 값이라 변경이 아니다.
 //
@@ -210,6 +212,10 @@ export function normalizeBook(raw) {
 /** 장부에서 과제 하나. 없으면 null. */
 export const projectOf = (book, id) => book.projects.find((p) => p.id === id) || null;
 
+/** 별칭이 같은(띄어쓰기·대소문자는 가리지 않는다) 과제 — exceptId 의 과제는 빼고. 없거나 별칭이 비었으면 null. */
+export const aliasOwner = (book, alias, exceptId = '') =>
+  (keyOf(alias) ? book.projects.find((p) => p.id !== exceptId && keyOf(p.alias) === keyOf(alias)) || null : null);
+
 /**
  * 과제의 보고 있는 차년도 — 골라 둔 것이 아직 있는 차년도면 그것, 아니면 오늘이 든 차년도.
  * 연구기간을 고쳐 차년도 수가 줄면 골라 둔 것이 없어질 수 있다.
@@ -271,6 +277,11 @@ export function projectChanges(before, after, date = todayStr()) {
 }
 
 export const calendarLabel = (calendar) => (calendar ? '1월 1일(첫 해는 시작일부터 12월 31일까지)' : '시작일부터 한 해씩');
+
+/** 계획서에서 온 연구내역 한 줄 — src/rndyaml.js 가 key 'roster'(참여연구자)·'plan'(연구개발 계획)으로 넣는다. 없으면 null. */
+export const fileLog = (y, key) => (y?.logs || []).find((l) => l.key === key) || null;
+/** 손으로 적은 진행 기록 — 계획서에서 온 줄(key 가 있는 것)은 뺀다. */
+export const noteLogs = (y) => (y?.logs || []).filter((l) => !l.key);
 
 /** 날짜가 늦은 것부터. 같은 날은 넣은 차례 그대로(뒤에 넣은 것이 앞). */
 export const newestFirst = (list) => [...(list || [])].map((x, i) => [x, i]).sort((a, b) => (b[0].date || '').localeCompare(a[0].date || '') || b[1] - a[1]).map(([x]) => x);
@@ -470,7 +481,7 @@ export const changeLines = (changes) => [...(changes || [])].sort((a, b) => (a.d
 
 /* ------------------------------------------------------------ 요약 */
 
-/** 과제 한 차년도를 붙여 넣을 글로 — 과제 개요 · 예산표 · 연구내역 · 변경이력. 보고서·메일에 붙여 넣는다. */
+/** 과제 한 차년도를 붙여 넣을 글로 — 과제 개요 · 예산표 · 참여연구자 · 연구개발 계획(계획서에서 온 것이 있을 때) · 진행 기록 · 변경이력. */
 export function summaryText(project, n, today = todayStr()) {
   const ys = yearsOf(project);
   const y = ys.find((x) => x.n === n) || ys[0];
@@ -493,8 +504,18 @@ export function summaryText(project, n, today = todayStr()) {
   }
   if (rows.length) lines.push(`- 합계: 계획 ${won(sum.plan)} · 집행 ${won(sum.used)} · 잔액 ${won(sum.left)}${sum.rate == null ? '' : ` · 집행률 ${sum.rate}%`}`);
 
-  lines.push('', `■ 연구내역 (${book.logs.length}건)`);
-  lines.push(...(book.logs.length ? logLines(book.logs) : ['- 적은 것 없음']));
+  const roster = fileLog(book, 'roster');
+  if (roster) {
+    const people = parseRoster(roster.text);
+    lines.push('', `■ 참여연구자${people ? ` (${people.length}명)` : ''}`, ...roster.text.split('\n').filter((s) => s.trim()).map((s) => `- ${s.trim()}`));
+  }
+  // 계획 글에는 ■ 절이 있으니 한 칸 들여 이 절 아래로 넣는다.
+  const plan = fileLog(book, 'plan');
+  if (plan) lines.push('', '■ 연구개발 계획', ...plan.text.split('\n').filter((s) => s.trim()).map((s) => `  ${s}`));
+
+  const notes = noteLogs(book);
+  lines.push('', `■ 진행 기록 (${notes.length}건)`);
+  lines.push(...(notes.length ? logLines(notes) : ['- 적은 것 없음']));
 
   lines.push('', `■ 변경이력 (${book.changes.length}건)`);
   lines.push(...(book.changes.length ? changeLines(book.changes) : ['- 적은 것 없음']));

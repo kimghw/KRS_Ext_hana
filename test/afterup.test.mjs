@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { afterUp, upBusy, UP_BUSY_KEY, UP_BUSY_MS, PANEL_HOW, ASK_TEXT } from '../src/afterup.js';
 import { intakeEvidence } from '../src/intake.js';
 import { createEvidenceStore, MARKS_KEY } from '../src/evidence.js';
-import { lodgeSame, lodgeKnown } from '../src/after.js';
+import { lodgeSame, lodgeKnown, lodgeComment, LODGE_OVER_REASON } from '../src/after.js';
 import { STAGES_KEY } from '../src/settling.js';
 import { todayStr } from '../src/parse.js';
 
@@ -58,7 +58,8 @@ function fakeSite({ pre = '완료', post = '대기', rows = [KTX('2026-09-09', '
       const send = plan.lodge.filter((l) => !same.includes(l));
       if (!send.length && !plan.trans.length && !plan.air) return { row: r, stage: stage(), sent: false, same, lodgeRows: [], lodgeSeqs: [] };
       const lodgeRows = send.map((l) => ({ seq: String(s.next++), del: '0', paydate: l.paydate, company: l.company, sday: String(l.sday), total: String(l.total) }));
-      s.saves.push({ trseq, lodge: send.map((l) => ({ company: l.company, paydate: l.paydate, sday: l.sday, total: l.total, samount: l.samount, vat: l.vat, file: l.file?.name || '', bytes: l.file?.dataUrl || '' })),
+      // comment 는 실제 폼에 나가는 비고다(src/after.js afterFields 가 lodgeComment 로 짓는다) — 상한액을 넘겨 실제 금액으로 정산하면 사유가 붙는다.
+      s.saves.push({ trseq, lodge: send.map((l) => ({ company: l.company, paydate: l.paydate, sday: l.sday, total: l.total, samount: l.samount, vat: l.vat, comment: lodgeComment(l), file: l.file?.name || '', bytes: l.file?.dataUrl || '' })),
         trans: plan.trans.map((x) => `${x.date} ${x.dep}→${x.arr} ${x.transport} ${x.total}`), air: plan.air });
       s.lodges.push(...lodgeRows);
       s.post = '작성';
@@ -104,13 +105,13 @@ await ta('숙박 영수증 — 그때 읽은 기록으로 숙박 줄을 올리�
   assert.match(r.text, /^사후정산을 올렸습니다 — 숙박 킨텍스호텔 1박 110,000원/);
   assert.equal(r.brief, '사후정산을 올렸습니다 — 숙박 킨텍스호텔 1박 110,000원', '접어 둔 알림에 적을 한 줄 — 무엇을 올렸는지만');
   assert.deepEqual(site.saves, [{ trseq: '157777', trans: [], air: null,
-    lodge: [{ company: '킨텍스호텔', paydate: '2026-09-10', sday: 1, total: 110000, samount: 100000, vat: 10000, file: 'hotel.png', bytes: png('hotel.png').dataUrl }] }]);
+    lodge: [{ company: '킨텍스호텔', paydate: '2026-09-10', sday: 1, total: 110000, samount: 100000, vat: 10000, comment: '', file: 'hotel.png', bytes: png('hotel.png').dataUrl }] }]);
   assert.deepEqual(site.calls, ['list', 'preDetail', 'lodgeMax:157777', 'afterSave'], '사전정산이 완료돼 있으면 확정하지 않는다');
   assert.deepEqual(await s.todo(), []);
   assert.deepEqual((await s.store.list('TR-1')).map((k) => [k.name, !!k.todo, !!k.record]), [['lunch.png', false, false], ['hotel.png', false, true]]);
   assert.deepEqual(s.marks.at(-1), { 'TR-1': [{ name: 'lunch.png', label: '출장지 영수증' }, { name: 'hotel.png', label: '숙박 증빙' }] }, '홈 카드와 패널이 보는 것에서도 표시가 걷힌다');
   assert.deepEqual(storage.data.attendLodgeMine, { 145580: { 81561: 'hotel.png' } }, '패널의 숙박비 내역이 그 줄을 증빙으로 올린 줄로 알아본다');
-  assert.deepEqual(storage.data.attendLodgeActual, { 145580: { 81561: { actual: 110000, supply: 100000, vat: 10000 } } }, '실제 금액과 문서의 공급가액·부가세 — 패널의 상한 버튼이 되돌릴 때 쓴다');
+  assert.deepEqual(storage.data.attendLodgeActual, { 145580: { 81561: { actual: 110000, supply: 100000, vat: 10000, reason: null } } }, '실제 금액과 문서의 공급가액·부가세 — 패널의 상한 버튼이 되돌릴 때 쓴다(상한액 안이라 비고의 사유는 없다)');
   assert.ok(stages.includes('숙박비 상한액을 확인하는 중...'));
 });
 await ta('올린 것은 활동 기록에 남는다 — 패널이 남기는 기록과 같은 머리라 숙박비 내역이 알아본다', async () => {
@@ -201,7 +202,8 @@ await ta('올리지 않고 무엇을 고를지 돌려준다 — 패널의 출장
     question: '실제 금액 150,000원이 상한액 120,000원(1일 120,000원 × 1박)을 넘습니다. 정산금액을 어느 쪽으로 올릴까요?',
     choices: [
       { settle: 'cap', label: '상한액 120,000원으로' },
-      { settle: 'real', label: '실제 금액 150,000원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다' },
+      // 실제 금액으로 올리면 비고에 들어가는 상한 초과 사유(2026-10-08 사용자 지정) — 홈 줄의 아이콘 풍선말에 적힌다.
+      { settle: 'real', label: '실제 금액 150,000원으로 · 부서장 승인', note: '상한액의 1.5배(180,000원) 이내라 부서장 승인을 받아 실제 금액으로 정산할 수 있습니다', reason: LODGE_OVER_REASON },
     ],
   }]);
   assert.deepEqual(await s.todo(), ['suite.png']);
@@ -212,7 +214,7 @@ await ta('상한액으로 고르면 상한액으로 올린다 — 공급가액·
   await s.drop('suite.png', SUITE);
   const r = await up(s.deps(site), { settle: { 'suite.png': 'cap' } });
   assert.deepEqual([r.ok, r.sent, r.ask], [true, true, undefined]);
-  assert.deepEqual(site.saves[0].lodge.map((l) => [l.company, l.total, l.samount, l.vat]), [['일산스위트', 120000, 109091, 10909]]);
+  assert.deepEqual(site.saves[0].lodge.map((l) => [l.company, l.total, l.samount, l.vat, l.comment]), [['일산스위트', 120000, 109091, 10909, '']], '상한액으로 정산하면 비고에 사유를 적지 않는다');
   assert.match(r.text, /^사후정산을 올렸습니다 — 숙박 일산스위트 1박 120,000원\(상한액\)/);
   assert.doesNotMatch(r.text, /부서장/);
   assert.deepEqual(await s.todo(), []);
@@ -220,10 +222,12 @@ await ta('상한액으로 고르면 상한액으로 올린다 — 공급가액·
 await ta('실제 금액으로 고르면 그 금액으로 올리고, 부서장 승인이 필요하다고 줄에 적는다 — 고른 것은 기록에도 남는다', async () => {
   const s = shelf();
   const site = fakeSite();
+  const storage = fakeStorage();
   await s.drop('suite.png', SUITE);
-  const r = await up(s.deps(site), { settle: { 'suite.png': 'real' } });
+  const r = await up(s.deps(site, storage), { settle: { 'suite.png': 'real' } });
   assert.equal(r.sent, true);
-  assert.deepEqual(site.saves[0].lodge.map((l) => [l.company, l.total]), [['일산스위트', 150000]]);
+  assert.deepEqual(site.saves[0].lodge.map((l) => [l.company, l.total, l.comment]), [['일산스위트', 150000, LODGE_OVER_REASON]], '실제 금액으로 올리면 비고에 상한 초과 사유(기본 문구)가 들어간다');
+  assert.equal(storage.data.attendLodgeActual[145580][81561].reason, LODGE_OVER_REASON, '비고에 적은 사유를 실제 금액과 같이 적어 둔다 — 패널의 상한 버튼이 잇고 걷을 때 쓴다');
   assert.equal(r.text, '사후정산을 올렸습니다 — 숙박 일산스위트 1박 150,000원 · 일산스위트: 부서장 승인 필요 — 상한액의 1.5배(180,000원) 이내');
   assert.equal(r.brief, '사후정산을 올렸습니다 — 숙박 일산스위트 1박 150,000원 · 부서장 승인 필요', '접어 둔 한 줄에도 승인이 필요하다는 것은 남는다');
   await wait();

@@ -46,7 +46,7 @@ export function skillGuide(manifest, { today = '' } = {}) {
     lines.push(`${i + 1}. ${p.step} — ${p.run}`, `   → ${p.out}`);
   });
   lines.push(
-    `${PIPELINE.length + 1}. 나온 YAML(KR_<과제>.yaml · KR_<과제>_r{N}.yaml · history/*.yaml)을 KRS WORKSPACE 의 R&D 탭 "연구개발계획서 YAML 넣기" 에 끌어다 놓으면 과제·차년도의 예산·연구내역·변경이력에 들어갑니다.`,
+    `${PIPELINE.length + 1}. 나온 YAML(KR_<과제>.yaml · KR_<과제>_r{N}.yaml · history/*.yaml)을 KRS WORKSPACE 의 R&D 탭 "연구개발계획서 YAML 넣기" 에 끌어다 놓으면 과제·차년도의 예산·참여연구자·연구개발 계획·변경이력에 들어갑니다.`,
     '',
     '스킬:',
   );
