@@ -1,0 +1,16 @@
+# 외부활동 허가 신청서의 첨부 — 요청 공문·초청장·위촉 요청 메일에 행사 안내·일정표를 더 넣는다.
+doc: 요청 공문
+ask: 외부활동 요청 공문·메일(강의·자문·심사·발표 의뢰)을 넣으세요
+more: 행사 안내·일정표 더 넣기
+need: []
+parts:
+  request: 요청 공문
+  event: 행사 안내문
+  course: 행사 안내문
+  content: 활동 자료
+  quote: 견적서
+  statement: 청구서
+  order: 예약 내역
+  other: 참고 자료
+# 첨부 파일 이름(견적서_<이 칸의 값>_날짜.pdf)과 읽은 문서의 머리(견적서 · <이 칸의 값> · 견적일)에 붙일 초안 칸 — purpose.yaml 의 fields key
+who: org

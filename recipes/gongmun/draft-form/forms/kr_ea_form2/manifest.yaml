@@ -1,0 +1,6 @@
+# 기안문 — 양식 칸에서 고를 수 있는 다른 폼. 목적은 두지 않는다 — 갈래(목적)의 제목·본문 틀을 그대로 이 폼에 넣는다.
+# 원본: ApprovalInPrinciple doc_recipes/technical-review-request/forms/kr_ea_form2(2026-08-11 실저장 통과)
+working_unit_id: draft-form
+label: 기안문
+form_id: KR_EA_Form2
+purposes: []

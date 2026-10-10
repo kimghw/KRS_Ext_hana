@@ -28,26 +28,56 @@ button.ghost:hover { background: var(--surface-soft); color: var(--fg); }
 button.small { min-height: 28px; padding: 4px 8px; font-size: 14px; }
 button.wide { width: 100%; margin-top: 10px; min-height: 40px; }
 .card { border: 1px solid var(--line); border-radius: 17px; background: var(--surface); box-shadow: var(--shadow); }
-.app-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
-.eyebrow { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: 1.7px; }
-.brand-mark { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 4px; background: var(--fg); color: var(--surface); font-size: 12px; letter-spacing: 0; }
-h1 { margin: 6px 0 0; font-size: 28px; line-height: 1.25; font-weight: 700; letter-spacing: -1.2px; }
-.title-dot { color: var(--pick); }
+.app-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 12px; margin-bottom: 16px; }
+.app-identity { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.brand-copy { min-width: 0; }
+.eyebrow { color: var(--muted); font-size: 9px; line-height: 1.4; font-weight: 650; letter-spacing: 1px; white-space: nowrap; }
+.brand-mark { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--pick) 15%, var(--line)); border-radius: 10px; background: var(--pick-soft); color: var(--pick); }
+.brand-mark svg { width: 21px; height: 21px; stroke-width: 2.2; }
+.app-header h1 { margin: 2px 0 0; font-size: 18px; line-height: 1.3; font-weight: 650; letter-spacing: -.45px; }
 button.icon { width: 32px; min-height: 32px; padding: 7px; }
-.app-header .refresh { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); color: var(--muted); }
-.app-header .refresh:hover { color: var(--pick); background: var(--pick-soft); }
-.head-tools { display: flex; flex: none; align-items: center; gap: 10px; }
-/* 홈 카드 사용 여부. 새로고침 버튼 옆의 작은 알약 — 눈에 띄되 제목을 밀어내지 않게. */
+.app-header button.icon { position: relative; width: 34px; height: 34px; min-height: 34px; padding: 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: none; color: var(--muted); }
+.app-header button.icon svg { width: 18px; height: 18px; stroke-width: 1.8; }
+.app-header button.icon:hover:not(:disabled) { color: var(--pick); border-color: color-mix(in srgb, var(--pick) 30%, var(--line)); background: var(--pick-soft); }
+.app-header button:focus-visible, .home-toggle input:focus-visible { outline-width: 2px; outline-offset: 2px; }
+.head-tools { display: flex; flex: none; align-items: center; gap: 7px; margin-left: auto; }
+/* 네이티브 체크박스라 키보드·저장 동작은 그대로이고, 집 아이콘 옆의 작은 스위치로 표시한다. */
 .home-toggle {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 11px 4px 9px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow);
-  color: var(--muted); font-size: 13px; font-weight: 550; white-space: nowrap; cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 6px 9px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  color: var(--muted); font-size: 11px; font-weight: 550; white-space: nowrap; cursor: pointer; user-select: none;
+  transition: color .16s ease, border-color .16s ease, background .16s ease;
 }
-.home-toggle:hover { color: var(--fg); }
-.home-toggle:has(input:checked) { color: var(--pick); border-color: var(--pick); background: var(--pick-soft); }
-.home-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--pick); cursor: pointer; }
+.home-toggle .home-icon { width: 16px; height: 16px; stroke-width: 1.8; }
+.home-toggle:hover { color: var(--fg); background: var(--surface-soft); }
+.home-toggle:has(input:checked) .home-icon { color: var(--pick); }
+.home-toggle:focus-within { border-color: color-mix(in srgb, var(--pick) 40%, var(--line)); }
+.home-toggle input { appearance: none; position: relative; flex: none; width: 26px; height: 16px; margin: 0; border: 1px solid var(--faint); border-radius: 999px; background: var(--faint); cursor: pointer; transition: background .16s ease, border-color .16s ease; }
+.home-toggle input::before { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); transition: transform .16s ease; }
+.home-toggle input:checked { border-color: var(--pick); background: var(--pick); }
+.home-toggle input:checked::before { transform: translateX(10px); }
+@media (max-width: 520px) {
+  .home-toggle { position: relative; }
+  .home-toggle-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@media (forced-colors: active) {
+  .home-toggle input { appearance: auto; background: none; }
+  .home-toggle input::before { display: none; }
+}
 .refresh.spin svg { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* GitHub 새 커밋(gitsync.js). 새 커밋·재시작 대기는 연한 파랑, 갈라짐·겹침은 빨간 배지로 구분한다. */
+.app-header .git-sync[hidden] { display: none; }
+.app-header .git-sync[data-mode="new"], .app-header .git-sync[data-mode="reload"] { color: var(--pick); border-color: color-mix(in srgb, var(--pick) 30%, var(--line)); background: var(--pick-soft); }
+.app-header .git-sync[data-mode="error"] svg { opacity: .45; }
+.git-sync.busy svg { animation: gitPulse .7s ease-in-out infinite alternate; }
+@keyframes gitPulse { to { opacity: .3; } }
+.git-count {
+  position: absolute; top: -4px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  background: var(--pick); color: #fff; font-size: 9px; font-weight: 700; line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--bg);
+}
+.git-count[hidden] { display: none; }
+.git-sync[data-mode="diverged"] .git-count, .git-sync[data-mode="blocked"] .git-count { background: var(--danger); }
 .controls { padding: 11px 16px; }
 .date-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .date-display { position: relative; display: flex; align-items: center; gap: 11px; min-width: 0; cursor: pointer; border-radius: 8px; }
@@ -477,7 +507,6 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-wfa-head strong { color: var(--fg); font-size: 13px; }
 .attend .at-wfa-head a { color: var(--pick); text-decoration: none; }
 .attend .at-wfa-head a:hover { text-decoration: underline; }
-.attend .at-wfa-count { color: var(--fg); font-weight: 600; }
 .attend .at-wfa-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .attend .at-wfa-rows li { display: grid; grid-template-columns: 3.2em minmax(0, 1fr) auto auto; gap: 8px; font-variant-numeric: tabular-nums; }
 .attend .at-wfa-rows li span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -490,6 +519,15 @@ button.danger:hover { filter: brightness(1.08); }
 .attend .at-wfa-open { align-self: flex-start; }
 /* 연차 안의 "기념일 지원" 체크박스 — 연차 칸과 기념일 칸 사이의 머리다. 위에 가는 선을 두어 아래 칸이 기념일 몫인 것이 보이게 한다. */
 .attend .at-field.at-check[data-key="wfa"] { padding-top: 10px; border-top: 1px solid var(--line); font-weight: 600; }
+/* 그 체크박스 오른쪽의 올해 쓴 횟수(올해 2/5번 사용 — 2026-10-09 사용자 지정). 다 썼으면 붉게, 못 읽었으면 흐리게. */
+.attend .at-wfa-used {
+  order: 3; padding: 1px 8px; border-radius: 999px; background: var(--surface-soft);
+  font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.attend .at-wfa-used.full { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
+.attend .at-wfa-used.wait, .attend .at-wfa-used.err { color: var(--faint); font-weight: 400; }
+/* 신청사항(이름이 칸 위에 선다) 옆의 기념일(이름이 칸 안에 있다)은 칸의 아래쪽에 붙인다 — 그래야 두 칸의 줄이 맞는다. */
+.attend .at-field[data-key="wfaDate"] { align-self: end; }
 
 /* 날짜·시각 칸은 이름을 칸 안 왼쪽에 적는다 — 이름 줄을 따로 두지 않아 한 줄씩 줄어든다.
    이름은 칸 위에 얹고(눌러도 칸이 받는다), 칸은 이름 글자 수(--lab)만큼 왼쪽을 비운다. */
@@ -995,33 +1033,43 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-kind.active { background: var(--pick); border-color: var(--pick); color: #fff; }
 .gongmun .gm-kind.active small { color: rgb(255 255 255 / 75%); }
 
-/* 갈래 아래의 과제 줄(구매·교육·출장) — "과제" 머리말 뒤에 별칭 칩. 아직 고르지 않았으면 머리말이 고르라고 한다(.need). */
-.gongmun .gm-projbar { display: flex; align-items: flex-start; gap: 8px; margin: -4px 0 12px; }
-.gongmun .gm-projbar-label { flex: none; padding-top: 7px; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* 연결 과제는 업무 탭보다 가벼운 설정 행으로 표시한다. 별칭과 라디오 표시로 고른 과제를 구분한다. */
+.gongmun .gm-projbar { display: flex; align-items: flex-start; gap: 10px; margin: -2px 0 14px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px; }
+.gongmun .gm-projbar-caption { display: inline-flex; flex: none; align-items: center; gap: 5px; min-height: 30px; color: var(--muted); }
+.gongmun .gm-projbar-caption svg { width: 14px; height: 14px; }
+.gongmun .gm-projbar-label { font-size: 12px; font-weight: 600; white-space: nowrap; }
 .gongmun .gm-projbar.need .gm-projbar-label { color: var(--pick); }
-.gongmun .gm-pick-row { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.gongmun .gm-pick-row .gm-noproj { padding-top: 6px; }
-
-/* 채팅 칸 — 근태의 말로 채우기와 같은 모양. 여러 줄 표를 붙여 넣으면 칸이 자란다(gongmunpanel.js 의 growChat). */
-.gongmun .gm-chat { margin-bottom: 12px; padding: 9px 11px; }
-.gongmun .gm-chat .ask-bar { align-items: flex-start; }
-.gongmun .gm-chat .sparkle-icon { margin-top: 11px; }
-.gongmun .gm-chat textarea {
-  flex: 1; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 12px; border: 1px solid transparent; border-radius: 10px;
-  background: var(--surface-soft); font: inherit; font-size: 14px; line-height: 1.5; color: inherit; resize: none; overflow-y: auto;
+.gongmun .gm-pick-row { display: flex; flex: 1; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.gongmun .gm-pick {
+  position: relative; display: block; max-width: 100%; min-height: 30px; padding: 4px 10px 4px 28px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.gongmun .gm-chat textarea::placeholder { color: var(--faint); }
-.gongmun .gm-chat.off .ask-bar button { background: var(--surface-soft); color: var(--muted); opacity: 1; }
-.gongmun .gm-chat.off .sparkle-icon { color: var(--faint); opacity: .55; }
-.gongmun .gm-chat-log { list-style: none; margin: 0; padding: 0; }
-.gongmun .gm-chat-log:not(:empty) { margin-top: 9px; }
+.gongmun .gm-pick::before { content: ""; position: absolute; left: 10px; top: calc(50% - 5px); width: 10px; height: 10px; border: 1px solid var(--faint); border-radius: 50%; }
+.gongmun .gm-pick:hover { border-color: var(--pick); color: var(--pick); background: var(--pick-soft); }
+.gongmun .gm-pick.active { border-color: color-mix(in srgb, var(--pick) 40%, var(--line)); color: var(--pick); background: var(--pick-soft); font-weight: 650; }
+.gongmun .gm-pick.active::before { border-color: var(--pick); background: var(--pick); box-shadow: inset 0 0 0 2px var(--surface); }
+.gongmun .gm-pick-row .gm-noproj { padding-top: 4px; }
+
 .gongmun .gm-say { margin-top: 5px; padding: 7px 10px; border-radius: 10px; font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
 .gongmun .gm-say.me { margin-left: 18%; background: var(--pick-soft); color: var(--fg); }
 .gongmun .gm-say.ai { margin-right: 8%; background: var(--surface-soft); color: var(--muted); }
 .gongmun .gm-say.error { color: var(--danger); }
 
-/* 문서 넣는 곳(세 갈래가 같다). 고르는 단추는 감추고(탭으로는 닿는다) 점선 상자 전체가 끌어다 놓는 자리이자 누르는 자리다. 안내는 한 줄(gm-drop-how)뿐이다. */
-.gongmun .gm-intake { position: relative; padding: 10px; }
+/* 참고 문서 카드 안에서 자료 추가와 읽은 결과를 이어서 본다. 초안이 있으면 추가 영역을 한 줄로 줄인다. */
+.gongmun .gm-evidence { margin-bottom: 12px; padding: 11px 12px; }
+.gongmun .gm-evidence-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.gongmun .gm-evidence-head strong { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); font-size: 14px; font-weight: 650; }
+.gongmun .gm-evidence-head strong svg { width: 16px; height: 16px; color: var(--muted); }
+.gongmun .gm-evidence-head > .ghost { margin-left: auto; font-size: 12px; }
+.gongmun .gm-fold { display: flex; flex: 1; min-width: 0; justify-content: flex-start; gap: 8px; min-height: 28px; padding: 0; background: transparent; text-align: left; }
+.gongmun .gm-fold:hover { background: transparent; }
+.gongmun .gm-fold-caret { width: 15px; height: 15px; color: var(--muted); transition: transform .16s ease; }
+.gongmun .gm-fold > .gm-fold-caret { margin-left: auto; }
+.gongmun [aria-expanded="false"] > .gm-fold-caret { transform: rotate(-90deg); }
+.gongmun .gm-evidence-body { margin-top: 8px; }
+.gongmun .gm-evidence-count { padding: 2px 6px; border-radius: 5px; background: var(--surface-soft); color: var(--muted); font-size: 11px; }
+.gongmun .gm-evidence-count:empty { display: none; }
+.gongmun .gm-intake { position: relative; }
 .gongmun .gm-intake input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .gongmun .gm-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
@@ -1030,7 +1078,7 @@ button.danger:hover { filter: brightness(1.08); }
 }
 .gongmun .gm-drop:hover, .gongmun .gm-intake.over .gm-drop { border-color: var(--pick); background: color-mix(in srgb, var(--pick) 16%, var(--surface)); }
 .gongmun .gm-drop:has(input[type="file"]:focus-visible) { outline: 2px solid var(--pick); outline-offset: 2px; }
-.gongmun .gm-drop-lead { display: inline-flex; align-items: center; gap: 6px; color: var(--pick); font-size: 14px; font-weight: 650; }
+.gongmun .gm-drop-lead { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; color: var(--pick); font-size: 14px; font-weight: 650; word-break: keep-all; overflow-wrap: anywhere; }
 .gongmun .gm-drop-lead svg { width: 17px; height: 17px; }
 .gongmun .gm-drop-how { color: var(--muted); font-size: 12px; word-break: keep-all; }
 .gongmun .gm-intake[aria-busy="true"] .gm-drop { opacity: .65; cursor: progress; }
@@ -1039,6 +1087,15 @@ button.danger:hover { filter: brightness(1.08); }
 /* 문서 넣는 곳 아래의 단추들 — 웹페이지 캡처(보고 있는 탭 · 부분 골라 캡처), 문서 없이 쓰기. */
 .gongmun .gm-intake-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; margin-top: 6px; }
 .gongmun .gm-intake-actions button { font-size: 12px; }
+.gongmun .gm-intake.compact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.gongmun .gm-intake.compact .gm-drop { flex: 1 1 210px; min-width: 0; min-height: 40px; padding: 8px 10px; border-width: 1px; border-color: var(--line); border-radius: 9px; background: var(--surface-soft); text-align: left; align-items: flex-start; }
+.gongmun .gm-intake.compact .gm-drop:hover, .gongmun .gm-intake.compact.over .gm-drop { border-color: var(--pick); background: var(--pick-soft); }
+.gongmun .gm-intake.compact .gm-drop-lead { font-size: 12px; font-weight: 600; }
+.gongmun .gm-intake.compact .gm-drop-lead svg { width: 15px; height: 15px; }
+.gongmun .gm-intake.compact .gm-drop-how { display: none; }
+.gongmun .gm-intake.compact .gm-intake-actions { margin: 0 0 0 auto; justify-content: flex-end; }
+.gongmun .gm-capture .wp-btns { gap: 4px; }
+.gongmun .gm-capture .wp-open { min-height: 30px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; }
 /* 웹페이지 캡처 단추 둘(webpick.js) — 공문 탭의 문서 넣는 곳과 출장 카드의 증빙 넣는 곳(사후정산 칸·여비증빙 송부 칸)이 같은 단추를 쓴다.
    글자는 전체 · 부분이고, 부분은 고르는 동안 "고르기 취소"로 바뀌고 파랗게 켜진다. */
 .wp-btns { display: inline-flex; align-items: center; gap: 2px; }
@@ -1046,31 +1103,56 @@ button.danger:hover { filter: brightness(1.08); }
 .wp-open svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .wp-open:disabled { opacity: .6; cursor: progress; }
 .wp-part.on { background: var(--pick-soft); }
-.gongmun .gm-intake .cli-help { margin: 8px 2px 0; }
-.gongmun .statusline { margin-bottom: 10px; }
+.gongmun .gm-intake .cli-help { flex-basis: 100%; margin: 8px 2px 0; }
+.gongmun .gm-evidence .statusline { margin: 6px 2px 0; }
+.gongmun .gm-evidence .statusline:has(.status:empty) { display: none; }
 
-/* 읽은 내용·공문 카드 */
-.gongmun .gm-draft, .gongmun .gm-doc { margin-bottom: 12px; padding: 14px 16px; }
-.gongmun .gm-draft { border-color: color-mix(in srgb, var(--pick) 25%, var(--line)); }
-.gongmun .gm-source { display: flex; flex-direction: column; gap: 3px; margin: -4px 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+/* 작성 내용·공문·읽은 내용은 탭을 바꾸어 보고, 카드 전체를 접을 수 있다. 입력 노드는 그대로 유지한다. 카드 폭은 비교작성의 두 칸 기준(컨테이너 쿼리). */
+.gongmun .gm-workspace { margin-bottom: 12px; overflow: hidden; container-type: inline-size; }
+.gongmun .gm-workspace-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.gongmun .gm-workspace.folded .gm-workspace-head { border-bottom-color: transparent; }
+.gongmun .gm-view-tabs { display: flex; flex: 1; gap: 2px; min-width: 0; max-width: 300px; padding: 3px; border-radius: 10px; background: var(--surface-soft); }
+.gongmun .gm-view-tab { flex: 1; min-width: 0; min-height: 32px; padding: 4px 6px; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gongmun .gm-view-tab.active { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+/* 비교작성 탭의 읽은 내용 탭 — 고른 탭은 아니지만 오른쪽에 보이고 있다(고를 수 없다). */
+.gongmun .gm-view-tab.beside { color: var(--pick); box-shadow: inset 0 0 0 1px var(--pick); opacity: 1; }
+.gongmun .gm-view-tab:hover:not(:disabled):not(.active) { color: var(--fg); background: var(--line); }
+/* 비교작성 단추 — 이 페이지를 크롬 탭(sidepanel.html?compare=갈래)에 넓게 연다. */
+.gongmun .gm-compare { flex: none; gap: 4px; font-size: 12px; white-space: nowrap; }
+.gongmun .gm-compare svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.gongmun .gm-workspace-toggle { flex: none; gap: 3px; margin-left: auto; font-size: 12px; }
+.gongmun .gm-draft, .gongmun .gm-doc, .gongmun .gm-read-view { margin: 0; padding: 12px 16px 14px; }
+.gongmun .gm-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+.gongmun .gm-source { display: flex; flex-direction: column; gap: 3px; margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .gongmun .gm-note { display: block; color: color-mix(in srgb, var(--mine) 70%, var(--fg)); font-size: 12px; line-height: 1.5; }
-/* 읽은 문서 — 접어 두는 칸(펴면 읽은 줄·오린 견적서·품목·읽은 칸). 펼쳐 두는 것은 과제·용도·사유·에이전트·결재선이다. */
-.gongmun .gm-more { margin: -4px 0 8px; border-bottom: 1px solid var(--line); }
-.gongmun .gm-more > summary { min-height: 34px; font-size: 13px; }
-.gongmun .gm-more > summary > span:first-of-type { flex: none; color: var(--fg); font-weight: 600; }
-.gongmun .gm-more > summary .summary-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gongmun .gm-more-body { padding: 4px 0 10px; }
-.gongmun .gm-more-body .gm-source { margin-top: 0; }
+/* 비교작성 탭의 두 칸 — 왼쪽은 고른 탭(작성 내용·공문), 오른쪽은 읽은 내용(DOM 의 맨 뒤라 오른쪽 칸). 사이드패널 안에서는 쓰지 않는다. */
+.gongmun #gmWorkspaceBody.compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.gongmun #gmWorkspaceBody.compare > .gm-read-view { border-left: 1px solid var(--line); }
+/* 사이드패널이 좁으면 세 탭이 한 줄을 다 쓰고 비교작성·접기는 다음 줄로 — 탭 글자가 잘리지 않게. */
+@container (max-width: 429px) {
+  .gongmun .gm-workspace-head { flex-wrap: wrap; row-gap: 6px; }
+  .gongmun .gm-view-tabs { flex-basis: 100%; max-width: none; }
+}
+/* 비교작성 탭 — sidepanel.html?compare=갈래 를 크롬 탭으로 연 것(sidepanel.js 의 initCompareTab). 공문 탭만, 넓게. 문서 넣기·비우기·오린 견적서 다시 오리기·
+   양식·공문 설정은 사이드패널에서 한다(읽은 파일이 거기 있다). 참고 문서 카드는 상태 말·한도 알림이 있을 때만 보인다. */
+body.compare-tab .app { max-width: 1240px; }
+body.compare-tab .gongmun #gmIntake, body.compare-tab .gongmun #gmReset, body.compare-tab .gongmun #gmTplBox, body.compare-tab .gongmun #gmPresetBox,
+body.compare-tab .gongmun .gm-cut-acts, body.compare-tab .gongmun [data-act="rnd"] { display: none; }
+body.compare-tab .gongmun .gm-evidence:has(.status:empty):has(.gm-limit.hidden) { display: none; }
+body.compare-tab .gongmun .gm-evidence-body { margin-top: 0; }
+body.compare-tab .gongmun .gm-draft, body.compare-tab .gongmun .gm-doc, body.compare-tab .gongmun .gm-read-view { padding: 16px 22px 18px; }
+body.compare-tab .gongmun .gm-cut img { max-height: 520px; }
+body.compare-tab .gongmun .gm-agent .ask-bar textarea { flex: 1; }
 .gongmun .gm-label small { margin-left: 4px; color: var(--faint); font-size: 11px; }
 /* 에이전트 칸 — 위의 채팅 칸과 같은 모양을 카드 안에 둔다. */
 .gongmun .gm-agent { margin: 10px 0 0; padding: 0; }
 /* 오린 견적서 — 가격과 그 둘레. 그림은 패널 폭에 맞추고 너무 길면 줄여 보인다. */
-.gongmun .gm-cut { margin: 0 0 10px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.gongmun .gm-cut { margin: 12px 0 0; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
 .gongmun .gm-cut-head { display: flex; align-items: baseline; gap: 8px; margin: 0 2px 6px; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .gongmun .gm-cut-head strong { flex: none; color: var(--fg); font-size: 13px; }
 .gongmun .gm-cut img { display: block; max-width: 100%; max-height: 260px; margin: 0 auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; object-fit: contain; }
 .gongmun .gm-cut-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
-.gongmun .gm-items { list-style: none; margin: 0 0 10px; padding: 0; border-top: 1px solid var(--line); }
+.gongmun .gm-items { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
 .gongmun .gm-items:empty { display: none; }
 .gongmun .gm-items li { display: flex; flex-direction: column; padding: 6px 2px; border-bottom: 1px solid var(--line); }
 .gongmun .gm-item-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
@@ -1080,6 +1162,7 @@ button.danger:hover { filter: brightness(1.08); }
   background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger); font-size: 13px; line-height: 1.6;
 }
 .gongmun .gm-limit.warn { border-color: color-mix(in srgb, var(--mine) 45%, var(--line)); background: color-mix(in srgb, var(--mine) 10%, var(--surface)); color: var(--fg); }
+.gongmun .gm-evidence-body > .gm-limit { margin: 10px 0 0; }
 .gongmun .gm-label { display: block; margin: 12px 0 5px; color: var(--muted); font-size: 13px; }
 .gongmun .gm-draft > .gm-label:first-of-type { margin-top: 4px; }
 
@@ -1138,7 +1221,31 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-steps-list { margin: 12px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .gongmun .gm-steps-list b { margin-right: 4px; color: var(--fg); font-weight: 600; }
 
-/* 양식·사전 설정 — 접어 두는 칸. 설정의 접는 줄과 같은 모양이다. */
+/* 문서설정·위임전결 — 공문 카드 안의 접는 칸. 작성 기록 — 단계마다 됐다·안 됐다·하는 중. */
+.gongmun .gm-set { margin: 12px 0 10px; padding: 0 12px; border-radius: 12px; background: var(--surface-soft); }
+.gongmun .gm-set > summary > span:first-of-type { flex: none; color: var(--fg); font-weight: 600; white-space: nowrap; }
+.gongmun .gm-set > summary .summary-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.gongmun .gm-set > summary::after { flex: none; }
+.gongmun .gm-set-grid { padding: 0 0 12px; }
+.gongmun .gm-set-grid > .gm-label:first-child { margin-top: 2px; }
+.gongmun .gm-set select { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px; background: var(--surface); font: inherit; font-size: 14px; color: inherit; }
+.gongmun .gm-set input[type="text"] { background: var(--surface); }
+.gongmun .gm-set-why { margin: 5px 0 0; color: var(--faint); font-size: 11.5px; line-height: 1.55; }
+.gongmun .gm-set-checks { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.gongmun .gm-set-checks label { display: inline-flex; align-items: center; gap: 5px; }
+.gongmun .gm-set-checks input { width: auto; min-height: 0; margin: 0; }
+.gongmun .gm-write-log { margin: 10px 0 0; padding: 0; list-style: none; font-size: 12.5px; line-height: 1.6; }
+.gongmun .gm-write-log li { position: relative; padding: 3px 0 3px 20px; color: var(--muted); overflow-wrap: anywhere; }
+.gongmun .gm-write-log li b { margin-right: 5px; color: var(--fg); font-weight: 600; }
+.gongmun .gm-write-log li::before { position: absolute; left: 2px; top: 3px; width: 14px; text-align: center; font-weight: 700; }
+.gongmun .gm-write-log li.ok::before { content: "✓"; color: var(--pick); }
+.gongmun .gm-write-log li.bad::before { content: "✕"; color: var(--danger); }
+.gongmun .gm-write-log li.bad { color: var(--danger); }
+.gongmun .gm-write-log li.busy::before { content: "…"; color: var(--faint); }
+.gongmun .gm-write-log li.gm-write-show { padding-left: 0; margin-top: 6px; }
+.gongmun .gm-write-log li.gm-write-show::before { content: none; }
+
+/* 양식·공문 설정 — 접어 두는 칸. 설정의 접는 줄과 같은 모양이다. */
 .gongmun .gm-box { margin-bottom: 10px; padding: 0 14px; border-radius: 14px; }
 .gongmun details > summary { display: flex; align-items: center; gap: 9px; min-height: 43px; color: var(--muted); font-size: 14px; cursor: pointer; list-style: none; }
 .gongmun details > summary::-webkit-details-marker { display: none; }
@@ -1148,6 +1255,17 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-box > summary > span:first-of-type { color: var(--fg); font-weight: 600; }
 .gongmun .gm-box-body { padding: 0 0 14px; }
 .gongmun .gm-box-body > .gm-label:first-child { margin-top: 2px; }
+/* 공문 설정 — 부서와 문서번호 코드가 한 줄, 부서장·소장·본부장이 한 줄(2026-10-09 사용자 지정). 칸마다 머리말(label)이 위에 선다. */
+.gongmun .gm-preset-grid { display: grid; gap: 0 10px; }
+.gongmun .gm-preset-dept { grid-template-columns: minmax(0, 1fr) 132px; }
+.gongmun .gm-preset-people { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gongmun .gm-preset-grid > div { min-width: 0; }
+.gongmun .gm-preset-grid input { width: 100%; }
+.gongmun .gm-preset-grid .gm-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gongmun .gm-docno-hint { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.gongmun .gm-docno-hint:empty { display: none; }
+.gongmun .gm-docno-hint.bad { color: var(--danger); }
+.gongmun .gm-docno-hint select { display: block; width: 100%; margin-top: 4px; }
 .gongmun .gm-box input[hidden] { display: none; }
 .gongmun .gm-box #gmTplFormId { margin-top: 6px; }
 .gongmun .gm-vars-box { margin-top: 10px; }
@@ -1163,6 +1281,12 @@ button.danger:hover { filter: brightness(1.08); }
 .gongmun .gm-row-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
 .gongmun .gm-row-fields input.wide { grid-column: 1 / -1; }
 .gongmun .gm-row-fields input { min-height: 34px; font-size: 13px; }
+/* R&D 탭의 과제 줄(2026-10-10 사용자 지정 — R&D 탭과 연동). 머리는 별칭, 그 아래 한 줄이 R&D 탭에 적힌 과제명·번호·책임자·기간·연구 내용이고
+   칸은 공문에만 쓰는 개요·계정 둘이다. 그 아래 R&D 탭에 없는 과제(예전에 여기 적은 것)는 머리글 한 줄 뒤에 예전 칸 그대로 선다. */
+.gongmun .gm-linked-name { color: var(--fg); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gongmun .gm-linked-meta { margin: -2px 0 6px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.gongmun .gm-linked-meta:empty { display: none; }
+.gongmun .gm-proj-orphan { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 /* 사유 칸 머리 — 이름 오른쪽에 "과제 내용으로 쓰기". 첨부가 될 문서 줄. 과제 내용 칸. */
 .gongmun .gm-field-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
 .gongmun .gm-reason { min-height: 22px; padding: 1px 7px; font-size: 11px; color: var(--pick); border: 1px solid color-mix(in srgb, var(--pick) 35%, var(--line)); border-radius: 7px; }
@@ -1176,13 +1300,12 @@ button.danger:hover { filter: brightness(1.08); }
 
 /* 과제 칩 한 줄 — 별칭(없으면 과제명을 열네 자 남짓에서 자른다). 전체 과제명은 툴팁. 끝의 ＋ 는 과제 더하기. */
 .rnd .rd-projects { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
-/* 공문 탭 위의 과제 칩(.gm-pick)도 같은 모양이다. */
-.rnd .rd-proj, .gongmun .gm-pick {
+.rnd .rd-proj {
   display: block; max-width: min(100%, 15em); min-height: 32px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 9px;
   background: var(--surface); font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.rnd .rd-proj:hover, .gongmun .gm-pick:hover { background: var(--pick-soft); border-color: var(--pick); }
-.rnd .rd-proj.active, .gongmun .gm-pick.active { background: var(--pick); border-color: var(--pick); color: #fff; }
+.rnd .rd-proj:hover { background: var(--pick-soft); border-color: var(--pick); }
+.rnd .rd-proj.active { background: var(--pick); border-color: var(--pick); color: #fff; }
 .rnd .rd-proj-add { width: 34px; padding: 4px; color: var(--pick); font-size: 16px; font-weight: 500; }
 .rnd .rd-empty { margin-bottom: 12px; padding: 14px 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .rnd .rd-empty p { margin: 0 0 8px; }
@@ -1251,7 +1374,7 @@ button.danger:hover { filter: brightness(1.08); }
 .rnd .rd-form .rd-del { margin-left: auto; }
 .rnd .statusline { margin-bottom: 10px; }
 
-/* 접는 칸(예산·연구내역·변경이력) — 공문 탭의 양식·사전 설정 칸과 같은 모양. */
+/* 접는 칸(예산·연구내역·변경이력) — 공문 탭의 양식·공문 설정 칸과 같은 모양. */
 .rnd .rd-box { margin-bottom: 10px; padding: 0 14px; border-radius: 14px; }
 .rnd details > summary { display: flex; align-items: center; gap: 9px; min-height: 43px; color: var(--muted); font-size: 14px; cursor: pointer; list-style: none; }
 .rnd details > summary::-webkit-details-marker { display: none; }

@@ -32,6 +32,7 @@ export const KIND_LABEL = {
   'attend-list': '근태내역',
   gongmun: '공문',
   'gongmun-setup': '공문설정',
+  git: 'GitHub',
 };
 
 const pad = (n) => String(n).padStart(2, '0');

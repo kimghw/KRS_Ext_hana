@@ -1,0 +1,24 @@
+# 기안문의 칸 지도 — kind 의 뜻은 research-form/forms/research_task/fieldmap.yaml 머리말과 같다.
+# 실측 원본: ApprovalInPrinciple doc_recipes/technical-review-request/forms/kr_ea_form2/fieldmap.yaml.
+# 기안문에는 과제 고르기 팝업과 차수 칸이 없다. Job Id. 는 글 칸이라 과제 번호(RND-20-2026 꼴)를 적는다.
+# 수신(txtRecieve)은 넣지 않는다 — 실제 기안문도 수신 칸은 비우고 문서설정의 수신처(내부결재)를 썼다.
+anchor: '#ctl00_ApplineInfoInReportKRTA1_txtDocTitle'
+fields:
+  title:
+    kind: title
+    selector: '#ctl00_ApplineInfoInReportKRTA1_txtDocTitle'
+    label: '#ctl00_ApplineInfoInReportKRTA1_lblDocTitle'
+    max: 99
+    source: title
+  reference:
+    kind: text
+    selector: '#ctl00_ContentPlaceHolder_Content_txtReference'
+    source: reference
+  job:
+    kind: text
+    selector: '#ctl00_ContentPlaceHolder_Content_txtJobId'
+    source: jobText
+  body:
+    kind: dext5
+    control: ctl00_ContentPlaceHolder_Content_EditorControl1
+    source: body

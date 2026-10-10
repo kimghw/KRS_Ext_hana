@@ -8,10 +8,14 @@
 // 갈지는 화면이 정하고 여기서는 받지 않는다. 명세에 없는 키는 버린다.
 //
 // 확장(브라우저)과 네이티브 다리(Node)가 같이 읽는다. DOM 도 Node API 도 쓰지 않는다.
+//
+// 작업은 input.yaml 의 것에, 공문 문서 읽기(gongmun.<갈래>)를 더한다 — 그것은 공문 레시피(recipes/gongmun)의 칸마다 적힌 읽는 법으로
+// 만든다(tools/gen-gongmun.mjs → src/gmrecipe.js 의 tasks).
 
 import { INPUT_SPEC } from './inputspec.js';
+import { RECIPE } from './gmrecipe.js';
 
-export const TASKS = INPUT_SPEC.tasks;
+export const TASKS = { ...INPUT_SPEC.tasks, ...RECIPE.tasks };
 
 /** 답이 명세와 달라 실행자에 넘길 수 없다. problems 는 무엇이 어긋났는지다. */
 export class InputError extends Error {
@@ -59,7 +63,11 @@ function keyLines(key, f, indent = '') {
  * jsonOnly 는 구조화 출력이 없는 길(로컬 CLI)에서 JSON 만 내라는 말을 덧붙인다.
  */
 export function systemPrompt(task, { jsonOnly = false } = {}) {
-  const spec = specOf(task);
+  return promptOf(specOf(task), { jsonOnly });
+}
+
+/** 작업 명세 하나의 지시문 — systemPrompt 와 같은 글(생성기가 레시피에서 바로 만든 작업을 보일 때도 쓴다). */
+export function promptOf(spec, { jsonOnly = false } = {}) {
   const keys = Object.entries(spec.fields).flatMap(([key, f]) => keyLines(key, f));
   return [
     spec.role,

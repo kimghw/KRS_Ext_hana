@@ -4,7 +4,7 @@
 //   과제 칩(별칭) → 머리(별칭 한 줄 — 펴면 과제 정보) · 차년도 칩(오늘이 든 것에 "올해")
 //   → 예산(비목 줄) · 참여연구자 · 연구개발 계획 · 진행 기록 · 변경이력 → 요약 복사 · JSON 저장·불러오기 → 연구개발계획서 YAML 넣기
 //
-// 어디에도 올리지 않는다 — 이 브라우저에만 남는다. 공문 탭의 사전 설정 과제를 가져올 수 있다(처음 열 때 과제가 없으면 저절로).
+// 어디에도 올리지 않는다 — 이 브라우저에만 남는다. 공문 탭의 공문 설정 과제를 가져올 수 있다(처음 열 때 과제가 없으면 저절로).
 // 예산 **계획**을 고치거나 비목을 빼면, 과제의 책임자·연구기간을 고치면 변경이력에 저절로 한 줄이 남고 사유만 사람이 적는다.
 // 과제는 별칭으로 다룬다 — 폼에서 별칭은 필수이고 과제끼리 겹치지 않으며, 별칭이 없는 과제는 머리에 정하는 칸이 선다.
 
@@ -725,12 +725,12 @@ export function createRndPanel({ $, escapeHtml, logEvent, copyText = defaultCopy
     }
   }
 
-  /** 공문 탭의 사전 설정 과제를 가져온다. quiet 면(처음 열 때) 없어도 말하지 않는다. */
+  /** 공문 탭의 공문 설정 과제를 가져온다. quiet 면(처음 열 때) 없어도 말하지 않는다. */
   async function importGongmun({ quiet = false } = {}) {
     const saved = await chrome.storage.local.get(GM_PROJECTS_KEY);
     const inc = fromGongmun(saved?.[GM_PROJECTS_KEY]);
     if (!inc.length) {
-      if (!quiet) setStatus('공문 탭의 사전 설정에 과제가 없습니다.', 'error');
+      if (!quiet) setStatus('공문 탭의 공문 설정에 과제가 없습니다.', 'error');
       return 0;
     }
     const res = mergeProjects(st.book, inc);

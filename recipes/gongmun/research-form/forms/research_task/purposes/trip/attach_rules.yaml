@@ -1,0 +1,15 @@
+# 출장 품의의 첨부 — 행사·회의 안내문이나 초청장에 교통·숙박 견적서(예상경비)를 더 넣는다.
+doc: 행사 안내문
+ask: 행사·회의 안내문이나 초청장을 넣으세요
+more: 교통·숙박 견적서 더 넣기
+need: []
+parts:
+  event: 행사 안내문
+  course: 행사 안내문
+  content: 행사 일정
+  quote: 견적서
+  statement: 청구서
+  order: 예약 내역
+  other: 참고 자료
+# 첨부 파일 이름(견적서_<이 칸의 값>_날짜.pdf)과 읽은 문서의 머리(견적서 · <이 칸의 값> · 견적일)에 붙일 초안 칸 — purpose.yaml 의 fields key
+who: place

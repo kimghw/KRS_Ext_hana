@@ -871,6 +871,7 @@ const FILLABLE = {
  * 회수하고 승인 뒤면 취소신청을 올린 다음 같은 내용을 새 신청서로 불러온다.
  * 패널이 다루는 종류가 아니면 수정·변경은 달지 않는다(목록에는 보인다).
  * 같은 내용으로 새 신청서를 쓰는 "복사"는 뺐다(2026-10-03 사용자 지정) — 반려된 건처럼 할 일이 없는 줄에는 버튼이 없다.
+ * 올려 둔 연차(승인 전후)에는 기념일 지원(wfa)이 더 붙는다 — 연차는 그대로 두고 가족 기념일 지원만 신청한다(welfareFormFor).
  */
 export function listItem(row) {
   const from = dashed(row.startDate);
@@ -897,6 +898,7 @@ export function listItem(row) {
     // 삭제 버튼을 보여 준다 — 회수 건을 서버가 받아 주지 않으면 목록에 그대로 남고, 패널이 그렇게 말한다.
     actions.push('delete');
   }
+  if (row.formId === 'LV' && kindName === '연차' && (st === STATUS.REQUESTED || st === STATUS.WAIT || st === STATUS.APPROVED)) actions.push('wfa');
   const when =from ? `${+from.slice(5, 7)}/${+from.slice(8)}${to && to !== from ? `~${+to.slice(5, 7)}/${+to.slice(8)}` : ''}` : '';
   // 주간(Weekly) 유연근무는 날짜·시각 자리에 "Weekly" 라는 글이 온다(2026-10-02 실제 목록). 날짜가 없어 신청한 날로 놓인다.
   const weekly = row.formId === 'FW' && row.startDate === 'Weekly';
@@ -935,6 +937,19 @@ export function kindOfItem(it) {
   if (id === 'ET') return 'leaveout';
   if (id === 'LV') return it.kindName === '정기 건강검진' ? 'health' : 'leave';
   return '';
+}
+
+/**
+ * 신청 내역의 연차 한 건에 기념일 지원을 붙이는 폼(2026-10-09 사용자 지정: "연차사용의 경우 승인 전후 신청 내역에서 추가로 신청할 수
+ * 있도록") — 연차는 이미 HR 에 올라가 있어 다시 올리지 않는다. 날짜·오전·오후만 목록에서 가져오고 기념일 체크박스를 켠다.
+ * 기념일 지원(wfa)을 달 수 없는 건이면 null.
+ */
+export function welfareFormFor(it, today) {
+  if (!it?.actions?.includes('wfa') || !DATE_RE.test(it.from || '')) return null;
+  const dateTo = DATE_RE.test(it.to || '') ? it.to : it.from;
+  const days = spanDays(it.from, dateTo);
+  const half = days === 1 ? HALVES.find((h) => h.value && String(it.gubun || '').includes(h.label))?.value || '' : '';
+  return { ...blankForm('leave', today), sub: 'LY', dateFrom: it.from, dateTo, days, half, wfa: true };
 }
 
 /** 종류 하나의 신청 내역. kind 가 'all' 이거나 비어 있으면 전부다. */

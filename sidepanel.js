@@ -24,6 +24,7 @@ import { isFoldedRoom, foldLabels } from './src/roomorder.js';
 import { createAttendPanel } from './attendpanel.js';
 import { createGongmunPanel } from './gongmunpanel.js';
 import { createRndPanel } from './rndpanel.js';
+import { createGitSync } from './gitsync.js';
 import { hrListDocs } from './src/hr.js';
 import { PLANS_KEY, loadPlans as readPlans, plansToShow } from './src/plans.js';
 import { tripRule, loadStages } from './src/settling.js';
@@ -1741,13 +1742,19 @@ const attend = createAttendPanel({
   onCar: (pick) => reserveCarPick(pick),
 });
 
+/**
+ * 비교작성 탭(2026-10-09 사용자 지정: "비교작성은 사이드패널이 아니라 크롬 탭에") — 이 페이지를 sidepanel.html?compare=<갈래> 로 크롬 탭에 열면
+ * 공문 탭 하나만, 작성 내용(공문)과 읽은 내용을 두 칸으로 넓게 보인다(initCompareTab). 사이드패널의 공문 탭이 비교작성 단추로 연다.
+ */
+const COMPARE_KIND = new URLSearchParams(window.location.search).get('compare') || '';
+
 /** 공문 탭. 화면 조각은 gongmunpanel.js 가 들고 있고, 여기서는 탭을 오갈 때 보이고 숨기기만 한다. */
 const gongmun = createGongmunPanel({
   $, escapeHtml, logEvent,
   ai: () => ({ apiKey: state.apiKey, cli: state.cli }),
   me: () => state.myName,
-  copyText: (text) => copyText(text),
   flash: (btn, text, ms) => flash(btn, text, ms),
+  compareTab: COMPARE_KIND,
 });
 
 /** R&D 탭. 화면 조각은 rndpanel.js 가 들고 있고, 여기서는 탭을 오갈 때 보이고 숨기기만 한다. */
@@ -1828,7 +1835,8 @@ function applyMode(mode) {
   }
 
   const pageName = car ? '차량 이용' : '회의실 예약';
-  el.appTitle.innerHTML = (attendTab ? '근태 신청' : gongmunTab ? '공문 작성' : rndTab ? 'R&amp;D 과제' : mineTab ? '현황' : pageName) + '<span class="title-dot">.</span>';
+  const screenTitle = attendTab ? '근태 신청' : gongmunTab ? '공문 작성' : rndTab ? 'R&D 과제' : mineTab ? '현황' : pageName;
+  el.appTitle.textContent = screenTitle;
   const openLabel = `${pageName} 페이지를 새 탭에서 열기`;
   el.openPageInline.title = openLabel;
   el.openPageInline.setAttribute('aria-label', openLabel);
@@ -2507,6 +2515,21 @@ function initHourSelects() {
   }
 }
 
+/**
+ * 비교작성 탭 — 공문 탭 하나만 띄운다. 머리의 도구·탭 줄·말로 찾기·날짜 격자·현황·설정은 숨기고(sidepanel.css 의 body.compare-tab 도),
+ * 사이트 조회·미리 훑기·로그인 복귀는 하지 않는다. 초안은 사이드패널과 같은 저장소의 것이라 한쪽에서 고치면 다른 쪽이 따라간다(gongmunpanel.js).
+ */
+async function initCompareTab() {
+  document.body.classList.add('compare-tab');
+  document.title = `공문 비교작성 — ${KINDS_TITLE[gongmun.compareTab] || ''}`.replace(/ — $/, '');
+  el.appTitle.textContent = '공문 비교작성';
+  for (const sel of ['.head-tools', '.tabs', '.ask', '.controls', '.schedule', '.settings', '.footer-note']) document.querySelector(sel)?.setAttribute('hidden', '');
+  checkCli();   // 에이전트 칸·연구 내용으로 쓰기는 여기서도 로컬 CLI(API 키)로 간다
+  gongmun.wire();
+  await gongmun.show();
+}
+const KINDS_TITLE = { purchase: '구매', edu: '교육', trip: '출장', outside: '외부활동' };
+
 async function init() {
   initHourSelects();
 
@@ -2523,6 +2546,8 @@ async function init() {
   state.foldOpen = !!saved.foldOpen;
   el.apiKey.value = state.apiKey;
   el.myName.value = state.myName;
+  // 비교작성 탭이면 여기서 끝 — 공문 탭만 띄운다.
+  if (gongmun.compareTab) return initCompareTab();
   el.homeCard.checked = homeEnabled(saved[HOME_ENABLE_KEY]);
   el.teamsButton.checked = teamsEnabled(saved[TEAMS_ENABLE_KEY]);
   el.homeUncfm.checked = unconfirmedEnabled(saved[UNCFM_ENABLE_KEY]);
@@ -2535,6 +2560,8 @@ async function init() {
     { mode: saved.mode || 'room' });
   paintAskReady();
   checkCli();
+  // GitHub 새 커밋 아이콘 — 다리가 없으면 숨어 있다(gitsync.js).
+  createGitSync({ button: $('gitSync'), badge: $('gitCount'), log: logEvent, say: setStatus }).start();
   paintRegion();
   el.date.value = todayStr();
 

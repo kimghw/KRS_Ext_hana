@@ -14,7 +14,8 @@ import { callClaude } from './ai.js';
 import { structure, InputError } from './input.js';
 import { parseLocal } from './nlq.js';
 import { parseAttendLocal, fixRelativeDates } from './attend.js';
-import { parseSetupLocal, reasonInput } from './gongmun.js';
+import { parseSetupLocal, reasonInput, KINDS, REASON_KEYS } from './gongmun.js';
+import { RECIPE } from './gmrecipe.js';
 
 export const NATIVE_HOST = 'com.krs.meetingroom';
 
@@ -147,29 +148,31 @@ export function receiptInput(file, { trip = {}, me = '', text = '' } = {}) {
 }
 
 /**
- * 공문(구매·교육·출장 품의)에 넣을 문서를 읽는다(input.yaml 의 gongmun). 파일(이미지·PDF) 여러 장은 한 문서의 여러 쪽으로 보고 한 번에
+ * 공문(구매·교육·출장 품의·외부활동 허가 신청서)에 넣을 문서를 읽는다. 지시문은 갈래마다 다르다 — 공문 레시피의 칸마다 적힌 읽는 법으로 만든
+ * 작업 gongmun.<갈래>(recipes/gongmun 의 purpose.yaml·registries/reading.yaml → src/gmrecipe.js 의 tasks). 파일(이미지·PDF) 여러 장은 한 문서의 여러 쪽으로 보고 한 번에
  * 보내며, 글을 붙여 넣었으면 글만 보낸다. 규칙 해석(local)은 없다 — 로컬 CLI 도 API 키도 안 되면 던진다.
  * 초안으로 바꾸는 것은 src/gongmun.js 의 fromRecord 다.
  * @param {{files?: {name:string,type:string,dataUrl:string}[], text?: string}} source
- * @param {{kind: 'purchase'|'edu'|'trip', today?: string}} ctx 화면이 고른 갈래
+ * @param {{kind: 'purchase'|'edu'|'trip'|'outside', today?: string}} ctx 화면이 고른 갈래
  * @returns {Promise<{record: object, via: 'cli'|'api', costUsd?: number, note?: string}>}
  */
 export async function gongmunSmart(source, ctx, opts) {
   const files = source?.files || [];
-  const got = await askClaude('gongmun', gongmunInput(source, ctx), { ...opts, kind: ctx.kind, files });
+  const kind = KINDS[ctx?.kind] ? ctx.kind : 'purchase';
+  const got = await askClaude(`gongmun.${kind}`, gongmunInput(source, { ...ctx, kind }), { ...opts, kind, files });
   if (!got.data) throw new Error(`문서를 읽지 못했습니다 — ${joined(got.fails) || 'Claude 연결(로컬 CLI 또는 API 키)이 필요합니다'}`);
   return { record: got.data, via: got.via, costUsd: got.costUsd, note: joined(got.notes) };
 }
 
 /**
- * 공문 탭의 채팅 칸 — 붙여 넣은 글(과제 목록 표·메모)에서 사전 설정 조각(과제·과제책임자(합의자)·부서장·참조자)을 뽑는다
- * (input.yaml 의 gongmunSetup). Claude 가 닿지 않으면 규칙 해석(src/gongmun.js 의 parseSetupLocal)으로 내려간다.
+ * 공문 탭의 채팅 칸 — 붙여 넣은 글(과제 목록 표·메모)에서 공문 설정 조각(과제·과제책임자(합의자)·부서장·참조자)을 뽑는다
+ * (공문 레시피 registries/setup.yaml 의 gongmunSetup). Claude 가 닿지 않으면 규칙 해석(src/gongmun.js 의 parseSetupLocal)으로 내려간다.
  * 얹는 것은 src/gongmun.js 의 mergeSetup 이다.
- * @param {{preset?: object, projects?: object[], current?: string}} now 지금 등록된 사전 설정과 초안에서 고른 과제
+ * @param {{preset?: object, projects?: object[], current?: string}} now 지금 등록된 공문 설정과 초안에서 고른 과제
  * @returns {Promise<{patch: object, reply: string, via: 'cli'|'api'|'local', costUsd?: number, note?: string}>}
  */
 export async function gongmunSetupSmart(text, now = {}, opts = {}) {
-  const input = `지금 등록된 사전 설정: ${JSON.stringify({ ...(now.preset || {}), projects: now.projects || [] })}\n`
+  const input = `지금 등록된 공문 설정: ${JSON.stringify({ ...(now.preset || {}), projects: now.projects || [] })}\n`
     + `지금 고른 과제: ${now.current || '없음'}\n\n새 글:\n<<<\n${String(text).slice(0, 8000)}\n>>>`;
   const got = await askClaude('gongmunSetup', input, { ...opts, kind: 'gongmun' });
   if (got.data) {
@@ -181,11 +184,8 @@ export async function gongmunSetupSmart(text, now = {}, opts = {}) {
   return { patch: out.data, reply: local.reply, via: 'local', note: joined(got.fails, out.notes) };
 }
 
-const GONGMUN_DOC = {
-  purchase: '구매(견적서·거래명세서·쇼핑몰 주문 화면)', edu: '교육(교육 안내문·교육 신청 확인서·교육비 견적서)',
-  trip: '출장(행사·회의·학회 안내문·초청장·출장 일정표·교통/숙박 견적서)',
-  outside: '외부활동 허가(강의·자문·심사·발표·위원 위촉 요청 공문·초청장·요청 메일·행사 안내문)',
-};
+/** 읽기 입력의 '품의 종류' 줄 — 갈래 이름과 넣는 문서(레시피 purpose.yaml 의 reading.docs). */
+const GONGMUN_DOC = Object.fromEntries(Object.values(RECIPE.purposes).map((p) => [p.id, `${p.label}(${p.reading.docs})`]));
 
 /**
  * 문서 읽기에 줄 글. 파일 여러 장은 같은 건의 문서들이다(교육이면 교육 견적서와 교육 내용 캡처 — 2026-10-07 사용자 지정).
@@ -204,13 +204,15 @@ export function gongmunInput({ files = [], text = '' } = {}, { kind = 'purchase'
 }
 
 /**
- * 과제 내용으로 품의 사유(구매사유·교육사유)와 용도(교육목적)를 쓴다(input.yaml 의 gongmunReason — 2026-10-07 사용자 지정).
+ * 과제 내용으로 품의 사유(구매사유·교육사유…)와 용도(교육목적…)를 쓴다(2026-10-07 사용자 지정). 지시문은 갈래마다 다르다 — 공문 레시피의
+ * 칸마다 적힌 쓰는 법으로 만든 작업 gongmunReason.<갈래>(purpose.yaml 의 write·writing, registries/writing.yaml). 답의 키는 초안 칸의 key 다.
  * 쓰는 일이라 규칙 해석은 없다 — 로컬 CLI 도 API 키도 안 되면 던진다. 초안에 넣는 것은 src/gongmun.js 의 applyReason 이다.
  * ask 는 초안의 에이전트 칸에 사용자가 적은 말이다 — 있으면 그 말대로 고쳐 쓰고 reply 에 한 줄로 답한다(2026-10-08 사용자 지정).
- * @returns {Promise<{data: {reason: string, use: string|null, reply: string|null}, via: 'cli'|'api', costUsd?: number, note?: string}>}
+ * @returns {Promise<{data: {reason: string, reply: string|null, [use: string]: string|null}, via: 'cli'|'api', costUsd?: number, note?: string}>}
  */
 export async function gongmunReasonSmart(kind, draft, project, opts, { ask = '' } = {}) {
-  const got = await askClaude('gongmunReason', reasonInput(kind, draft, project, { ask }), { ...opts, kind });
+  if (!REASON_KEYS[kind]) throw new Error(`${KINDS[kind]?.title || kind} 에는 사유 쓰기가 없습니다`);
+  const got = await askClaude(`gongmunReason.${kind}`, reasonInput(kind, draft, project, { ask }), { ...opts, kind });
   if (!got.data) throw new Error(`사유를 쓰지 못했습니다 — ${joined(got.fails) || 'Claude 연결(로컬 CLI 또는 API 키)이 필요합니다'}`);
   return { data: got.data, via: got.via, costUsd: got.costUsd, note: joined(got.notes) };
 }

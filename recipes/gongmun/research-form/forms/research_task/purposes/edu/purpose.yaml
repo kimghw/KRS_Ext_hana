@@ -1,0 +1,152 @@
+# 교육 품의 — 과제 수행을 위한 교육(대면·온라인) 참가. 제목은 "[과제 별명] 수행을 위한 [교육|온라인교육] 품의"(2026-10-07 사용자 지정).
+# 칸의 꼴과 from 의 뜻은 purchase/purpose.yaml 머리말과 같다. read·write·rules·example·context 는 그대로 Claude 에게 가는 지시문이다(# 주석은 사람만 본다).
+# Claude 가 받는 지시문 전문은 `node tools/gen-gongmun.mjs --prompt edu`(사유 쓰기는 --prompt edu reason).
+purpose_id: edu
+label: 교육
+title: 교육품의
+rule_key: 연구비집행         # 교육훈련비를 과제 예산으로 쓴다
+amount_field: fee
+document_setting: 연구품의
+limit: null
+account: 연구활동비(교육훈련비)
+
+reading:
+  docs: 교육 안내문·교육 신청 확인서·교육비 견적서
+  rules:
+    # 2026-10-07·10-08 사용자 지정: "교육은 첨부로 '견적서' 그리고 '교육내용' 의 첨부가 들어 가야함"
+    - 교육 공문의 첨부는 교육 견적서와 교육 내용 둘입니다. parts 에서 견적서는 quote, 청구서는 statement, 수강료·결제 칸만 있는 장은 order 이고, 교육 안내·강의 소개·커리큘럼·수업 목록이 든 장은 content 입니다.
+
+# 견적서 오리기 — 견적서 양식 없이 온라인 강의·교육 신청 화면만 있으면 수강료 칸을 오려 교육 견적서로 첨부하고, 강의 소개·커리큘럼 장은
+# 교육 내용으로 남긴다(2026-10-08 사용자 지정). 꼴은 purchase/purpose.yaml 의 quote_crop 과 같다.
+quote_crop:
+  when: 견적서 양식 없이 온라인 강의·교육 신청 화면(인프런·유데미 같은 강의 페이지)을 캡처한 그림일 때 — 수강료가 보이지 않는 화면이면 null
+  keep: [수강료(정가·할인가·결제 금액), 강의명, 교육기관, 수강 기간, 수강 옵션]
+  drop: [강의 소개 글, 커리큘럼, 수강평, 추천 강의, 광고, 메뉴]
+  read: 가격 글자가 잘리지 않게 넉넉히 잡습니다. 그 칸이 두 장에 걸쳐 있으면 장마다 한 줄씩 위에서 아래 차례로 적습니다.
+
+fields:
+  - key: course
+    label: 교육명
+    wide: true
+    from: document
+    need: 교육명
+    read: 교육 과정의 이름 — 안내문·신청 확인서·견적서에 적힌 그대로(회차·기수 표시도 그대로).
+    example: 전력변환 설계 실무(3기)
+
+  - key: provider
+    label: 교육기관
+    from: document
+    read: 교육을 여는 기관·업체 — 상호 그대로. 온라인 강의면 강의 플랫폼 이름입니다.
+    example: 한국전력기술교육원
+
+  - key: fee
+    label: '교육비 (VAT 포함, 원)'
+    type: money
+    from: document            # 비어 오면 공급가액+부가세(아래 reads 의 supply·vat)를 더한다
+    need: 교육비
+    read: >-
+      부가세를 포함해 실제로 낼 교육비 — 할인을 뺀 결제 금액. "부가세 별도" 이고 공급가액만 있으면 null 로 두고 supply 에 적습니다 —
+      셈해 넣지 않습니다.
+    example: 450000
+
+  # 본문의 {교육기간} 은 시작일·종료일로 "2026. 11. 3. ~ 2026. 11. 5. (3일)", 하루면 "2026. 11. 3. (1일)" 이 된다(body_spec.yaml).
+  - key: from
+    label: 시작일
+    type: date
+    from: document
+    need: 교육기간
+    read: >-
+      교육이 실제로 열리는 첫날. 신청 마감일·결제일·수강 가능 기한("수강기한 90일")과 헷갈리지 않습니다. 연도가 적혀 있지 않으면
+      문서 발행일(없으면 오늘)의 연도를 붙입니다. 날짜 없이 언제든 듣는 온라인 강의면 null 입니다.
+    example: 2026-11-03
+
+  - key: to
+    label: 종료일
+    type: date
+    from: document
+    not_before: from
+    read: 교육의 마지막 날. 하루짜리 교육이면 시작일과 같은 날입니다.
+    example: 2026-11-05
+
+  - key: place
+    label: 교육장소
+    from: document
+    read: 교육이 열리는 곳 — 도시와 기관·강의실. 온라인 강의면 "온라인", 실시간 화상 교육이면 "온라인(Zoom)" 처럼 적습니다.
+    example: 대전 한국전력기술교육원
+
+  - key: mode
+    label: 교육 구분 (제목)
+    type: choice
+    options: [교육, 온라인교육]
+    # 교육장소·교육기관에 아래 online 의 말이 하나라도 있으면 온라인교육, 없으면 교육(src/gongmun.js eduModeOf — 대소문자·띄어쓰기는 보지 않는다).
+    # 사용자가 고르면 그것이 이기고, 손대지 않았으면 교육장소를 고칠 때 따라간다.
+    from: auto
+    online: [온라인, online, 비대면, 원격, 이러닝, e-learning, elearning, 웨비나, webinar, 인터넷강의, 인강, 동영상강의, VOD, 인프런, inflearn, 유데미, udemy, 코세라, coursera, 패스트캠퍼스, 클래스101, K-MOOC, KMOOC]
+
+  - key: hours
+    label: 교육시간
+    wide: true
+    from: document
+    read: 교육 시간 — 총 시간과 하루 시간표를 적힌 대로. 온라인 강의면 총 재생 시간이나 수업 수입니다.
+    example: 3일 21시간(09:00~17:00)
+
+  - key: topics
+    label: 교육내용
+    wide: true
+    area: true
+    max: 400
+    from: document
+    read: 교육 내용 — 커리큘럼·주요 강의 주제를 " · " 로 나열합니다. 교육 내용(커리큘럼) 캡처가 함께 왔으면 그 장을 보고 적습니다.
+    example: DC-DC 컨버터 설계 · 제어 루프 설계 · 시뮬레이션 실습
+
+  - key: attendees
+    label: 참석자
+    wide: true
+    from: me                  # 여러 명이면 칸에서 더 적는다
+
+  - key: purpose
+    label: 교육목적
+    wide: true
+    open: true
+    from: document
+    need: 교육목적
+    read: 교육으로 무엇의 역량을 기르는지 짧은 구절로. 문서에 적혀 있으면 그대로, 없으면 교육 내용으로 보아 적습니다(사용자가 고칩니다).
+    write: 교육 내용으로 보아 무엇의 역량을 기르는지 짧은 구절로(끝에 마침표 없이). 지금 적힌 교육목적이 있으면 그것을 다듬어 씁니다.
+    example: 전력변환 회로 설계 역량 강화
+
+  - key: reason
+    label: 교육사유
+    wide: true
+    area: true
+    open: true
+    placeholder: 과제와 이어지는 필요성 — 비워 두지 않습니다
+    from: write
+    need: 교육사유
+    write: 이 교육이 과제 수행에 왜 필요한지 — 과제 내용과 이어지는 필요성을 1~2문장으로, "…필요함" 처럼 명사형으로 끝맺습니다.
+    example: 과제의 MVDC 전력변환기 설계 역량 확보에 필요함
+
+  - key: account
+    label: 예산계정
+    wide: true
+    from: setup               # 비워 두면 과제의 계정, 그것도 없으면 위의 account
+
+# 사유 쓰기 — 꼴은 purchase/purpose.yaml 의 writing 과 같다.
+writing:
+  context: |-
+    교육명: {교육명}
+    교육기관: {교육기관?}
+    교육 내용: {교육내용?}
+    지금 적힌 교육목적: {교육목적?}
+  rules: []
+
+# 칸에는 없지만 문서에서 더 읽는 것 — 교육비를 못 읽었을 때 더할 재료.
+reads:
+  - key: supply
+    type: money
+    read: 공급가액(부가세를 뺀 교육비) — 문서에 따로 적혀 있을 때만
+    example: 409091
+
+  - key: vat
+    type: money
+    read: 부가세 — 문서에 따로 적혀 있을 때만
+    example: 40909

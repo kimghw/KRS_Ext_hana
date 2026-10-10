@@ -1,0 +1,125 @@
+# 외부활동 허가 신청서 — 강의·자문·심사·발표·위원 활동 같은 외부활동을 하기 전에 허가를 받는 글(2026-10-08 사용자 지정 "출장 옆에 외부활동 허가 신청서").
+# 요청 공문·초청장·위촉 요청 메일을 넣으면 요청 기관·활동명·구분·기간·시간·장소·내용·사례비를 읽는다. 예산을 쓰지 않아 계정은 없다.
+# 칸의 꼴과 from 의 뜻은 purchase/purpose.yaml 머리말과 같다. read·write·rules·example·context 는 그대로 Claude 에게 가는 지시문이다(# 주석은 사람만 본다).
+# Claude 가 받는 지시문 전문은 `node tools/gen-gongmun.mjs --prompt outside`(사유 쓰기는 --prompt outside reason).
+purpose_id: outside
+label: 외부활동
+title: 외부활동 허가 신청서
+rule_key: 외부활동
+amount_field: null
+document_setting: 연구품의
+limit: null
+account: ''
+
+reading:
+  docs: 강의·자문·심사·발표·위원 위촉 요청 공문·초청장·요청 메일·행사 안내문
+  rules: []
+
+# 활동 구분은 제목에 들어간다. 사례비가 없으면 본문의 그 줄은 빠진다.
+fields:
+  - key: type
+    label: 활동 구분 (제목)
+    type: choice
+    options: [강의, 자문, 심사·평가, 발표, 위원 활동, 집필, 기타]
+    from: document            # 못 읽으면 options 의 첫째(강의)
+    read: 외부활동의 구분 — 강의·특강은 강의, 자문은 자문, 심사·평가위원은 심사·평가, 발표·강연은 발표, 위원회 위촉은 위원 활동, 집필·기고는 집필, 그 밖은 기타.
+    example: 강의
+
+  - key: org
+    label: 요청 기관
+    from: document
+    need: 요청 기관
+    read: 활동을 요청한 기관·부서 — 공문의 발신 기관이나 메일을 보낸 곳의 이름 그대로.
+    example: 부산대학교 조선해양공학과
+
+  - key: subject
+    label: 활동명 (주제)
+    wide: true
+    from: document
+    need: 활동명
+    read: 활동명 — 강의 제목·자문 주제·심사 대상. 공문 본문에 들어가니 문서에 적힌 제목을 짧게 적습니다.
+    example: MVDC 차단기 기술 특강
+
+  # 본문의 {활동기간} 은 시작일·종료일로 "2026. 11. 5. (1일)" 이 된다(body_spec.yaml).
+  - key: from
+    label: 시작일
+    type: date
+    from: document
+    need: 활동기간
+    read: 외부활동의 첫날. 연도가 적혀 있지 않으면 문서 발행일(없으면 오늘)의 연도를 붙입니다.
+    example: 2026-11-05
+
+  - key: to
+    label: 종료일
+    type: date
+    from: document
+    not_before: from
+    read: 외부활동의 마지막 날 — 하루면 시작일과 같은 날입니다.
+    example: 2026-11-05
+
+  - key: hours
+    label: 활동시간
+    from: document
+    read: 활동 시간 — 시각과 길이를 적힌 대로.
+    example: 14:00~16:00 (2시간)
+
+  - key: place
+    label: 활동장소
+    from: document
+    need: 활동장소
+    read: 활동 장소 — 기관·건물·호실. 온라인이면 "온라인" 입니다.
+    example: 부산대학교 공학관
+
+  - key: fee
+    label: '사례비 (원, 없으면 비움)'
+    type: money
+    from: document
+    read: 사례비·강사료·자문료 — 적혀 있으면 그 금액, 없으면 null 입니다.
+    example: 300000
+
+  - key: topics
+    label: 활동내용
+    wide: true
+    area: true
+    max: 400
+    from: document
+    read: 활동 내용 — 강의 주제·자문 사항·심사 대상을 " · " 로 나열합니다.
+    example: MVDC 차단기 개요 · 시험 결과
+
+  - key: who
+    label: 활동자
+    wide: true
+    from: me
+
+  - key: purpose
+    label: 활동목적
+    wide: true
+    open: true
+    from: document
+    need: 활동목적
+    read: 그 활동이 과제·기관에 어떤 뜻인지 짧은 구절로. 문서에 적혀 있으면 그대로, 없으면 활동 내용으로 보아 적습니다(사용자가 고칩니다).
+    write: 그 활동이 과제·기관에 어떤 뜻인지 짧은 구절로(끝에 마침표 없이). 지금 적힌 활동목적이 있으면 그것을 다듬어 씁니다.
+    example: 부산대 특강을 통한 연구 성과 확산
+
+  - key: reason
+    label: 신청사유
+    wide: true
+    area: true
+    open: true
+    placeholder: 과제와 이어지는 필요성 — 비워 두지 않습니다
+    from: write
+    need: 신청사유
+    write: >-
+      그 활동(강의·자문·심사·발표·위원 활동)이 과제 수행이나 연구 성과의 확산·활용과 어떻게 이어지는지, 직무와 상충하지 않는지를 1~2문장으로,
+      "…필요함"·"…위함" 처럼 명사형으로 끝맺습니다.
+    example: 과제에서 얻은 MVDC 차단기 시험 성과를 학계에 확산하기 위함이며 직무와 상충하지 않음
+
+# 사유 쓰기 — 꼴은 purchase/purpose.yaml 의 writing 과 같다. 사례비는 넣지 않는다.
+writing:
+  context: |-
+    외부활동: {활동구분} — {활동명}
+    요청 기관: {요청기관?}
+    활동기간: {활동기간?}
+    활동 내용: {활동내용?}
+    지금 적힌 활동목적: {활동목적?}
+  rules: []

@@ -1,0 +1,110 @@
+# 문서설정 — eclass 전자결재 툴바의 '문서설정' 창에 넣는 값. 레시피의 purpose.yaml 이 document_setting 으로 프로파일 이름을 가리킨다.
+#
+# 원본: krs-web-agents references/공문_문서설정.md · ea_setting.yaml(연구품의 = 보존년한 10년 · Doc No. 기안 팀 채번 · 수신 내부결재).
+# 겹쳐 쓰는 차례: defaults < profiles.<이름> < 패널에서 이 공문에만 바꾼 값(뒤가 이긴다).
+# 문서설정 창의 선택지는 영어 이름이라(예: '10 Years') 값 코드로 적는다 — 아래 options 가 코드와 화면 이름의 표다.
+# 문서설정을 넣지 않으면 서버 기본값이 남는다 — Doc No. 가 (1000)Quality Management Team 으로 잡힌다(2026-10-08 실측). 그래서 늘 넣는다.
+
+defaults:
+  retention: '120'        # 보존년한 — options.retention 의 코드
+  doc_no: team            # Doc No.(채번 부서) — team 이면 기안 팀 코드(공문 설정의 '문서번호 부서', 비면 teams 표에서 부서 이름으로)
+  receiver: 내부결재      # 수신처 — 내부결재 | KRE (부서 수신은 아직 넣지 않는다)
+  scope: 결재선           # 공개범위 — options.scope
+  emergency: false        # 긴급
+  approving_open: false   # 진행공개
+  drm: false              # DRM
+  tag: ''                 # 검색 키워드
+
+profiles:
+  연구품의: {}            # 연구업무추진품의 — 기본값 그대로(10년 · 기안 팀 채번 · 내부결재)
+
+# 한글 팀 이름 → Doc No. 코드(문서설정 창 ddlDocNo 의 값). 화면에는 '(8100)Hydrogen & Electric Propulsion Research Team' 처럼 영어로 보인다.
+# 결재선 창 조직도의 한글 팀 이름과 아래 doc_no_options 의 영문 이름을 맞춘 것이다(연구본부 다섯 팀, 2026-10-09). 여기 없는 팀은 패널의 공문 설정이
+# doc_no_options 에서 고르게 한다(부서 글에 맞는 영문 이름이 하나면 그것, 둘 이상이거나 없으면 목록에서 고름).
+teams:
+  수소전기추진연구팀: '8100'
+  대체연료기술연구팀: '7600'
+  시스템안전연구팀: '7700'
+  연구지원팀: '7800'
+  자율운항선박연구팀: '8200'
+
+# 문서설정 창 ddlDocNo 의 전체 목록(코드 → 화면의 영문 이름, 2026-10-08 새 연구업무품의서 창에서 캡처). 완료한 문서의 문서설정 화면에는 Doc No. 가
+# 보이지 않아(2026-10-09 읽기 전용 실측) 보낸 공문에서 읽어 오지 못하므로, 패널은 이 목록에서 찾거나 고르게 한다.
+doc_no_options:
+  '1000': Quality Management Team
+  '1100': Audit Team
+  '1200': International Relations Team
+  '2100': Planning & Coordination Team
+  '2200': Strategy Team
+  '2300': Legal Affairs Team
+  '2400': Human Resource Management Team
+  '2500': Finance Team
+  '2600': General Affairs Team
+  '2700': Education Team
+  '2800': External Affairs and PR Team
+  '2900': Academy Business Team
+  '3000': Survey Team
+  '3100': Class Register and Record Team
+  '3200': GAS Carrier Survey Technology Team
+  '4000': Hull Technology Team 2
+  '4100': Hull Technology Team 1
+  '4200': Stability & Tonnage Team
+  '4300': Machinery & Piping Team 1
+  '4400': Digital Solutions Team
+  '4500': Machinery & Piping Team 2
+  '4600': Certification of Material & Components Team
+  '4700': Hull Rule Development Team
+  '4800': Machinery Rule Development Team
+  '4900': Technology Planning Team
+  '5000': Domestic Business Development Team
+  '5100': Technical Business Development Team
+  '5200': Overseas Business Development Team
+  '5300': Management System Certification Center
+  '5301': North Europe TFT
+  '5400': Conformity Assessment Center
+  '5500': Academy Center
+  '5600': Naval Business Planning Team
+  '5700': Naval Vessel Technology Team
+  '5800': Naval Vessel Survey Team
+  '5900': Wind Energy Business Team
+  '6000': Statutory Service Team
+  '6100': Convention & Legislation Service Team
+  '6200': Statutory System Certification  Team
+  '7000': AI Technology Development Team
+  '7100': ICT Solution Team
+  '7200': Advanced Technology Convergence Team
+  '7300': DT System Development Team
+  '7400': Green Ship Technology Team
+  '7500': Ship & Offshore Technology Team
+  '7600': Alternative Fuel Technology Research Team
+  '7700': System Safety Research Team
+  '7800': R&D Support Team
+  '7900': Maritime Autonomous Surface Ships TFT
+  '8000': Common
+  '8100': Hydrogen & Electric Propulsion Research Team
+  '8200': Autonomous Ship Research Team
+  '8900': KR Hellas Ltd. Administrative Team
+  '8901': KR Hellas Ltd. Quality Management Team
+  '8902': KR Hellas Ltd. TechnicalCertification Team
+  '8903': KRH Product Certification Team
+  '8904': KRH Boiler and Pressure Vessel Team
+  '8905': KRH System Certificate Team
+  '9100': Employee Welfare Fund
+  '9200': MAZ Mutual Aid Society
+  '9300': KR Brunei
+  '9400': BFA System TFT
+  '9500': Occupational Health & Safety Team
+
+options:
+  retention:
+    '12': 1년
+    '24': 2년
+    '36': 3년
+    '60': 5년
+    '120': 10년
+    '240': 20년
+    '1200': 영구
+  scope:
+    결재선: YNN
+    기안부서: NNY
+  receiver: [내부결재, KRE]

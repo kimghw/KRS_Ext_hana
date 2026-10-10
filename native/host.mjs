@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { TASKS as SPEC_TASKS, systemPrompt } from '../src/input.js';
+import { gitStatus, gitPull } from './gitsync.mjs';
 
 // 2026-10-05 사용자 지정: "모두 opus 5.5로 변경해줘" — 그 전에는 빨리 답하는 claude-haiku-4-5 였다(2026-10-03).
 const MODEL = 'claude-opus-5-5';
@@ -31,7 +32,7 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 // 그 통신이 막히거나 늦을 때 호출이 통째로 기다리는 일도 없어진다. 다리가 띄우는 이 한 번짜리 호출에만 건다(사용자의 CLI 설정은 그대로다).
 const cliEnv = () => ({ ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' });
 
-// 작업과 지시문은 입력 명세(input.yaml → src/inputspec.js)에서 온다. 확장의 API 길(src/ai.js)과 같은 지시문이고,
+// 작업과 지시문은 입력 명세(input.yaml → src/inputspec.js)와 공문 레시피(gongmun.<갈래> → src/gmrecipe.js)에서 온다. 확장의 API 길(src/ai.js)과 같은 지시문이고,
 // 이 길에는 구조화 출력이 없으므로 JSON 만 내라는 말을 덧붙인다. 돌려준 답은 확장이 같은 명세로 검증한다.
 const TASKS = Object.fromEntries(Object.keys(SPEC_TASKS).map((name) =>
   [name, { system: systemPrompt(name, { jsonOnly: true }) }]));
@@ -434,8 +435,11 @@ export function spawnClaude({ args, stdin, env, limitMs, cleanup }) {
 
 /* ------------------------------------------------------------ 요청 처리 */
 
-/** 첨부에서 글자를 먼저 뽑는 작업 — 출장 증빙(receipt)과 공문 문서(gongmun — 견적서·교육 안내문·웹페이지 캡처, 2026-10-08). */
-export const TEXT_FIRST = new Set(['receipt', 'gongmun']);
+/**
+ * 첨부에서 글자를 먼저 뽑는 작업 — 출장 증빙(receipt)과 공문 문서(gongmun.<갈래> — 견적서·교육 안내문·웹페이지 캡처, 2026-10-08).
+ * 공문 문서 읽기는 갈래마다 작업이 따로다(공문 레시피가 만든다 — src/gmrecipe.js 의 tasks).
+ */
+export const TEXT_FIRST = new Set(['receipt', ...Object.keys(TASKS).filter((name) => name.startsWith('gongmun.'))]);
 
 /**
  * 첨부에서 글자를 먼저 뽑는다(native/doctext.mjs 의 withText). 그 모듈과 꾸러미(pdfjs-dist·tesseract.js)는 첨부를 읽을 때만
@@ -453,13 +457,22 @@ async function extractText(input, files) {
 /**
  * 요청 하나를 처리해 돌려줄 응답을 만든다. claude 를 부른 것은 성패와 상관없이 기록한다.
  * ping 과 logs 는 부를 때마다 남기면 기록이 그것으로 찬다 — 남기지 않는다.
+ * gitStatus·gitPull 은 패널 머리의 git 아이콘이 부른다(native/gitsync.mjs — 명령은 거기 고정돼 있고 확장이 넘기는 값은 없다).
+ * 확인은 몇 분마다 돌아 남기지 않고, 받기는 파일을 바꾸므로 남긴다.
  *
  * @param {object} msg
- * @param {{ run?: Function, log?: Function, tail?: Function, text?: Function }} [deps] 테스트가 갈아 끼운다
+ * @param {{ run?: Function, log?: Function, tail?: Function, text?: Function, git?: {status: Function, pull: Function} }} [deps] 테스트가 갈아 끼운다
  */
-export async function handle(msg, { run = runClaude, log = writeLog, tail = tailLogs, text = extractText } = {}) {
+export async function handle(msg, { run = runClaude, log = writeLog, tail = tailLogs, text = extractText, git = { status: gitStatus, pull: gitPull } } = {}) {
   if (msg?.task === 'ping') return { ok: true, pong: true };
   if (msg?.task === 'logs') return { ok: true, entries: tail(msg.limit) };
+  if (msg?.task === 'gitStatus') return git.status();
+  if (msg?.task === 'gitPull') {
+    const started = Date.now();
+    const r = await git.pull();
+    log({ task: 'gitPull', ms: Date.now() - started, ...r });
+    return r;
+  }
 
   // 명세에 적힌 이름만 받는다('constructor' 같은 이름이 객체의 내장 속성에 걸리지 않게).
   const task = typeof msg?.task === 'string' && Object.hasOwn(TASKS, msg.task) ? TASKS[msg.task] : null;

@@ -6,7 +6,7 @@ import {
   KINDS, KIND_ORDER, KIND_MAIN, KIND_MORE, FORMS, CANCEL_FORMS, STATUS, blankForm, fieldsFor, missingFields, problems, readyToSend,
   contentOf, splitContent, describe, spanHours, buildJob, buildDocJob, buildCancelJob, listItem, listItems, formFromDoc,
   normalizePatch, applyPatch, parseAttendLocal, tripDates, relativeDates, fixRelativeDates, plansIn,
-  workStartOn, halfPlan, halfFlexForm, itemsIn, isPast, rangeCovering, isWelfare, nameOf, leaveBalance,
+  workStartOn, halfPlan, halfFlexForm, itemsIn, isPast, rangeCovering, isWelfare, welfareFormFor, nameOf, leaveBalance,
   SUBS, codeOf, withSub, halfOf, halfFromTimes, timeStep, timeOptions, spanDays, spanned, spanEnd, settle, nextSpan, SPAN_HOURS,
   FLEX_TIMES, FLEX_MODES, FLEX_DAYS, flexTimesFor, flexModeOf, fillFlexWeek,
   acceptsFile, kindOfItem, itemsOfKind, EVIDENCE_ACCEPT, statusLabel,
@@ -643,6 +643,25 @@ t('연차·체력관리·교육은 패널이 다룬다 — 수정·변경이 붙
   assert.deepEqual(listItem({ ...leave, workCodeKindName: '체력관리' }).actions, ['change', 'cancel']);
   assert.deepEqual(listItem({ ...ROW, workCodeKindName: '교육' }).actions, ['change', 'cancel']);
   assert.deepEqual(listItem({ ...ROW, formId: 'TR', workCodeKindName: '교육' }).actions, ['cancel'], '출장 신청서로 올린 교육은 다루지 않는다');
+});
+t('올려 둔 연차(승인 전후)에는 기념일 지원이 붙는다 — 임시저장·반려·회수와 체력관리에는 없다', () => {
+  const leave = { ...ROW, formId: 'LV', workCodeKindName: '연차', startTime: '', endTime: '', wrkGubunName: '전일' };
+  assert.deepEqual(listItem(leave).actions, ['change', 'cancel', 'wfa']);
+  assert.deepEqual(listItem({ ...leave, statusCode: '3' }).actions, ['change', 'recall', 'wfa']);
+  assert.deepEqual(listItem({ ...leave, statusCode: '2' }).actions.includes('wfa'), true);
+  for (const statusCode of ['1', '4', '6']) assert.equal(listItem({ ...leave, statusCode }).actions.includes('wfa'), false, statusCode);
+  assert.equal(listItem({ ...leave, workCodeKindName: '체력관리' }).actions.includes('wfa'), false);
+});
+t('신청 내역의 연차로 여는 기념일 지원 폼 — 연차 날짜·오전·오후를 가져오고 체크박스를 켠다', () => {
+  const leave = { ...ROW, formId: 'LV', workCodeKindName: '연차', startDate: '20261013', endDate: '20261013', startTime: '', endTime: '', wrkGubunName: '전일' };
+  const f = welfareFormFor(listItem(leave), '2026-10-09');
+  assert.deepEqual([f.kind, f.sub, f.dateFrom, f.dateTo, f.days, f.half, f.wfa], ['leave', 'LY', '2026-10-13', '2026-10-13', 1, '', true]);
+  assert.equal(isWelfare(f), true);
+  assert.equal(welfareFormFor(listItem({ ...leave, wrkGubunName: '오후반차' }), '2026-10-09').half, 'pm');
+  const two = welfareFormFor(listItem({ ...leave, endDate: '20261014' }), '2026-10-09');
+  assert.deepEqual([two.dateTo, two.days, two.half], ['2026-10-14', 2, '']);
+  assert.equal(welfareFormFor(listItem({ ...leave, statusCode: '6' }), '2026-10-09'), null, '회수한 연차에는 붙이지 않는다');
+  assert.equal(welfareFormFor(listItem({ ...leave, workCodeKindName: '체력관리' }), '2026-10-09'), null);
 });
 t('삭제된 건은 빼고, 최근 문서가 위로', () => {
   const items = listItems([{ ...ROW, docNo: '202609-11115-0001' }, { ...ROW, docNo: '202609-11115-0005', statusCode: 'D' }, ROW]);

@@ -10,17 +10,27 @@
 <body>
   <main class="app">
     <header class="app-header">
-      <div>
-        <div class="eyebrow"><span class="brand-mark" aria-hidden="true">K</span> KRS WORKSPACE</div>
-        <h1 id="appTitle">회의실 예약<span class="title-dot">.</span></h1>
+      <div class="app-identity">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 5v14M17 5l-10 7 10 7"/></svg></span>
+        <div class="brand-copy">
+          <div class="eyebrow">KRS WORKSPACE</div>
+          <h1 id="appTitle">회의실 예약</h1>
+        </div>
       </div>
       <div class="head-tools">
         <label class="home-toggle" title="e-Class 홈 맨 위에 WORKSPACE 카드(내 회의실·차량 예약과 출장·외근·휴가)를 붙입니다. 끄면 열려 있는 홈에서도 곧바로 사라지고, 홈에서 예약·근태를 읽지도 않습니다.">
+          <svg class="home-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7"/></svg>
+          <span class="home-toggle-text">홈에 WORKSPACE</span>
           <input type="checkbox" id="homeCard" checked />
-          <span>홈에 WORKSPACE</span>
         </label>
-        <button id="refresh" class="icon refresh" title="새로고침" aria-label="예약 현황 새로고침">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg>
+        <!-- GitHub 새 커밋 — 확장 폴더가 GitHub 보다 뒤졌으면 귀퉁이에 그 수를 띄우고, 누르면 받는다(git pull --ff-only — 다리가 돌린다, gitsync.js).
+             다리가 없으면 숨는다. -->
+        <button id="gitSync" class="icon git-sync" type="button" hidden title="GitHub 새 커밋 확인" aria-label="GitHub 새 커밋 확인">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12M18 9a9 9 0 0 1-9 9"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/></svg>
+          <span id="gitCount" class="git-count" hidden></span>
+        </button>
+        <button id="refresh" class="icon refresh" type="button" title="새로고침" aria-label="새로고침">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4v6h-6M20 10a8 8 0 1 0-1.5 7"/></svg>
         </button>
       </div>
     </header>
@@ -102,89 +112,126 @@
     <section id="gongmun" class="gongmun hidden" aria-label="공문 작성">
       <div id="gmKinds" class="gm-kinds" role="group" aria-label="품의 종류"></div>
       <!-- 과제 — 구매·교육·출장은 어떤 과제의 품의인지 갈래 바로 아래에서 별칭 칩으로 먼저 고른다(2026-10-08 사용자 지정: "구매, 교육, 출장일때
-           어떤 과제인지 별칭으로 상단에서 우선 선택"). 칩은 R&D 탭의 과제 칩과 같은 모양(별칭, 없으면 과제명)이고 과제명·과제번호·책임자는 툴팁이다.
-           문서를 넣기 전에 고르면 읽은 초안이 그 과제로 시작한다. 외부활동은 과제 수행 자체가 아니라 읽은 내용 카드 안(gmProjects)에서 고른다. -->
+           어떤 과제인지 별칭으로 상단에서 우선 선택"). 업무 탭과 구분되는 옅은 라디오 선택이며 과제명·과제번호·책임자는 툴팁이다.
+           문서를 넣기 전에 고르면 읽은 초안이 그 과제로 시작한다. 외부활동은 작성 내용 카드 안(gmProjects)에서 고른다. -->
       <div id="gmProjBar" class="gm-projbar hidden">
-        <span class="gm-projbar-label">과제</span>
-        <div id="gmPick" class="gm-pick-row" role="radiogroup" aria-label="과제"></div>
-      </div>
-      <!-- 말로 채우기 — 과제명·과제책임자(합의자)·부서장·참조자를 붙여 넣으면 사전 설정에 얹는다(2026-10-07 사용자 지정).
-           근태의 말로 채우기 칸과 같은 모양이다. Claude 가 없으면 규칙으로 읽고(src/gongmun.js 의 parseSetupLocal) 회색(.off)으로 내린다. -->
-      <div id="gmChat" class="gm-chat card">
-        <div class="ask-bar">
-          <span class="sparkle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/><path d="m20 2 .7 1.3L22 4l-1.3.7L20 6l-.7-1.3L18 4l1.3-.7L20 2Z"/></svg></span>
-          <textarea id="gmChatInput" rows="1" aria-label="과제·합의자·부서장·참조자 붙여 넣기" title="예) 과제: MW급 차단기 개발, 책임자 박기도 · 별명: 차단기 과제 · 기간: 2026.04.01 ~ 2029.12.31 · 부서장 노길태 · 참조 홍길동, 이몽룡 — 과제 목록 표를 복사해 붙여 넣어도 됩니다. 과제명 없이 '합의자 ○○○'·'별명: …'만 적으면 지금 고른 과제 몫이 됩니다." placeholder="과제명·과제책임자(합의자)·부서장·참조자를 붙여 넣으세요" spellcheck="false"></textarea>
-          <button id="gmChatGo" class="primary" aria-label="붙여 넣은 글로 사전 설정 채우기">채우기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
-        </div>
-        <ul id="gmChatLog" class="gm-chat-log" aria-live="polite"></ul>
+        <span class="gm-projbar-caption"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="gm-projbar-label">연결 과제</span></span>
+        <div id="gmPick" class="gm-pick-row" role="radiogroup" aria-label="연결 과제"></div>
       </div>
       <!-- 문서 넣는 곳 — 세 갈래가 같다. 캡처해 붙여 넣거나(Ctrl+V) 끌어다 놓거나 눌러서 고른다 — 탭 어디에 놓아도 여기로 온다. 글을 붙여 넣어도 읽는다.
            상자 안의 말은 머리말(gmDropLead)과 안내 한 줄뿐이다(2026-10-08 사용자 지정: "중간에 3줄이나 있는 건 모두 삭제하고 드래그, 붙여넣기, 캡처하기 가능 정도 짧게"). -->
-      <div id="gmIntake" class="gm-intake card">
-        <label class="gm-drop" for="gmFile">
-          <input type="file" id="gmFile" accept="image/*,application/pdf" multiple />
-          <span class="gm-drop-lead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><span id="gmDropLead">견적서를 넣으세요</span></span>
-          <span class="gm-drop-how">드래그 · 붙여넣기 · 캡처 가능</span>
-        </label>
-        <!-- 웹페이지 캡처 단추 둘(src/pagecap.js) — 교육 안내 페이지를 조각조각 캡처하지 않아도 된다. 보고 있는 탭 아이콘은 그 탭을 위에서 아래까지
-             통째로, 부분 골라 캡처는 페이지 위에서 프레임(틀·상자)을 눌러 하나 이상 고른 것만 찍는다. 처음 찍을 때 한 번 사이트 접근 권한을 묻는다.
-             단추는 gongmunpanel.js 가 그린다 — 출장 카드의 증빙 넣는 곳과 같은 것이다(webpick.js). -->
-        <div class="gm-intake-actions">
-          <span id="gmCapture" class="gm-capture" role="group" aria-label="웹페이지 캡처"></span>
-          <button type="button" id="gmManual" class="ghost small gm-manual">문서 없이 쓰기</button>
+      <div id="gmEvidence" class="gm-evidence card">
+        <div class="gm-evidence-head">
+          <button type="button" id="gmEvidenceToggle" class="gm-fold" aria-expanded="true" aria-controls="gmEvidenceBody" title="참고 문서 접기">
+            <strong><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>참고 문서</strong><span id="gmEvidenceCount" class="gm-evidence-count"></span><svg class="gm-fold-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <button id="gmReset" class="ghost small" hidden>비우기</button>
         </div>
-        <p class="cli-help" hidden><span>Claude 가 연결되지 않아 문서를 읽을 수 없습니다.</span><button type="button" class="small cli-guide-copy" title="이 PC 의 Claude Code·Codex 같은 코딩 에이전트에 붙여 넣으면 로컬 Claude CLI 를 연결해 줍니다. 확장 폴더 경로와 확장 ID 가 함께 들어갑니다.">연결 지침 복사</button></p>
+        <div class="statusline"><span id="gmStatus" class="status" role="status" aria-live="polite"></span></div>
+        <div id="gmEvidenceBody" class="gm-evidence-body">
+          <div id="gmIntake" class="gm-intake">
+            <label class="gm-drop" for="gmFile">
+              <input type="file" id="gmFile" accept="image/*,application/pdf" multiple />
+              <span class="gm-drop-lead"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><span id="gmDropLead">견적서를 넣으세요</span></span>
+              <span class="gm-drop-how">드래그 · 붙여넣기 · 캡처 가능</span>
+            </label>
+            <!-- 웹페이지 캡처 단추 둘(src/pagecap.js) — 전체 또는 페이지 위에서 고른 부분만 찍는다.
+                 출장 카드의 증빙 넣는 곳과 같은 단추다(webpick.js). -->
+            <div class="gm-intake-actions">
+              <span id="gmCapture" class="gm-capture" role="group" aria-label="웹페이지 캡처"></span>
+              <button type="button" id="gmManual" class="ghost small gm-manual">문서 없이 쓰기</button>
+            </div>
+            <p class="cli-help" hidden><span>Claude 가 연결되지 않아 문서를 읽을 수 없습니다.</span><button type="button" class="small cli-guide-copy" title="이 PC 의 Claude Code·Codex 같은 코딩 에이전트에 붙여 넣으면 로컬 Claude CLI 를 연결해 줍니다. 확장 폴더 경로와 확장 ID 가 함께 들어갑니다.">연결 지침 복사</button></p>
+          </div>
+          <!-- 100만원 한도(구매) — 문서를 읽은 결과라 여기 남는다. 읽은 칸(합계)은 아래 작업 카드의 읽은 내용 탭에 있다. -->
+          <div id="gmLimit" class="gm-limit hidden" role="alert"></div>
+        </div>
       </div>
-      <div class="statusline"><span id="gmStatus" class="status" role="status" aria-live="polite"></span></div>
-      <!-- 읽은 것 — 칸을 고치고 과제를 고른다. 구매는 합계가 100만원을 넘으면 공문을 만들지 않는다(src/gongmun.js 의 PURCHASE_LIMIT). -->
-      <div id="gmDraft" class="gm-draft card hidden">
-        <div class="booking-head"><strong>읽은 내용</strong><button id="gmReset" class="ghost small">비우기</button></div>
-        <!-- 읽은 문서와 읽은 칸은 접어 둔다 — 펼쳐 두는 것은 과제(R&D 탭)·용도·사유·에이전트·결재선뿐이다(2026-10-08 사용자 지정). -->
-        <details id="gmMore" class="gm-more">
-          <summary><span>읽은 문서</span><span id="gmMoreState" class="summary-detail"></span></summary>
-          <div class="gm-more-body">
+      <!-- 작성 내용·공문·읽은 내용은 한 카드의 세 탭으로 번갈아 보며(2026-10-09 사용자 지정: "작성내용, 공문 그리고 옆에 읽은 내용 탭으로"),
+           접기 단추로 선택한 탭의 내용을 접는다. 비교작성 단추는 이 페이지를 sidepanel.html?compare=갈래 로 크롬 탭에 연다 — 거기서는 고른 탭
+           (작성 내용·공문)이 왼쪽, 읽은 내용이 오른쪽에 나란히 선다(같은 날 사용자 지정: "비교작성 버튼을 추가 해서 왼쪽 탭에서 비교하면서 작성",
+           "비교작성은 사이드패널이 아니라 크롬 탭에"). 사이드패널 안에서는 두 칸으로 나누지 않는다. -->
+      <div id="gmWorkspace" class="gm-workspace card hidden">
+        <div class="gm-workspace-head">
+          <div id="gmViewTabs" class="gm-view-tabs" role="tablist" aria-label="작성 내용·공문·읽은 내용">
+            <button type="button" id="gmViewDraft" class="gm-view-tab active" data-gm-view="draft" role="tab" aria-selected="true" aria-controls="gmDraft" tabindex="0">작성 내용</button>
+            <button type="button" id="gmViewDoc" class="gm-view-tab" data-gm-view="doc" role="tab" aria-selected="false" aria-controls="gmDoc" tabindex="-1" disabled>공문</button>
+            <button type="button" id="gmViewRead" class="gm-view-tab" data-gm-view="read" role="tab" aria-selected="false" aria-controls="gmReadView" tabindex="-1">읽은 내용</button>
+          </div>
+          <button type="button" id="gmCompare" class="ghost small gm-compare" title="크롬 탭에 넓게 열어 작성 내용(공문)을 왼쪽, 읽은 내용을 오른쪽에 두고 비교하며 씁니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7.5" height="16" rx="1.5"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.5"/></svg>비교작성</button>
+          <button type="button" id="gmWorkspaceToggle" class="ghost small gm-workspace-toggle" aria-expanded="true" aria-controls="gmWorkspaceBody" aria-label="작성 내용 접기" title="작성 내용 접기"><span id="gmWorkspaceFoldLabel">접기</span><svg class="gm-fold-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        </div>
+        <div id="gmWorkspaceBody">
+          <!-- 작성 내용 — 용도·사유·에이전트·결재선. 구매는 합계가 100만원을 넘으면 공문을 만들지 않는다(src/gongmun.js 의 PURCHASE_LIMIT). -->
+          <div id="gmDraft" class="gm-draft hidden" role="tabpanel" aria-labelledby="gmViewDraft" tabindex="0">
+            <!-- 외부활동의 과제 — 구매·교육·출장은 탭 위의 과제 줄(gmProjBar)에서 고르니 이 둘은 숨는다. -->
+            <div id="gmProjLabel" class="gm-label">과제 <small>R&amp;D 탭</small></div>
+            <div id="gmProjects" class="gm-projects" role="radiogroup" aria-label="과제"></div>
+            <!-- 고른 과제의 기본 내용(별명·번호·연구기간·연구 내용) — 제목·과제 개요에 들어가고, 연구 내용은 사유의 근거다. -->
+            <p id="gmProjInfo" class="gm-proj-info hidden"></p>
+            <div id="gmFields" class="gm-fields"></div>
+            <!-- 에이전트 — 고른 과제의 연구 내용을 보고 용도·사유를 쓰고, 여기 적은 말대로 고쳐 쓴다(src/llm.js 의 gongmunReasonSmart). -->
+            <div id="gmAgent" class="gm-chat gm-agent">
+              <div class="ask-bar">
+                <span class="sparkle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/><path d="m20 2 .7 1.3L22 4l-1.3.7L20 6l-.7-1.3L18 4l1.3-.7L20 2Z"/></svg></span>
+                <textarea id="gmAgentInput" rows="1" aria-label="에이전트에게 — 용도·사유 고쳐 쓰기" title="고른 과제의 연구 내용(R&amp;D 탭의 연구개발 계획·진행 기록)을 보고 용도·사유를 고쳐 씁니다. 예) 사유를 시험 장비 검증 쪽으로 다시 써 줘 · 용도를 더 짧게" placeholder="에이전트에게 — 예) 사유를 시험 장비 검증 쪽으로" spellcheck="false"></textarea>
+                <button id="gmAgentGo" class="primary" aria-label="에이전트에게 보내기">보내기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
+              </div>
+              <ul id="gmAgentLog" class="gm-chat-log" aria-live="polite"></ul>
+            </div>
+            <div class="gm-label">결재선</div>
+            <div id="gmLine" class="gm-line"></div>
+            <p id="gmNeed" class="gm-need" role="status"></p>
+          </div>
+          <!-- 만든 공문. 제목·본문은 여기서 바로 고쳐도 된다(고치면 위 칸을 바꿔도 그대로 둔다 — 양식으로 다시 만들기로 되돌린다). -->
+          <div id="gmDoc" class="gm-doc hidden" role="tabpanel" aria-labelledby="gmViewDoc" tabindex="0" hidden>
+            <div class="gm-doc-head"><span>양식</span><span id="gmFormName" class="gm-form-name"></span></div>
+            <label for="gmTitle" class="gm-label">제목</label>
+            <input type="text" id="gmTitle" autocomplete="off" spellcheck="false" />
+            <label for="gmBody" class="gm-label">본문</label>
+            <textarea id="gmBody" rows="16" spellcheck="false"></textarea>
+            <p id="gmEdited" class="gm-edited hidden">직접 고친 글입니다 — 위 칸을 바꿔도 그대로 둡니다. <button type="button" id="gmRegen" class="ghost small">양식으로 다시 만들기</button></p>
+            <!-- 문서설정·위임전결 — 새 공문 창에 같이 넣는다(2026-10-08 사용자 지정: "문서설정, 위임전결도 같이 입력"). 기본값은 레시피
+                 (recipes/gongmun/registries 의 settings.yaml·delegation.yaml)이고, 여기서 바꾼 것은 이 공문에만 남는다. -->
+            <details id="gmSetBox" class="gm-set">
+              <summary><span>문서설정 · 위임전결</span><span id="gmSetState" class="summary-detail"></span></summary>
+              <div class="gm-set-grid">
+                <label for="gmRank" class="gm-label">전결권자</label>
+                <select id="gmRank"></select>
+                <p id="gmRankWhy" class="gm-set-why"></p>
+                <label for="gmRetention" class="gm-label">보존년한</label>
+                <select id="gmRetention"></select>
+                <label for="gmDocNoOne" class="gm-label">Doc No. (문서번호 부서 코드)</label>
+                <input type="text" id="gmDocNoOne" inputmode="numeric" maxlength="8" autocomplete="off" />
+                <label for="gmReceiver" class="gm-label">수신처</label>
+                <select id="gmReceiver"></select>
+                <label for="gmScope" class="gm-label">공개범위</label>
+                <select id="gmScope"></select>
+                <div class="gm-set-checks">
+                  <label><input type="checkbox" id="gmEmergency" /> 긴급</label>
+                  <label><input type="checkbox" id="gmApprovingOpen" /> 진행공개</label>
+                  <label><input type="checkbox" id="gmDrm" /> DRM</label>
+                </div>
+                <label for="gmTag" class="gm-label">검색 키워드</label>
+                <input type="text" id="gmTag" autocomplete="off" />
+                <div class="gm-actions"><button type="button" id="gmSetReset" class="ghost small">기본값으로</button></div>
+              </div>
+            </details>
+            <!-- 새 공문 창을 열고 과제(Job Id)·제목·차수·본문·문서설정·결재선을 넣는다(src/gmwrite.js). 임시저장·상신은 창에서 사람이 한다. -->
+            <button type="button" id="gmWrite" class="primary wide">eclass 에 공문 작성</button>
+            <ol id="gmWriteLog" class="gm-write-log hidden" aria-live="polite"></ol>
+            <button type="button" id="gmSavePdf" class="ghost wide hidden">견적서 PDF 저장 (첨부용)</button>
+            <ol id="gmSteps" class="gm-steps-list"></ol>
+          </div>
+          <!-- 읽은 내용 — 무엇을 읽었는지·첨부·알림, 읽은 칸(품목 요지·합계·교육명·교육기간…), 품목, 오린 견적서(src/quotecut.js).
+               맨 뒤에 두어 비교작성 탭에서는 오른쪽 칸이 된다. 읽은 칸에 채울 것이 남았거나 한도에 걸리면 이 탭이 저절로 열린다. -->
+          <div id="gmReadView" class="gm-read-view hidden" role="tabpanel" aria-labelledby="gmViewRead" tabindex="0" hidden>
             <p id="gmSource" class="gm-source"></p>
-            <!-- 구매·교육 — 쇼핑몰 화면·온라인 강의 페이지에서 가격과 그 둘레만 오린 견적서(src/quotecut.js). 더 넓게·원래 장으로. -->
-            <div id="gmCut" class="gm-cut hidden"></div>
-            <ul id="gmItems" class="gm-items"></ul>
             <div id="gmMoreFields" class="gm-fields"></div>
+            <ul id="gmItems" class="gm-items"></ul>
+            <div id="gmCut" class="gm-cut hidden"></div>
           </div>
-        </details>
-        <div id="gmLimit" class="gm-limit hidden" role="alert"></div>
-        <!-- 외부활동의 과제 — 구매·교육·출장은 탭 위의 과제 줄(gmProjBar)에서 고르니 이 둘은 숨는다. -->
-        <div id="gmProjLabel" class="gm-label">과제 <small>R&amp;D 탭</small></div>
-        <div id="gmProjects" class="gm-projects" role="radiogroup" aria-label="과제"></div>
-        <!-- 고른 과제의 기본 내용(별명·번호·연구기간·연구 내용) — 제목·과제 개요에 들어가고, 연구 내용은 사유의 근거다. -->
-        <p id="gmProjInfo" class="gm-proj-info hidden"></p>
-        <div id="gmFields" class="gm-fields"></div>
-        <!-- 에이전트 — 고른 과제의 연구 내용을 보고 용도·사유를 쓰고, 여기 적은 말대로 고쳐 쓴다(src/llm.js 의 gongmunReasonSmart). -->
-        <div id="gmAgent" class="gm-chat gm-agent">
-          <div class="ask-bar">
-            <span class="sparkle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/><path d="m20 2 .7 1.3L22 4l-1.3.7L20 6l-.7-1.3L18 4l1.3-.7L20 2Z"/></svg></span>
-            <textarea id="gmAgentInput" rows="1" aria-label="에이전트에게 — 용도·사유 고쳐 쓰기" title="고른 과제의 연구 내용(R&amp;D 탭의 연구개발 계획·진행 기록)을 보고 용도·사유를 고쳐 씁니다. 예) 사유를 시험 장비 검증 쪽으로 다시 써 줘 · 용도를 더 짧게" placeholder="에이전트에게 — 예) 사유를 시험 장비 검증 쪽으로" spellcheck="false"></textarea>
-            <button id="gmAgentGo" class="primary" aria-label="에이전트에게 보내기">보내기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
-          </div>
-          <ul id="gmAgentLog" class="gm-chat-log" aria-live="polite"></ul>
         </div>
-        <div class="gm-label">결재선</div>
-        <div id="gmLine" class="gm-line"></div>
-        <p id="gmNeed" class="gm-need" role="status"></p>
-      </div>
-      <!-- 만든 공문. 제목·본문은 여기서 바로 고쳐도 된다(고치면 위 칸을 바꿔도 그대로 둔다 — 양식으로 다시 만들기로 되돌린다). -->
-      <div id="gmDoc" class="gm-doc card hidden">
-        <div class="booking-head"><strong>공문</strong><span id="gmFormName" class="gm-form-name"></span></div>
-        <label for="gmTitle" class="gm-label">제목</label>
-        <input type="text" id="gmTitle" autocomplete="off" spellcheck="false" />
-        <label for="gmBody" class="gm-label">본문</label>
-        <textarea id="gmBody" rows="16" spellcheck="false"></textarea>
-        <p id="gmEdited" class="gm-edited hidden">직접 고친 글입니다 — 위 칸을 바꿔도 그대로 둡니다. <button type="button" id="gmRegen" class="ghost small">양식으로 다시 만들기</button></p>
-        <div class="gm-actions">
-          <button type="button" id="gmCopyTitle" class="ghost">제목 복사</button>
-          <button type="button" id="gmCopyBody" class="primary">본문 복사</button>
-        </div>
-        <button type="button" id="gmOpen" class="primary wide">eclass 에서 새 공문 열기</button>
-        <button type="button" id="gmSavePdf" class="ghost wide hidden">견적서 PDF 저장 (첨부용)</button>
-        <ol id="gmSteps" class="gm-steps-list"></ol>
       </div>
       <!-- 양식 — 갈래마다 eclass 양식·제목 틀·본문 틀을 보고 고친다(2026-10-07 사용자 지정). 고친 것만 저장하고, 기본 양식으로 되돌릴 수 있다. -->
       <details id="gmTplBox" class="gm-box card">
@@ -204,14 +251,22 @@
           <div class="gm-actions"><button type="button" id="gmTplReset" class="ghost small">기본 양식으로</button></div>
         </div>
       </details>
-      <!-- 사전 설정 — 부서(본문 첫 줄)·부서장(결재자)·참조자, 과제 다섯 개(과제책임자가 합의자). 위 채팅 칸에 붙여 넣어도 채워진다. -->
+      <!-- 공문 설정 — 부서(본문 첫 줄)와 문서번호 코드(문서설정 Doc No.), 결재선에 설 사람(부서장·소장·본부장)·참조자, 과제 다섯 개(과제책임자가 합의자).
+           2026-10-09 사용자 지정: 이름은 '공문 설정', 말로 채우기(채팅) 칸은 빼고, 부서장·소장·본부장은 한 줄, 문서번호 코드는 부서 옆. -->
       <details id="gmPresetBox" class="gm-box card">
-        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--surface)"/><circle cx="15" cy="17" r="3" fill="var(--surface)"/></svg><span>사전 설정</span><span id="gmPresetState" class="summary-detail">부서장 · 참조자 · 과제</span></summary>
+        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--surface)"/><circle cx="15" cy="17" r="3" fill="var(--surface)"/></svg><span>공문 설정</span><span id="gmPresetState" class="summary-detail">부서장 · 소장 · 본부장</span></summary>
         <div class="gm-box-body">
-          <label for="gmDept" class="gm-label">부서 (본문 첫 줄)</label>
-          <input type="text" id="gmDept" placeholder="예) 연구본부 수소전기추진연구팀" autocomplete="off" />
-          <label for="gmHead" class="gm-label">부서장 (결재자)</label>
-          <input type="text" id="gmHead" placeholder="예) 노길태" autocomplete="off" />
+          <div class="gm-preset-grid gm-preset-dept">
+            <div><label for="gmDept" class="gm-label">부서 (본문 첫 줄)</label><input type="text" id="gmDept" placeholder="예) 연구본부 수소전기추진연구팀" autocomplete="off" /></div>
+            <div><label for="gmDocNo" class="gm-label">문서번호 코드 <small>문서설정 Doc No.</small></label><input type="text" id="gmDocNo" inputmode="numeric" maxlength="8" placeholder="비우면 부서로 찾음" autocomplete="off" /></div>
+          </div>
+          <!-- 부서로 찾은 코드. 둘 이상이거나 없으면 문서설정 창의 목록(레시피 settings.yaml 의 doc_no_options)에서 고르는 칸이 선다. -->
+          <div id="gmDocNoHint" class="gm-docno-hint" aria-live="polite"></div>
+          <div class="gm-preset-grid gm-preset-people">
+            <div><label for="gmHead" class="gm-label">부서장 <small>결재 · 팀장 전결</small></label><input type="text" id="gmHead" placeholder="예) 노길태" autocomplete="off" /></div>
+            <div><label for="gmDirector" class="gm-label">소장 <small>소장 전결일 때</small></label><input type="text" id="gmDirector" placeholder="예) 송강현" autocomplete="off" /></div>
+            <div><label for="gmChief" class="gm-label">본부장 <small>본부장 전결일 때</small></label><input type="text" id="gmChief" placeholder="예) 김대헌" autocomplete="off" /></div>
+          </div>
           <label for="gmRefs" class="gm-label">참조자</label>
           <input type="text" id="gmRefs" placeholder="예) 홍길동, 이몽룡" autocomplete="off" />
           <div class="gm-proj-head"><span class="gm-label">과제 <span id="gmProjCount" class="count"></span></span><button type="button" id="gmProjAdd" class="ghost small">과제 더하기</button></div>
@@ -221,12 +276,12 @@
     </section>
     <!-- R&D 탭. 과제마다 연구기간을 차년도로 잘라, 보고 있는 차년도(처음엔 오늘이 든 차년도)의 예산·참여연구자·연구개발 계획·진행 기록·변경이력을 적어 둔다.
          어디에도 올리지 않는다 — 이 브라우저(chrome.storage 의 rndBook)에만 남고, JSON 으로 내보내고 들여온다. rndpanel.js 가 그린다.
-         과제는 공문 탭의 사전 설정에서 가져올 수 있다(처음 열 때 과제가 없으면 저절로). 다른 탭에서는 통째로 숨는다. -->
+         과제는 공문 탭의 공문 설정에서 가져올 수 있다(처음 열 때 과제가 없으면 저절로). 다른 탭에서는 통째로 숨는다. -->
     <section id="rnd" class="rnd hidden" aria-label="R&amp;D 과제 관리">
       <!-- 과제 칩 한 줄 — 별칭(없으면 과제명을 줄여)으로, 맨 끝의 ＋ 로 과제를 더한다. -->
       <div id="rdProjects" class="rd-projects" role="group" aria-label="과제"></div>
       <div id="rdEmpty" class="rd-empty card hidden">
-        <p>적어 둔 과제가 없습니다. 맨 아래 칸에 연구개발계획서 YAML 을 넣거나, 공문 탭의 사전 설정에 둔 과제를 가져오거나, 새 과제를 더하세요.</p>
+        <p>적어 둔 과제가 없습니다. 맨 아래 칸에 연구개발계획서 YAML 을 넣거나, 공문 탭의 공문 설정에 둔 과제를 가져오거나, 새 과제를 더하세요.</p>
         <div class="rd-actions">
           <button type="button" id="rdEmptyImport" class="ghost small">공문 탭의 과제 가져오기</button>
           <button type="button" id="rdEmptyAdd" class="primary small">과제 더하기</button>
@@ -349,7 +404,7 @@
           <button type="button" id="rdCopy" class="primary small" title="보고 있는 과제·차년도의 개요·예산표·참여연구자·연구개발 계획·진행 기록·변경이력을 글로 복사합니다">요약 복사</button>
           <button type="button" id="rdExport" class="ghost small" title="과제 전부를 JSON 파일로 내려받습니다 — 다른 PC·브라우저로 옮기거나 보관할 때">JSON 저장</button>
           <label class="ghost small rd-import" title="JSON 저장으로 받은 파일을 들여옵니다. 지금 적어 둔 것을 통째로 바꿉니다."><input type="file" id="rdImport" accept="application/json,.json" />JSON 불러오기</label>
-          <button type="button" id="rdImportGm" class="ghost small" title="공문 탭 사전 설정의 과제(과제명·별명·과제번호·책임자·연구기간)를 가져옵니다. 이미 있는 과제는 빈 칸만 채웁니다.">공문 탭의 과제 가져오기</button>
+          <button type="button" id="rdImportGm" class="ghost small" title="공문 탭 공문 설정의 과제(과제명·별명·과제번호·책임자·연구기간)를 가져옵니다. 이미 있는 과제는 빈 칸만 채웁니다.">공문 탭의 과제 가져오기</button>
         </div>
       </div>
       <!-- 원노트 공유(선택, 2026-10-08 사용자 지정) — 과제 정보(별칭·과제명·과제번호·책임자·연구기간·비고)만 원노트의 한 페이지에 두고 다른 기기와 맞춘다.

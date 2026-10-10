@@ -1,22 +1,31 @@
-// 공문(전자결재 품의) 작성의 순수 로직 — src/gongmun.js. 틀 채우기·조사·한도·결재선·사전 설정 채우기를 못 박는다.
+// 공문(전자결재 품의) 작성의 순수 로직 — src/gongmun.js. 틀 채우기·조사·한도·결재선·공문 설정 채우기를 못 박는다.
 // 화면 쪽(탭 전환·채팅·한도 차단·새 공문 열기)은 test/wiring.test.mjs 의 "공문 탭" 이 본다.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import {
-  KINDS, KIND_ORDER, FORMS, DEFAULT_TEMPLATES, MAX_PROJECTS, PURCHASE_LIMIT, FIELDS,
+  delegationOf, docSettingOf, settingText, writePlan,
+} from '../src/gongmun.js';
+import { readRecipe, checkRecipe, render as renderRecipe, build as buildRecipe } from '../tools/gen-gongmun.mjs';
+import {
+  KINDS, KIND_ORDER, FORMS, DEFAULT_TEMPLATES, MAX_PROJECTS, PURCHASE_LIMIT, FIELDS, VARS, varsFor,
   templateOf, templateEdited, templatePatch, normalizePreset, normalizeProjects, namesOf, josa, hasBatchim, fillTemplate,
   totalOf, gistOf, fromRecord, blankDraft, overLimit, approvalLine, lineText, compose, needs, bodyHtml, draftUrl, attachName,
   moneyOf, won, dotDate, summaryOf, parseSetupLocal, mergeSetup, attachList, attachBlock, mergeDraft, applyReason, reasonInput, REASON_KEYS,
   eduModeOf, EDU_MODES, spreadParts, attachWithCut, rndContent, rndProjects, OUTSIDE_TYPES, outsideTypeOf, REASON_LABEL, missingDocs, moreLead,
+  normalizeRndExtra, sameProject,
 } from '../src/gongmun.js';
 import { normalizeBook } from '../src/rnd.js';
-import { structure, systemPrompt, InputError } from '../src/input.js';
+import { structure, systemPrompt, promptOf, InputError } from '../src/input.js';
 import { checkSpec } from '../tools/gen-input.mjs';
 import { TASKS } from '../src/input.js';
+import { INPUT_SPEC } from '../src/inputspec.js';
+import { DOC_NAMES, whoOf } from '../src/gongmun.js';
 import { gongmunInput, gongmunSetupSmart } from '../src/llm.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name); };
+const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o?.[k]]));
 const ta = async (name, fn) => { await fn(); pass++; console.log('  ok  ' + name); };
 
 const PRESET = { dept: '연구본부 수소전기추진연구팀', head: '노길태', refs: '홍길동, 이몽룡' };
@@ -29,7 +38,7 @@ t('갈래는 구매·교육·출장·외부활동 넷이고 넷 다 문서를 �
   assert.deepEqual(KIND_ORDER.map((k) => KINDS[k].label), ['구매', '교육', '출장', '외부활동']);
   for (const k of KIND_ORDER) assert.ok(KINDS[k].doc && KINDS[k].ask && KINDS[k].more, `${k} 에 문서 넣는 곳의 말`);
   assert.equal(KINDS.trip.ask, '행사·회의 안내문이나 초청장을 넣으세요');
-  assert.deepEqual(FIELDS.trip.map((f) => f.key), ['place', 'from', 'to', 'who', 'cost', 'purpose', 'reason', 'account']);
+  assert.deepEqual(FIELDS.trip.map((f) => f.key), ['place', 'from', 'to', 'who', 'cost', 'division', 'purpose', 'reason', 'account'], '출장 구분(국내·해외)은 위임전결을 가른다');
   assert.deepEqual(FIELDS.trip.filter((f) => f.open).map((f) => f.key), ['purpose', 'reason'], '펼쳐 두는 칸은 출장목적·출장사유');
   assert.equal(KINDS.outside.title, '외부활동 허가 신청서');
   assert.deepEqual(FIELDS.outside.map((f) => f.key), ['type', 'org', 'subject', 'from', 'to', 'hours', 'place', 'fee', 'topics', 'who', 'purpose', 'reason']);
@@ -102,7 +111,7 @@ t('구매 — 품목 요지와 요약("…을 구매하고자")을 만든다', (
   assert.equal(summaryOf(''), '');
 });
 t('교육 — 교육명·기간·교육비, 참석자는 나', () => {
-  const { draft } = fromRecord('edu', { docType: 'course', vendor: '한국전력기술교육원', courseName: '전력변환 설계 실무', courseFrom: '2026-10-12', courseTo: '2026-10-14', total: 450000, gist: 'x' }, { me: '김거화' });
+  const { draft } = fromRecord('edu', { docType: 'course', provider: '한국전력기술교육원', course: '전력변환 설계 실무', from: '2026-10-12', to: '2026-10-14', fee: 450000 }, { me: '김거화' });
   assert.deepEqual([draft.course, draft.provider, draft.from, draft.to, draft.fee, draft.attendees], ['전력변환 설계 실무', '한국전력기술교육원', '2026-10-12', '2026-10-14', 450000, '김거화']);
 });
 t('외화 문서는 원화로 고쳐 달라고 알린다', () => {
@@ -169,7 +178,7 @@ t('과제 개요·계정을 적어 두면 그것을 쓴다', () => {
   assert.match(c.body, /구매계정 : 연구재료비/);
   assert.deepEqual(c.missing.sort(), ['구매사유', '업체', '요약', '용도', '품목요지', '합계'].sort());
 });
-const EDU_REC = { courseName: '전력변환 설계 실무', vendor: '교육원', courseFrom: '2026-10-12', courseTo: '2026-10-14', total: 450000, use: '전력변환 설계 역량 강화' };
+const EDU_REC = { course: '전력변환 설계 실무', provider: '교육원', from: '2026-10-12', to: '2026-10-14', fee: 450000, purpose: '전력변환 설계 역량 강화' };
 const FULL = { ...PROJECT, alias: '차단기 과제', period: '2026.04.01 ~ 2029.12.31' };
 t('교육 — 제목은 "[과제 별명] 수행을 위한 교육 품의", 본문은 가. 과제 개요 · 나. 교육 내용(기간은 며칠인지까지)', () => {
   const { draft } = fromRecord('edu', EDU_REC, { me: '김거화' });
@@ -187,7 +196,7 @@ t('교육 — 제목은 "[과제 별명] 수행을 위한 교육 품의", 본문
   assert.match(c.body, /※ 첨 부\n {4}1\. 교육 견적서 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/, '문서 없이 써도 교육 견적서·교육 내용 두 줄');
 });
 t('교육 — 온라인이면 "… 수행을 위한 온라인교육 품의", 고른 교육 구분이 이긴다', () => {
-  const { draft } = fromRecord('edu', { ...EDU_REC, vendor: '인프런', place: '온라인' }, { me: '김거화' });
+  const { draft } = fromRecord('edu', { ...EDU_REC, provider: '인프런', place: '온라인' }, { me: '김거화' });
   assert.equal(draft.mode, '온라인교육');
   const c = compose('edu', draft, { ...CTX, project: FULL });
   assert.equal(c.title, '차단기 과제 수행을 위한 온라인교육 품의');
@@ -206,20 +215,22 @@ t('교육 — 별명이 없으면 제목에 과제명, 번호·기간이 없으�
   assert.equal(none.title, '[과제별명] 수행을 위한 교육 품의', '과제를 고르지 않으면 눈에 띄게 남는다');
   assert.ok(none.missing.includes('과제별명'));
 });
-const TRIP_REC = { docType: 'event', tripPlace: '부산(한국선급 본사)', tripFrom: '2026-10-20', tripTo: '2026-10-21', total: 300000, gist: '실증 시험', use: '실증 시험 참관', summary: '실증 시험 참관 안내' };
+const TRIP_REC = { docType: 'event', place: '부산(한국선급 본사)', from: '2026-10-20', to: '2026-10-21', cost: 300000, purpose: '실증 시험 참관', summary: '실증 시험 참관 안내' };
 t('출장 — 행사 안내문에서 출장지·기간·목적·예상경비를 읽고, 제목은 "[과제 별명] 수행을 위한 출장 품의", 본문에 과제 개요·출장 내용·첨부', () => {
   assert.equal(DEFAULT_TEMPLATES.trip.title, '{과제별명} 수행을 위한 출장 품의');
   const { draft, notes } = fromRecord('trip', TRIP_REC, { me: '김거화' });
   assert.deepEqual([draft.place, draft.from, draft.to, draft.who, draft.purpose, draft.cost, notes], ['부산(한국선급 본사)', '2026-10-20', '2026-10-21', '김거화', '실증 시험 참관', 300000, []]);
-  assert.equal(fromRecord('trip', { ...TRIP_REC, use: null }).draft.purpose, '실증 시험', '목적이 없으면 행사명');
+  // 목적이 문서에 없으면 행사명으로 "○○ 참석" 처럼 쓰는 것은 읽기 지시문(레시피 trip/purpose.yaml 의 purpose read)이 한다.
+  assert.match(systemPrompt('gongmun.trip'), /- purpose \(글 또는 null\): [^\n]*없으면 행사·회의명으로 "○○ 참석"/);
+  assert.equal(fromRecord('trip', { ...TRIP_REC, purpose: null }).draft.purpose, '', '못 읽었으면 비어 남은 것에 뜬다');
   const c = compose('trip', { ...draft, reason: '과제의 실증 시험 결과 확인에 필요함' }, { ...CTX, project: FULL });
   assert.equal(c.title, '차단기 과제 수행을 위한 출장 품의');
   assert.match(c.body, /가\. 과제 개요\n[\s\S]*나\. 출장 내용\n {4}\(1\) 출 장 지 : 부산\(한국선급 본사\)\n {4}\(2\) 출장기간 : 2026\. 10\. 20\. ~ 2026\. 10\. 21\. \(2일\)\n {4}\(3\) 출 장 자 : 김거화/);
   assert.match(c.body, /\(4\) 출장목적 : 실증 시험 참관\n {4}\(5\) 출장사유 : 과제의 실증 시험 결과 확인에 필요함\n {4}\(6\) 예상경비 : 300,000원\n {4}\(7\) 예산계정 : 연구활동비\(국내여비\)\n\n※ 첨 부\n {4}1\. 행사 안내문 1부\.  끝\.$/);
 });
 const OUTSIDE_REC = {
-  docType: 'request', vendor: '부산대학교 조선해양공학과', gist: 'MVDC 차단기 기술 특강', activityType: 'lecture', actFrom: '2026-11-05', actTo: '2026-11-05',
-  actHours: '14:00~16:00 (2시간)', place: '부산대학교 공학관', topics: 'MVDC 차단기 개요 · 시험 결과', total: 300000, use: '연구 성과 확산', summary: '특강 요청 공문',
+  docType: 'request', org: '부산대학교 조선해양공학과', subject: 'MVDC 차단기 기술 특강', type: '강의', from: '2026-11-05', to: '2026-11-05',
+  hours: '14:00~16:00 (2시간)', place: '부산대학교 공학관', topics: 'MVDC 차단기 개요 · 시험 결과', fee: 300000, purpose: '연구 성과 확산', summary: '특강 요청 공문',
   parts: [{ file: '요청.png', kind: 'request' }],
 };
 t('외부활동 — 요청 공문에서 요청 기관·활동명·구분·기간·시간·장소·내용·사례비를 읽고, 제목은 "[요청 기관] [구분] 외부활동 허가 신청", 본문에 과제 개요·외부활동 내용·첨부', () => {
@@ -228,7 +239,8 @@ t('외부활동 — 요청 공문에서 요청 기관·활동명·구분·기간
   assert.deepEqual([draft.type, draft.org, draft.subject, draft.from, draft.to, draft.hours, draft.place, draft.topics, draft.who, draft.fee, draft.purpose, notes],
     ['강의', '부산대학교 조선해양공학과', 'MVDC 차단기 기술 특강', '2026-11-05', '2026-11-05', '14:00~16:00 (2시간)', '부산대학교 공학관', 'MVDC 차단기 개요 · 시험 결과', '김거화', 300000, '연구 성과 확산', []]);
   assert.deepEqual(draft.attach, [{ label: '요청 공문', files: ['요청.png'] }]);
-  assert.equal(fromRecord('outside', { ...OUTSIDE_REC, activityType: null }).draft.type, '강의', '구분을 못 읽으면 첫 번째');
+  assert.equal(fromRecord('outside', { ...OUTSIDE_REC, type: null }).draft.type, '강의', '구분을 못 읽으면 첫 번째');
+  assert.equal(fromRecord('outside', { ...OUTSIDE_REC, type: '자문' }).draft.type, '자문', '읽기는 구분을 이름 그대로 돌려준다');
   assert.equal(blankDraft('outside', { me: '김거화' }).who, '김거화');
   const c = compose('outside', { ...draft, reason: '과제 연구 성과의 확산에 필요함' }, { ...CTX, project: FULL });
   assert.equal(c.title, '부산대학교 조선해양공학과 강의 외부활동 허가 신청');
@@ -258,20 +270,20 @@ t('구매 — 제목·본문은 그대로(원본에서도 과제 개요를 빼�
 });
 t('남은 것 — 과제·부서장·합의자·용도·구매사유', () => {
   assert.deepEqual(needs('purchase', blankDraft('purchase'), { preset: {}, project: null, projects: [] }),
-    ['과제 등록(R&D 탭)', '부서장(사전 설정)', '부서(사전 설정)', '품목', '합계', '용도', '구매사유']);
+    ['과제 등록(R&D 탭)', '부서장(공문 설정)', '부서(공문 설정)', '품목', '합계', '용도', '구매사유']);
   assert.deepEqual(needs('purchase', { gist: 'x', total: 1, use: 'u', reason: 'r' }, { preset: PRESET, project: { name: 'p' }, projects: [{ name: 'p' }] }), ['합의자(과제책임자)']);
 });
 t('남은 것 — 교육·출장은 제목에 쓸 과제 별명(구매는 묻지 않는다)', () => {
   const edu = { course: 'c', from: '2026-10-12', fee: 1, purpose: 'p', reason: 'r' };
-  assert.deepEqual(needs('edu', edu, { preset: PRESET, project: PROJECT, projects: [PROJECT] }), ['과제 별명(사전 설정 — 제목)']);
+  assert.deepEqual(needs('edu', edu, { preset: PRESET, project: PROJECT, projects: [PROJECT] }), ['과제 별명(공문 설정 — 제목)']);
   assert.deepEqual(needs('edu', edu, { preset: PRESET, project: FULL, projects: [FULL] }), []);
   assert.deepEqual(needs('trip', blankDraft('trip'), { preset: PRESET, project: FULL, projects: [FULL] }), ['출장지', '출장기간', '예상경비', '출장목적', '출장사유']);
   assert.deepEqual(needs('trip', { place: '부산', from: '2026-10-20', cost: 1, purpose: 'p', reason: 'r' }, { preset: PRESET, project: FULL, projects: [FULL] }), []);
 });
-t('붙여 넣을 HTML — 들여쓰기는 &nbsp;, 아 래 줄은 가운데', () => {
+t('편집기에 넣을 HTML — 줄마다 div, 들여쓰기는 &nbsp;, 빈 줄은 <br>, 아 래 줄은 가운데(SetHTMLBody 로 저장까지 남은 꼴)', () => {
   const html = bodyHtml('가. 구매\n    (1) A\n\n------------ 아   래 ------------\n<b>');
-  assert.equal(html, '<p style="margin:0">가. 구매</p><p style="margin:0">&nbsp;&nbsp;&nbsp;&nbsp;(1) A</p><p style="margin:0">&nbsp;</p>'
-    + '<p style="margin:0;text-align:center">------------ 아   래 ------------</p><p style="margin:0">&lt;b&gt;</p>');
+  assert.equal(html, '<div>가. 구매</div><div>&nbsp;&nbsp;&nbsp;&nbsp;(1) A</div><div><br></div>'
+    + '<div style="text-align:center;">------------ 아   래 ------------</div><div>&lt;b&gt;</div>');
 });
 t('새 공문 주소는 loginbyname 을 거친다 — 이상한 양식 ID 는 기본 양식으로', () => {
   const doc = '/RealEANet/Main/DocumentView.aspx?FORMID=KR_EA_Form2&DOCID=&GROUPID=0&MDTID=0&DID=0&ISMODIFY=0&OLDDOC=&ATTYN=0&ALERTMAIL=0&DOCCNT=0&EXEMTD=RETMTD&ACTYPE=0';
@@ -330,7 +342,7 @@ t('교육 — 온라인 강의 페이지에서 수강료 칸을 오리면 그것
   const tiles = ['인프런_1.png', '인프런_2.png', '인프런_3.png'];
   const parts = [{ file: tiles[0], kind: 'course' }, { file: tiles[1], kind: 'other' }, { file: tiles[2], kind: 'order' }];
   const cut = { name: '견적서_가격부분.png', drop: [tiles[2]], on: true };
-  const { draft } = fromRecord('edu', { docType: 'course', courseName: '웹 해킹 입문', total: 77000, parts }, { files: tiles, cut });
+  const { draft } = fromRecord('edu', { docType: 'course', course: '웹 해킹 입문', fee: 77000, parts }, { files: tiles, cut });
   assert.deepEqual(draft.attach, [{ label: '교육 견적서', files: ['견적서_가격부분.png'] }, { label: '교육 내용', files: tiles.slice(0, 2) }]);
   assert.match(compose('edu', draft, CTX).body, /※ 첨 부\n {4}1\. 교육 견적서 1부\.\n {4}2\. 교육 내용 1부\.  끝\.$/);
   assert.deepEqual(attachWithCut('edu', parts, tiles, { ...cut, on: false }), [
@@ -342,7 +354,7 @@ t('첨부 줄 — 마지막 줄에만 끝.', () => {
 });
 t('교육 — 견적서와 교육 내용을 함께 읽으면 교육내용 줄과 첨부 두 줄이 들어간다', () => {
   const { draft } = fromRecord('edu', {
-    courseName: '전력변환 설계 실무', vendor: '교육원', courseFrom: '2026-10-12', total: 450000, topics: 'DC-DC 컨버터 · 제어 루프 설계',
+    course: '전력변환 설계 실무', provider: '교육원', from: '2026-10-12', fee: 450000, topics: 'DC-DC 컨버터 · 제어 루프 설계',
     parts: [{ file: '견적.png', kind: 'quote' }, { file: '커리큘럼.png', kind: 'content' }],
   }, { me: '김거화', files: ['견적.png', '커리큘럼.png'] });
   const body = compose('edu', draft, CTX).body;
@@ -386,7 +398,8 @@ t('Claude 에 주는 글에 과제 내용과 품의할 것이 들어가고, 금�
     { ...PROJECT, content: 'MVDC 차단기 시험·평가 체계 구축' });
   assert.match(text, /^품의 종류: 구매품의\n과제명: MW급/);
   assert.match(text, /과제 내용:\n<<<\nMVDC 차단기 시험·평가 체계 구축\n>>>/);
-  assert.match(text, /품목: 34인치 모니터 \(WQHD\) × 1대/);
+  // 품의할 것은 레시피 purchase/purpose.yaml 의 writing.context — 틀과 같은 꼴로 품목마다 사양·수량을 적는다.
+  assert.match(text, /품의할 것:\n품목: 34인치 모니터\n {2}사양: WQHD\n {2}수량: 1대\n/);
   assert.match(text, /지금 적힌 용도: 회의용/);
   assert.ok(!/890|OO상사/.test(text));
   assert.match(reasonInput('edu', { course: '전력변환 설계', topics: 'DC-DC' }, null), /과제명: \(없음\)[\s\S]*교육 내용: DC-DC/);
@@ -398,18 +411,22 @@ t('써 온 사유는 넣고, 용도는 사용자가 고쳤으면 둔다', () => 
   const data = { reason: ' 과제의 시험 데이터 검토에 필요함 ', use: '시험 데이터 검토용' };
   assert.deepEqual(applyReason('purchase', { reason: '', use: '' }, data), { reason: '과제의 시험 데이터 검토에 필요함', use: '시험 데이터 검토용' });
   assert.equal(applyReason('purchase', { use: '내가 쓴 용도' }, data, { touched: ['use'] }).use, '내가 쓴 용도');
-  assert.equal(applyReason('edu', { purpose: '' }, data).purpose, '시험 데이터 검토용');
+  // 답의 키는 초안 칸의 key 다 — 교육은 교육목적 칸(purpose)으로 답한다.
+  assert.equal(applyReason('edu', { purpose: '' }, { reason: data.reason, purpose: '시험 데이터 검토 역량 강화' }).purpose, '시험 데이터 검토 역량 강화');
+  assert.equal(applyReason('edu', { purpose: '' }, data).purpose, '', '다른 갈래의 키(use)는 넣지 않는다');
 });
 
-console.log('사전 설정');
-t('과제는 이름이 있는 것만, 다섯 개까지', () => {
-  const list = normalizeProjects([{ name: '' }, ...Array.from({ length: 7 }, (_, i) => ({ name: `과제${i}`, about: '개요.', content: ' 연구내용 ' }))]);
+console.log('공문 설정');
+t('과제는 이름이 있는 것만, R&D 탭과 같은 열 개까지(처음의 다섯 개는 풀었다 — 연장·겹치는 과제)', () => {
+  assert.equal(MAX_PROJECTS, 10);
+  const list = normalizeProjects([{ name: '' }, ...Array.from({ length: MAX_PROJECTS + 2 }, (_, i) => ({ name: `과제${i}`, about: '개요.', content: ' 연구내용 ' }))]);
   assert.equal(list.length, MAX_PROJECTS);
   assert.equal(list[0].content, '연구내용', '과제 내용도 담는다');
   assert.equal(list[0].about, '개요', '끝의 마침표는 틀이 붙인다');
   const [one] = normalizeProjects([{ name: '과제', alias: ' 차단기 과제 ', period: '2026.04.01 ~ 2029.12.31' }]);
   assert.deepEqual([one.alias, one.period], ['차단기 과제', '2026.04.01 ~ 2029.12.31'], '별명·연구기간도 담는다');
-  assert.deepEqual(normalizePreset({ refs: '가, 나' }), { dept: '', head: '', refs: ['가', '나'] });
+  assert.deepEqual(normalizePreset({ refs: '가, 나' }), { dept: '', head: '', refs: ['가', '나'], director: '', chief: '', docNo: '' });
+  assert.equal(normalizePreset({ docNo: ' (8100) ' }).docNo, '8100', '문서번호 부서는 숫자만');
 });
 t('채팅 — 과제 목록 표(머리글 줄은 건너뛴다)·부서장·참조를 규칙으로 읽는다', () => {
   const { patch, reply } = parseSetupLocal(`과제명\t과제번호\t책임자\n${PROJECT.name}\tRND-20-2026\t박기도 책임\n선박용 수소 엔진-연료전지 하이브리드 추진 시스템 | RND-21-2026 | 김거화 수석\n부서장: 노길태 팀장\n참조 홍길동, 이몽룡 선임`);
@@ -448,18 +465,20 @@ t('채팅 — "과제: …, 책임자 ○○○" 문장과, 과제 없이 "합�
   assert.deepEqual(parseSetupLocal('합의자 박기도 책임').patch, { lead: '박기도' });
   assert.deepEqual(parseSetupLocal('안녕하세요').patch, {});
 });
-t('얹기 — 이름·번호가 같은 과제는 고치고, 빈 줄을 먼저 채우고, 다섯 개를 넘으면 뺀다', () => {
+t('얹기 — 이름·번호가 같은 과제는 고치고, 빈 줄을 먼저 채우고, 한도(열 개)를 넘으면 뺀다', () => {
   const rows = [{ name: PROJECT.name, code: '', lead: '' }, { name: '' }];
   const res = mergeSetup(rows, { head: '옛 부서장' }, {
     projects: [{ name: PROJECT.name, lead: '박기도 책임' }, { name: '새 과제 A', code: 'RND-1' }, { name: '새 과제 B' }],
     head: '노길태', refs: '홍길동',
   });
   assert.deepEqual(res.rows.map((r) => [r.name, r.lead]), [[PROJECT.name, '박기도'], ['새 과제 A', ''], ['새 과제 B', '']]);
-  assert.deepEqual(res.preset, { dept: '', head: '노길태', refs: ['홍길동'] });
+  assert.deepEqual(res.preset, { dept: '', head: '노길태', refs: ['홍길동'], director: '', chief: '', docNo: '' });
   assert.equal(res.skipped.length, 0);
-  const full = Array.from({ length: 5 }, (_, i) => ({ name: `과제${i}`, code: `C${i}` }));
-  const over = mergeSetup(full, {}, { projects: [{ name: '여섯째' }, { name: '다른이름', code: 'C2', lead: '박기도' }] });
-  assert.deepEqual(over.skipped, ['여섯째']);
+  const five = Array.from({ length: 5 }, (_, i) => ({ name: `과제${i}`, code: `C${i}` }));
+  assert.deepEqual(mergeSetup(five, {}, { projects: [{ name: '여섯째' }] }).rows.at(-1).name, '여섯째', '다섯 개 넘게도 둔다(연장·겹치는 과제)');
+  const full = Array.from({ length: MAX_PROJECTS }, (_, i) => ({ name: `과제${i}`, code: `C${i}` }));
+  const over = mergeSetup(full, {}, { projects: [{ name: '열한째' }, { name: '다른이름', code: 'C2', lead: '박기도' }] });
+  assert.deepEqual(over.skipped, ['열한째']);
   assert.equal(over.rows[2].lead, '박기도', '번호가 같으면 같은 과제');
   assert.equal(over.rows[2].name, '과제2', '이미 있는 과제 이름은 두고');
 });
@@ -468,40 +487,41 @@ t('얹기 — 사람만 왔으면 지금 고른 과제의 합의자, 고른 과�
   assert.match(mergeSetup([{ name: '과제A' }], {}, { lead: '박기도' }).skipped[0], /어느 과제인지 모릅니다/);
 });
 
-console.log('입력 명세 — gongmun·gongmunSetup');
+console.log('입력 명세 — gongmun.<갈래>·gongmunSetup');
 t('명세가 맞다(목록 형 포함)', () => assert.deepEqual(checkSpec({ tasks: TASKS }), []));
 t('목록 안의 목록·줄 칸이 없는 목록은 생성기가 거부한다', () => {
   const broken = structuredClone({ tasks: TASKS });
-  broken.tasks.gongmun.fields.items.item.sub = { type: 'list', desc: '안', item: { a: { type: 'string', desc: 'a' } } };
+  broken.tasks['gongmun.purchase'].fields.items.item.sub = { type: 'list', desc: '안', item: { a: { type: 'string', desc: 'a' } } };
   broken.tasks.gongmunSetup.fields.projects.item = {};
   const errors = checkSpec(broken).join('\n');
   assert.match(errors, /items\.sub: 목록 안에 목록을 둘 수 없습니다/);
   assert.match(errors, /projects: 목록은 줄의 칸\(item\)이 있어야 합니다/);
 });
 t('지시문에 목록의 줄 칸이 들여 적힌다', () => {
-  const text = systemPrompt('gongmun');
+  const text = systemPrompt('gongmun.purchase');
   assert.match(text, /- items \(목록\(30줄까지\) — 줄마다 아래 키의 객체 또는 null\)/);
   assert.match(text, /\n {4}- name \(글, 필수\): 품목명/);
 });
 t('관문 — 품목명이 없는 줄은 빼고 알린다, 목록이 아니면 비운다', () => {
-  const { data, notes } = structure('gongmun', { docType: 'quote', gist: '모니터', summary: '견적서', items: [{ name: 'A', qty: '2', amount: '1000' }, { qty: 1 }, 'x'], total: '1000' });
+  const { data, notes } = structure('gongmun.purchase', { docType: 'quote', gist: '모니터', summary: '견적서', items: [{ name: 'A', qty: '2', amount: '1000' }, { qty: 1 }, 'x'], total: '1000' });
   assert.deepEqual(data.items, [{ name: 'A', spec: null, qty: 2, unit: null, unitPrice: null, amount: 1000 }]);
   assert.deepEqual(notes, ['품목 중 2줄은 받을 수 없어 뺐습니다']);
-  assert.equal(structure('gongmun', { docType: 'quote', gist: 'g', summary: 's', items: 'A' }).data.items, null);
-  assert.throws(() => structure('gongmun', { docType: 'quote', summary: 's' }), InputError);
+  assert.equal(structure('gongmun.purchase', { docType: 'quote', gist: 'g', summary: 's', items: 'A' }).data.items, null);
+  assert.throws(() => structure('gongmun.purchase', { docType: 'quote', gist: 'g' }), InputError, '한 줄 요약(summary)은 꼭 있어야 한다');
 });
-t('사전 설정 조각은 부분 수정 — 말하지 않은 칸은 빠진다', () => {
+t('공문 설정 조각은 부분 수정 — 말하지 않은 칸은 빠진다', () => {
   assert.deepEqual(structure('gongmunSetup', { projects: [{ name: '과제', lead: '박기도' }], head: null, reply: '채웠습니다' }).data,
     { projects: [{ name: '과제', code: null, lead: '박기도', alias: null, period: null, about: null, content: null }], reply: '채웠습니다' });
 });
 t('읽기는 파일마다 문서 종류(parts)를 돌려준다 — 모르는 종류의 줄은 뺀다', () => {
-  const { data, notes } = structure('gongmun', { docType: 'quote', gist: 'g', summary: 's', parts: [{ file: 'a.png', kind: 'quote' }, { file: 'b.png', kind: 'menu' }] });
+  const { data, notes } = structure('gongmun.edu', { docType: 'quote', course: 'c', summary: 's', parts: [{ file: 'a.png', kind: 'quote' }, { file: 'b.png', kind: 'menu' }] });
   assert.deepEqual(data.parts, [{ file: 'a.png', kind: 'quote' }]);
   assert.deepEqual(notes, ['파일 중 1줄은 받을 수 없어 뺐습니다']);
 });
 t('사유 쓰기의 답은 사유가 꼭 있어야 한다', () => {
-  assert.deepEqual(structure('gongmunReason', { reason: '필요함', use: null }).data, { reason: '필요함', use: null, reply: null });
-  assert.throws(() => structure('gongmunReason', { use: 'x' }), InputError);
+  assert.deepEqual(structure('gongmunReason.purchase', { reason: '필요함', use: null }).data, { reason: '필요함', use: null, reply: null });
+  assert.deepEqual(structure('gongmunReason.trip', { reason: '필요함', purpose: '학회 참석' }).data, { reason: '필요함', purpose: '학회 참석', reply: null });
+  assert.throws(() => structure('gongmunReason.purchase', { use: 'x' }), InputError);
 });
 t('읽기 입력 — 파일이면 장 수와 이름, 글이면 글을 싸서 보낸다', () => {
   assert.equal(gongmunInput({ files: [{ name: 'a.png' }, { name: 'b.png' }] }, { kind: 'purchase', today: '2026-10-07' }),
@@ -550,13 +570,17 @@ t('초안의 첨부와 본문 ※ 첨부 — 쇼핑몰 화면 일곱 장이 견�
   assert.match(compose('purchase', draft, CTX).body, /※ 첨 부\n {4}1\. 견적서 1부\.  끝\.$/);
 });
 t('읽기는 오릴 칸(quoteArea)을 그림마다 % 로 돌려준다 — 범위 밖·빠진 칸의 줄은 뺀다', () => {
-  const { data, notes } = structure('gongmun', {
+  const { data, notes } = structure('gongmun.purchase', {
     docType: 'order', gist: 'g', summary: 's',
     quoteArea: [{ file: 'a.png', left: 5, top: 10, right: 95, bottom: 40 }, { file: 'b.png', left: -1, top: 0, right: 50, bottom: 50 }, { file: 'c.png', left: 0, top: 0 }],
   });
   assert.deepEqual(data.quoteArea, [{ file: 'a.png', left: 5, top: 10, right: 95, bottom: 40 }]);
   assert.deepEqual(notes, ['견적서로 오릴 칸 중 2줄은 받을 수 없어 뺐습니다']);
-  assert.match(systemPrompt('gongmun'), /quoteArea 는 구매·교육일 때만 적습니다/);
+  // 오릴 칸은 레시피에 quote_crop 이 있는 갈래(구매·교육)에만 있고, 오린 칸에 꼭 들어갈 것(견적서의 필수 내용)이 지시문에 적힌다.
+  assert.match(systemPrompt('gongmun.purchase'), /- quoteArea [^\n]*오린 칸에 꼭 들어갈 것: 상품명·모델·옵션·수량·단가·할인·배송비·합계·판매자\. 넣지 않을 것: 추천 상품/);
+  assert.match(systemPrompt('gongmun.edu'), /오린 칸에 꼭 들어갈 것: 수강료\(정가·할인가·결제 금액\)·강의명/);
+  assert.deepEqual(['trip', 'outside'].map((k) => 'quoteArea' in TASKS[`gongmun.${k}`].fields), [false, false]);
+  assert.deepEqual(KIND_ORDER.filter((k) => KINDS[k].cut), ['purchase', 'edu']);
 });
 
 console.log('구매로 산 강의 — 견적서와 강의 내용');
@@ -597,16 +621,34 @@ console.log('R&D 탭의 과제 — 연구 내용으로 사유 쓰기·에이전�
     assert.deepEqual([got.year, got.plan, got.logs], [2, 1, 0]);
     assert.match(got.text, /\[연구개발 계획 — 1차년도\]/);
   });
-  t('R&D 탭의 과제를 공문의 과제로 — 별칭·번호·책임자·연구기간은 그 과제, 개요·계정·빈 칸은 사전 설정의 같은 과제에서', () => {
-    const preset = [{ name: '다른 이름', code: 'RS-2026-0001', about: '차단기 과제를 수행하고 있습니다', account: '연구재료비', content: '사전 설정의 내용' },
-      { name: '계획서 없는 과제', lead: '홍길동', content: '사전 설정에 적은 과제 내용' }];
+  t('R&D 탭의 과제를 공문의 과제로 — 별칭·번호·책임자·연구기간은 그 과제, 개요·계정·빈 칸은 공문 설정의 같은 과제에서', () => {
+    const preset = [{ name: '다른 이름', code: 'RS-2026-0001', about: '차단기 과제를 수행하고 있습니다', account: '연구재료비', content: '공문 설정의 내용' },
+      { name: '계획서 없는 과제', lead: '홍길동', content: '공문 설정에 적은 과제 내용' }];
     const [a, b] = rndProjects(book, preset, TODAY);
     assert.deepEqual({ ...a, content: a.content.slice(0, 11) }, {
       name: 'MW급 10kV 고전압 직류 시스템용 반도체 차단기 개발', alias: 'SSCB', code: 'RS-2026-0001', lead: '박기도', period: '2026.04.01 ~ 2029.12.31',
       about: '차단기 과제를 수행하고 있습니다', content: '[연구개발 계획 — ', account: '연구재료비', rnd: { id: 'p1', year: 1, plan: 1, logs: 1 },
     });
-    assert.deepEqual([b.lead, b.content, b.rnd.plan], ['홍길동', '사전 설정에 적은 과제 내용', 0], '연구 내용이 없으면 사전 설정의 과제 내용');
+    assert.deepEqual([b.lead, b.content, b.rnd.plan], ['홍길동', '공문 설정에 적은 과제 내용', 0], '연구 내용이 없으면 공문 설정의 과제 내용');
     assert.deepEqual(rndProjects(normalizeBook(null), preset), []);
+  });
+  t('R&D 과제 몫으로 공문 설정에서 적은 개요·계정(과제 id 로 묶는다)이 같은 과제 줄의 것보다 먼저다 — 비워 두었으면 비운 대로', () => {
+    const preset = [{ name: '다른 이름', code: 'RS-2026-0001', about: '줄의 개요', account: '연구재료비' }];
+    const extra = normalizeRndExtra({ p1: { about: ' 차단기 과제를 수행하고 있습니다. ', account: '' }, p9: { about: '없는 과제' }, '': { about: 'x' }, p2: 'x' });
+    assert.deepEqual(extra, { p1: { about: '차단기 과제를 수행하고 있습니다', account: '' }, p9: { about: '없는 과제', account: '' } });
+    const [a, b] = rndProjects(book, preset, TODAY, extra);
+    assert.deepEqual([a.about, a.account], ['차단기 과제를 수행하고 있습니다', ''], '적은 것이 이긴다 — 계정을 비웠으면 갈래 기본값');
+    assert.deepEqual([b.about, b.account], ['', '']);
+    const [c] = rndProjects(book, preset, TODAY);
+    assert.deepEqual([c.about, c.account], ['줄의 개요', '연구재료비'], '적은 적이 없으면 같은 과제 줄의 것');
+  });
+  t('공문 설정의 과제 줄과 R&D 과제가 같은 과제인가 — 과제번호·과제명·별칭 가운데 하나(공백·대소문자 무시)', () => {
+    const p = book.projects[0];
+    assert.equal(sameProject(p, { name: '다른 이름', code: 'rs-2026-0001' }), true);
+    assert.equal(sameProject(p, { name: ' MW급 10kV 고전압 직류 시스템용 반도체 차단기개발' }), true);
+    assert.equal(sameProject(p, { name: '다른 이름', alias: 'sscb' }), true);
+    assert.equal(sameProject(p, { name: '다른 이름', code: '', alias: '' }), false);
+    assert.equal(sameProject(book.projects[1], { name: '다른 이름', code: '', alias: '' }), false, '번호 없는 R&D 과제와 번호 없는 줄은 번호로 같지 않다');
   });
   t('에이전트에 적은 말 — 지금 적힌 사유와 사용자의 말을 넘기고, 과제 내용이 R&D 연구 내용임을 알린다', () => {
     const [p] = rndProjects(book, [], TODAY);
@@ -623,6 +665,182 @@ console.log('R&D 탭의 과제 — 연구 내용으로 사유 쓰기·에이전�
   t('초안의 칸 — 용도(교육목적)·사유만 펼쳐 두고 나머지 읽은 칸은 접는다', () => {
     assert.deepEqual(FIELDS.purchase.filter((f) => f.open).map((f) => f.key), ['use', 'reason']);
     assert.deepEqual(FIELDS.edu.filter((f) => f.open).map((f) => f.key), ['purpose', 'reason']);
+  });
+}
+
+console.log('레시피(recipes/gongmun) — 위임전결·문서설정·쓸 것');
+{
+  const FULL_PRESET = { ...PRESET, director: '송강현', chief: '김대헌' };
+  t('레시피 생성물이 레시피와 같고, 틀린 레시피는 생성기가 막는다', () => {
+    assert.equal(fs.readFileSync(new URL('../src/gmrecipe.js', import.meta.url), 'utf8'), renderRecipe(), '`node tools/gen-gongmun.mjs` 를 돌리세요');
+    const raw = readRecipe();
+    assert.deepEqual(checkRecipe(raw), []);
+    const broken = structuredClone(raw);
+    broken.delegation.rules.연구비집행.source = '';
+    broken.forms.find((f) => f.manifest.form_id === 'KR_EA_Research_Task').purposes.find((p) => p.id === 'edu').purpose.rule_key = '없는규정';
+    const errs = checkRecipe(broken);
+    assert.ok(errs.some((e) => /연구비집행: source\(규정 근거\)가 없습니다/.test(e)), errs.join('\n'));
+    assert.ok(errs.some((e) => /purposes\/edu\/purpose.yaml: rule_key 없는규정/.test(e)), errs.join('\n'));
+  });
+  t('위임전결 — 연구비 집행은 2천만원 이하 팀장·넘으면 소장, 출장은 국내 팀장·해외 본부장, 외부활동은 팀장', () => {
+    assert.equal(delegationOf('purchase', { total: 989_000 }).rank, '팀장');
+    assert.deepEqual(pick(delegationOf('edu', { fee: 20_000_000 }), ['rank', 'basis', 'unknown']), { rank: '팀장', basis: '20,000,000원', unknown: false }, '2천만원은 이하');
+    assert.equal(delegationOf('edu', { fee: 20_000_001 }).rank, '소장');
+    assert.deepEqual(pick(delegationOf('edu', {}), ['rank', 'unknown']), { rank: '팀장', unknown: true }, '금액을 모르면 맨 아래 구간이고 모른다고 알린다');
+    assert.equal(delegationOf('trip', { division: '해외', cost: 1 }).rank, '본부장');
+    assert.equal(delegationOf('trip', {}).rank, '팀장', '구분이 비면 국내');
+    assert.equal(delegationOf('outside', {}).rank, '팀장');
+    assert.match(delegationOf('purchase', {}).source, /QI-01K Rev164 45절/);
+    assert.deepEqual(pick(delegationOf('purchase', { total: 1 }, { rank: '소장' }), ['rank', 'auto', 'overridden']), { rank: '소장', auto: '팀장', overridden: true }, '고른 전결권자가 이긴다');
+  });
+  t('결재선은 부서장부터 전결권자까지 — 이름이 없는 직책은 남은 것으로', () => {
+    const line = approvalLine({ ...CTX, preset: FULL_PRESET, kind: 'trip', draft: { division: '해외' } });
+    assert.equal(lineText(line), '기안자 김거화 → 합의자 박기도 → 결재자 노길태 → 결재자 송강현 → 결재자 김대헌 · 참조자 홍길동, 이몽룡');
+    assert.deepEqual(line.steps.slice(-2).map((s) => s.why), ['소장', '본부장']);
+    const short = approvalLine({ ...CTX, kind: 'edu', draft: { fee: 30_000_000 } });
+    assert.deepEqual([short.steps.at(-1).name, short.missing], ['노길태', ['소장']]);
+    assert.deepEqual(needs('edu', { course: 'c', from: '2026-11-01', fee: 30_000_000, purpose: 'p', reason: 'r' }, { preset: PRESET, project: FULL, projects: [FULL] }),
+      ['소장(공문 설정 — 위임전결)']);
+    assert.deepEqual(approvalLine({ ...CTX, kind: 'purchase', draft: { total: 1 } }).steps, approvalLine(CTX).steps, '부서장 전결은 예전 결재선과 같다');
+  });
+  t('문서설정 — 보존 10년 · 기안 팀 채번(부서 이름으로) · 내부결재 · 결재선 공개, 이 공문에서 바꾼 것이 이긴다', () => {
+    const s = docSettingOf('purchase', PRESET);
+    assert.deepEqual(pick(s, ['profile', 'retention', 'retentionText', 'docNo', 'docNoFrom', 'receiver', 'scope', 'scopeCode', 'emergency']),
+      { profile: '연구품의', retention: '120', retentionText: '10년', docNo: '8100', docNoFrom: '부서(수소전기추진연구팀)', receiver: '내부결재', scope: '결재선', scopeCode: 'YNN', emergency: false });
+    assert.equal(settingText(s), '보존 10년 · Doc No. 8100 · 수신 내부결재 · 공개 결재선');
+    const mine = docSettingOf('purchase', { ...PRESET, docNo: '7200' }, { retention: '36', scope: '기안부서', emergency: 1, receiver: '없는곳', tag: ' 장비 ' });
+    assert.deepEqual(pick(mine, ['retention', 'docNo', 'docNoFrom', 'scopeCode', 'emergency', 'receiver', 'tag']),
+      { retention: '36', docNo: '7200', docNoFrom: '공문 설정', scopeCode: 'NNY', emergency: true, receiver: '내부결재', tag: '장비' }, '모르는 수신처는 버린다');
+    assert.equal(docSettingOf('purchase', { dept: '모르는팀' }).docNo, '');
+    assert.deepEqual(needs('purchase', { gist: 'x', total: 1, use: 'u', reason: 'r' }, { preset: { ...PRESET, dept: '모르는팀' }, project: FULL, projects: [FULL] }), ['문서번호 부서(공문 설정)']);
+  });
+  t('쓸 것(writePlan) — 폼의 칸 지도·값·문서설정·결재선을 한데, 줄표는 바꾸고 제목은 99자', () => {
+    const project = { ...FULL, rnd: { id: 'x', year: 1 } };
+    const plan = writePlan('purchase', { title: `모니터 — 구매 품의${'가'.repeat(120)}`, body: '1. 사유 — 시험\n\n------------ 아   래 ------------', draft: { total: 989_000 } },
+      { me: '김거화', preset: PRESET, project });
+    assert.equal(plan.form, 'KR_EA_Research_Task');
+    assert.equal(plan.url, draftUrl('KR_EA_Research_Task'));
+    assert.equal(plan.fields.job.kind, 'picker');
+    assert.equal(plan.fields.body.control, 'ctl00_ContentPlaceHolder_Content_EditorControl1');
+    assert.equal(plan.values.title.length, 99);
+    assert.ok(plan.values.title.startsWith('모니터 - 구매 품의'), plan.values.title);
+    assert.equal(plan.values.html, '<div>1. 사유 - 시험</div><div><br></div><div style="text-align:center;">------------ 아   래 ------------</div>');
+    assert.deepEqual([plan.values.degree, plan.values.job], ['1', { name: FULL.name, code: FULL.code }]);
+    assert.equal(plan.setting.docNo, '8100');
+    assert.deepEqual(plan.line, { approvers: ['노길태'], agree: ['박기도'], refs: ['홍길동', '이몽룡'], missing: [], rank: '팀장', team: '수소전기추진연구팀' });
+    const other = writePlan('purchase', { title: 't', body: 'b', form: 'KR_Something' }, { preset: PRESET });
+    assert.deepEqual([other.known, other.fields], [false, {}], '칸 지도가 없는 양식은 열기만 한다');
+    assert.equal(writePlan('trip', { title: 't', body: 'b', form: 'KR_EA_Form2' }, { preset: PRESET }).fields.job.source, 'jobText', '기안문의 Job Id. 는 글 칸');
+  });
+}
+
+console.log('레시피 — 칸마다 읽는 법과 틀의 자리(인라인 프롬프트, 2026-10-09 사용자 지정)');
+{
+  const purposeOf = (raw, id) => raw.forms.flatMap((f) => f.purposes).find((p) => p.id === id);
+  const flat = (s) => String(s).replace(/\s+/g, ' ').trim();
+  t('문서에서 읽는 칸의 read·example 이 그대로 지시문에 들어가고, 과제 내용으로 쓰는 칸(사유)은 읽지 않는다', () => {
+    for (const k of KIND_ORDER) {
+      const task = TASKS[`gongmun.${k}`];
+      const text = systemPrompt(`gongmun.${k}`);
+      assert.match(text, new RegExp(`^당신은 [^\\n]*${KINDS[k].title}에 넣을 값을 뽑습니다`), `${k}: 역할에 갈래 이름`);
+      for (const f of FIELDS[k].filter((x) => x.from === 'document')) {
+        assert.ok(text.includes(`- ${f.key} (`), `${k}.${f.key}`);
+        assert.ok(text.includes(flat(f.read).slice(0, 40)), `${k}.${f.key} 의 read`);
+        if ('example' in f) assert.ok(text.includes(`예: ${f.example}`), `${k}.${f.key} 의 example`);
+      }
+      for (const f of FIELDS[k].filter((x) => x.from === 'write')) assert.ok(!(f.key in task.fields), `${k}.${f.key} 는 읽지 않는다`);
+    }
+  });
+  t('읽기의 키가 곧 초안 칸의 key 다 — 예시로 만든 기록이 초안에 그대로 들어간다', () => {
+    for (const k of KIND_ORDER) {
+      const rec = Object.fromEntries(FIELDS[k].filter((x) => x.from === 'document' && 'example' in x).map((x) => [x.key, x.example]));
+      const got = structure(`gongmun.${k}`, { ...rec, docType: 'quote', summary: 's' });
+      assert.deepEqual(got.notes, [], `${k}: 예시는 관문을 그대로 지난다`);
+      const { draft } = fromRecord(k, got.data, { me: '김거화' });
+      for (const [key, v] of Object.entries(rec)) assert.equal(draft[key], v, `${k}.${key}`);
+    }
+  });
+  t('종료일이 시작일보다 앞서면 종료일만 비우고 알린다(레시피의 not_before)', () => {
+    const { data, notes } = structure('gongmun.edu', { docType: 'course', summary: 's', from: '2026-11-05', to: '2026-11-03' });
+    assert.deepEqual([data.from, data.to], ['2026-11-05', null]);
+    assert.deepEqual(notes, ['교육 종료일이 시작일보다 앞서 종료일은 뺐습니다']);
+  });
+  t('틀의 자리는 레시피의 from·show 대로 — 기간은 며칠까지, 금액은 원, 비면 내 이름 · 양식 칸 아래에 꼴의 예가 보인다', () => {
+    const v = varsFor('edu', { from: '2026-11-03', to: '2026-11-05', fee: 450000, attendees: '' }, { me: '김거화' });
+    assert.deepEqual([v.교육기간, v.교육비, v.참석자, v.교육구분], ['2026. 11. 3. ~ 2026. 11. 5. (3일)', '450,000원', '김거화', '교육']);
+    assert.equal(varsFor('trip', { from: '2026-10-20' }).출장기간, '2026. 10. 20. (1일)', '하루면 (1일)');
+    assert.ok(VARS.edu.some(([tok, d]) => tok === '{교육기간}' && d.includes('2026. 11. 3. ~ 2026. 11. 5. (3일)')));
+    assert.ok(VARS.purchase.some(([tok, d]) => tok === '{{#품목}} … {{/품목}}' && d.includes('{번호}·{품목명}·{사양}·{수량}')));
+    assert.ok(VARS.trip.some(([tok]) => tok === '{과제별명}'), '공통 자리(registries/vars.yaml)도 갈래마다 앞에');
+  });
+  t('남은 것의 이름은 레시피의 need 다', () => {
+    assert.deepEqual(FIELDS.edu.filter((f) => f.need).map((f) => `${f.key}:${f.need}`), ['course:교육명', 'fee:교육비', 'from:교육기간', 'purpose:교육목적', 'reason:교육사유']);
+    assert.deepEqual(needs('edu', { ...blankDraft('edu'), course: 'c' }, { preset: PRESET, project: FULL, projects: [FULL] }), ['교육비', '교육기간', '교육목적', '교육사유']);
+  });
+  t('틀린 칸·자리는 생성기가 막는다 — 읽지 않는 칸의 read, 꼴이 틀린 예시, read 없는 읽는 칸, 틀에 없는 이름, 없는 칸을 가리키는 자리', () => {
+    const broken = structuredClone(readRecipe());
+    const edu = purposeOf(broken, 'edu');
+    edu.purpose.fields.find((f) => f.key === 'reason').read = '사유를 읽는다';
+    edu.purpose.fields.find((f) => f.key === 'from').example = '2026.11.03';
+    delete edu.purpose.fields.find((f) => f.key === 'course').read;
+    edu.body.body += '\n{교육일정}';
+    edu.body.vars.교육기간.from = ['from', 'until'];
+    broken.vars.common.결재자 = '없는 자리';
+    const errs = checkRecipe(broken).join('\n');
+    assert.match(errs, /fields\[\d+\]\(reason\): read 는 from: document 칸에만 씁니다/);
+    assert.match(errs, /fields\[\d+\]\(from\): example\(2026\.11\.03\)은 YYYY-MM-DD 날짜여야 합니다/);
+    assert.match(errs, /fields\[0\]\(course\): from: document 칸은 read/);
+    assert.match(errs, /edu\/body_spec\.yaml body: \{교육일정\} 가 vars·공통 자리/);
+    assert.match(errs, /vars\.교육기간: from 의 until 가 칸\(key\)에 없습니다/);
+    assert.match(errs, /vars\.yaml common: 결재자 는 코드가 채우지 않는 자리/);
+  });
+  t('--prompt 는 레시피에서 바로 지시문 전문을 만든다 — 확장이 보내는 것과 같다(읽기·사유 쓰기·공문 설정 채우기)', () => {
+    const { tasks } = buildRecipe();
+    for (const k of KIND_ORDER) {
+      assert.equal(promptOf(tasks[`gongmun.${k}`]), systemPrompt(`gongmun.${k}`), k);
+      assert.equal(promptOf(tasks[`gongmunReason.${k}`]), systemPrompt(`gongmunReason.${k}`), `${k} 사유`);
+    }
+    assert.equal(promptOf(tasks.gongmunSetup), systemPrompt('gongmunSetup'));
+  });
+  t('공문의 작업은 모두 레시피가 만든다 — input.yaml 에는 공문 작업이 없다', () => {
+    assert.deepEqual(Object.keys(INPUT_SPEC.tasks).filter((n) => n.startsWith('gongmun')), []);
+    assert.deepEqual(Object.keys(TASKS).filter((n) => n.startsWith('gongmun')).sort(),
+      ['gongmunSetup', ...KIND_ORDER.flatMap((k) => [`gongmun.${k}`, `gongmunReason.${k}`])].sort());
+  });
+  t('사유 쓰기 — 칸의 write·example 이 지시문이 되고, 답의 키는 칸의 key, 사유 칸은 꼭 있어야 한다', () => {
+    for (const k of KIND_ORDER) {
+      const text = systemPrompt(`gongmunReason.${k}`);
+      assert.match(text, new RegExp(`${KINDS[k].title} 본문에 들어갈 다음 칸을 공문체로 씁니다: [^\\n]*${REASON_LABEL[k]}`));
+      for (const f of FIELDS[k].filter((x) => x.write)) {
+        assert.ok(text.includes(`- ${f.key} (글${f.from === 'write' ? ', 필수' : ' 또는 null'})`), `${k}.${f.key}`);
+        assert.ok(text.includes(flat(f.write).slice(0, 30)), `${k}.${f.key} 의 write`);
+      }
+    }
+    assert.match(systemPrompt('gongmunReason.outside'), /직무와 상충하지 않는지/, '외부활동 사유 쓰기만의 말은 그 칸의 write 에');
+  });
+  t('공문 설정 채우기도 레시피(registries/setup.yaml)의 키마다 읽는 법·예시로 — 부분 수정이다', () => {
+    const text = systemPrompt('gongmunSetup');
+    assert.match(text, /\n {4}- code \(글 또는 null\): 과제번호\. 예: RND-20-2026/);
+    assert.match(text, /- 필수가 아닌 키는 사용자가 말하지 않았으면 null 입니다\.$/);
+  });
+  t('읽은 문서의 이름·누구의 것·온라인으로 보는 말도 레시피에서', () => {
+    assert.deepEqual([DOC_NAMES.quote, DOC_NAMES.request, DOC_NAMES.unknown], ['견적서', '요청 공문', '문서']);
+    assert.deepEqual(KIND_ORDER.map((k) => whoOf(k, { vendor: 'V', provider: 'P', place: 'L', org: 'O' })), ['V', 'P', 'L', 'O']);
+    assert.equal(eduModeOf({ provider: 'Coursera' }), '온라인교육', 'mode 칸의 online 에 있는 말(대소문자 무시)');
+    assert.equal(eduModeOf({ place: '인터넷 강의' }), '온라인교육', '띄어쓰기는 보지 않는다');
+  });
+  t('사유 쓰기의 틀린 칸은 생성기가 막는다 — 쓰지 않는 칸의 write, write 없는 사유 칸, 품의할 것의 없는 이름, 없는 who', () => {
+    const broken = structuredClone(readRecipe());
+    const trip = purposeOf(broken, 'trip');
+    trip.purpose.fields.find((f) => f.key === 'who').write = '출장자를 쓴다';
+    delete trip.purpose.fields.find((f) => f.key === 'reason').write;
+    trip.purpose.writing.context += '\n출장 예산: {출장예산?}';
+    trip.attach.who = 'host';
+    const errs = checkRecipe(broken).join('\n');
+    assert.match(errs, /fields\[\d+\]\(who\): write 는 from: document·write 칸에만/);
+    assert.match(errs, /fields\[\d+\]\(reason\): from: write 칸은 write/);
+    assert.match(errs, /trip\/purpose\.yaml writing\.context: \{출장예산\} 가 vars·공통 자리/);
+    assert.match(errs, /trip\/attach_rules\.yaml: who\(host\)/);
   });
 }
 

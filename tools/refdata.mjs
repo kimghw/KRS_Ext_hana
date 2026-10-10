@@ -3,7 +3,7 @@
 //   node tools/refdata.mjs [status]                                       현황표 + 다음 할 일
 //   node tools/refdata.mjs ktx [<xls 경로|주소>] [--basis YYYY-MM-DD] [--dry-run]   코레일 KTX 운임표를 받아 다시 가져온다
 //   node tools/refdata.mjs mileage                                        항공 마일리지 표를 원본과 맞춰 보게 찍는다
-//   node tools/refdata.mjs gen | check                                    두 생성기를 돌린다 / 어긋났는지만 본다
+//   node tools/refdata.mjs gen | check                                    생성기들을 돌린다 / 어긋났는지만 본다(공문 레시피 recipes/gongmun 포함)
 //
 // 밖에서 오는 것은 둘이다. KTX 공식 운임표는 코레일이 올려 둔 엑셀이라 받아서 가져올 수 있고(ktx), 항공 마일리지 표는 항공사 홈페이지가
 // 자동 접근을 막아 사람이 페이지를 열어 맞춰 본다(mileage). 나머지(여비 규칙·길잡이·입력 명세)는 사람이 정해 손으로 고치는 것이다.
@@ -58,7 +58,7 @@ function status() {
   const input = yaml('input.yaml');
   const captures = fixtureDates();
   const airRoutes = mileage.airlines.reduce((n, line) => n + line.routes.length, 0);
-  const checks = [['src/inputspec.js', inSync('gen-input.mjs')], ['src/travelspec.js · references/review.md', inSync('gen-travel.mjs')]];
+  const checks = [['src/inputspec.js', inSync('gen-input.mjs')], ['src/travelspec.js · references/review.md', inSync('gen-travel.mjs')], ['src/gmrecipe.js (recipes/gongmun)', inSync('gen-gongmun.mjs')]];
 
   const rows = [
     ['KTX 공식 운임', 'ktx-fares-official.yaml', `${official.routes.length}구간 · 기준일 ${official.basis} · ${official.imported} 가져옴 ${ago(official.imported)}`, '밖에서 가져옴 — ktx'],
@@ -144,8 +144,8 @@ const commands = {
   status,
   ktx: () => ktx(args),
   mileage,
-  gen: () => node('gen-input.mjs') || node('gen-travel.mjs'),
-  check: () => Math.max(node('gen-input.mjs', '--check'), node('gen-travel.mjs', '--check')),
+  gen: () => node('gen-input.mjs') || node('gen-travel.mjs') || node('gen-gongmun.mjs'),
+  check: () => Math.max(node('gen-input.mjs', '--check'), node('gen-travel.mjs', '--check'), node('gen-gongmun.mjs', '--check')),
 };
 if (!commands[cmd]) {
   console.error(`모르는 명령: ${cmd}\n쓰는 법: node tools/refdata.mjs [status | ktx [<xls 경로|주소>] [--basis YYYY-MM-DD] [--dry-run] | mileage | gen | check]`);

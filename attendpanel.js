@@ -9,7 +9,7 @@ import {
   KINDS, KIND_MAIN, KIND_MORE, STATUS, MAX_TRIP_DAYS, blankForm, fieldsFor, missingFields, problems, describe, settle,
   nameOf, timeOptions, spanDays, nextSpan, halfOf, halfPlan, halfFlexForm, workStartOn, itemsIn, isPast, rangeCovering,
   buildJob, buildDocJob, buildCancelJob, listItems, formFromDoc, applyPatch, withSub, attendToday,
-  FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek, isWelfare, leaveBalance,
+  FLEX_MODES, FLEX_DAYS, flexModeOf, fillFlexWeek, isWelfare, welfareFormFor, leaveBalance,
   acceptsFile, itemsOfKind, EVIDENCE_ACCEPT, statusLabel, CANCELLING_KEY, CANCELLING_LABEL, CANCELLED_LABEL, cancellingOf, pruneCancelling, isCancelDoc, linkCancel,
 } from './src/attend.js';
 import { hrListDocs, hrGetDoc, hrDeleteDoc, hrRunJob, hrWeekTimes, hrUserLeaves, hrOpenDoc, hrCloseWorker, hrCancelRefs, HR_SSO_URL } from './src/hr.js';
@@ -55,8 +55,9 @@ const SCHED_MONTHS = 3;
 const FILE_LIMIT = 10 * 1024 * 1024;
 const VIA_LABEL = { cli: '로컬 CLI', api: 'API 키', local: '규칙 해석' };
 // `근태 변경` — 처음에는 `변경`이었는데, 출장 카드에 여비계산서를 고치는 버튼들이 같이 서면서 무엇을 변경하는지 헷갈렸다(2026-10-05 사용자 지정).
-const ACTION_LABEL = { edit: '수정', change: '근태 변경', request: '상신', delete: '삭제', recall: '회수', cancel: '취소신청' };
+const ACTION_LABEL = { edit: '수정', change: '근태 변경', request: '상신', delete: '삭제', recall: '회수', cancel: '취소신청', wfa: '기념일 지원' };
 const ACTION_TITLE = {
+  wfa: '이 연차로 가족 기념일 지원을 신청합니다 — 연차는 다시 올리지 않고, 폼에 연차 날짜와 기념일 칸이 열립니다',
   edit: '이 임시저장 문서를 폼으로 불러와 고칩니다',
   change: '시간·날짜를 바꿉니다 — 올린 건을 거둬들이고(승인 전이면 회수, 승인 뒤면 취소신청) 같은 내용을 폼에 불러옵니다',
   request: '이 임시저장 문서를 그대로 결재요청합니다',
@@ -167,6 +168,8 @@ export function createAttendPanel({
     leaves: null, leavesWait: null,
     // 기념일 지원(휴가의 기념일 갈래)의 신청 현황 — eclass 목록 화면에서 읽은 줄들: { rows } 또는 { error }.
     wfa: null, wfaWait: null,
+    // 신청 내역의 연차 카드에서 "기념일 지원"을 눌러 연 폼이면 그 연차({ docNo, summary }) — 연차는 이미 올라가 있어 결재요청·임시저장을 숨긴다.
+    wfaFor: null,
     // 출장의 근무지. 한 번 적으면 저장해 두고 새 신청서마다 깔아 준다(2026-10-02 사용자 지정). 패널을 새로 열면 show() 가
     // 저장소에서 되읽어 온다. 칸을 지우면 지운 것이 남는다.
     workplace: '',
@@ -413,6 +416,8 @@ export function createAttendPanel({
         `<option value="${escapeHtml(o.value)}"${o.value === v ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select>`;
     } else if (f.type === 'check') {
       input = `<input type="checkbox" id="${id}"${v ? ' checked' : ''} />`;
+      // 기념일 지원 체크박스의 오른쪽에 올해 쓴 횟수(연 다섯 번까지 — 2026-10-09 사용자 지정). 켜기 전에도 보인다.
+      if (f.key === 'wfa') input += wfaUsedHtml();
     } else if (f.type === 'file') {
       // 고르는 단추는 감추고 칸 전체를 끌어다 놓는 자리로 쓴다. 칸이 label 이라 누르면 탐색기가 열린다.
       input = `<input type="file" id="${id}"${f.accept ? ` accept="${escapeHtml(f.accept)}"` : ''} /><span class="at-drop${v ? ' picked' : ''}">`
@@ -446,9 +451,15 @@ export function createAttendPanel({
     el.form.classList.toggle('hidden', !kind || st.view === 'all');
     if (!kind || st.view === 'all') return;
     seedFlexWeek();
+    // 신청 내역에서 연 기념일 지원은 기념일 체크박스를 끄거나 종류를 바꾸면 끝난다 — 그때부터는 보통의 연차 폼이다.
+    if (st.wfaFor && !isWelfare(st.form)) {
+      st.wfaFor = null;
+      paintList();   // 그 연차 카드의 표시(editing)를 걷는다
+    }
     // 연차에 기념일 지원을 붙였으면 제목에도 적는다 — "연차 신청 · 기념일 지원".
     const plus = isWelfare(st.form) ? ' · 기념일 지원' : '';
-    el.formTitle.textContent = st.edit ? `${nameOf(st.form)} 수정 · ${st.edit.docNo}${plus}` : `${nameOf(st.form)} 신청${plus}`;
+    el.formTitle.textContent = st.wfaFor ? `기념일 지원 · ${st.wfaFor.summary}`
+      : st.edit ? `${nameOf(st.form)} 수정 · ${st.edit.docNo}${plus}` : `${nameOf(st.form)} 신청${plus}`;
     paintFold();
     // 같은 묶음(group)의 칸은 한 줄에 나란히 세운다(출장지·장소 / 근무지·교통편).
     let html = '';
@@ -467,10 +478,18 @@ export function createAttendPanel({
       + (wantsCar(st.form) ? '<div id="atCars" class="at-cars" role="group" aria-label="차량 조회"></div>' : '')
       + (isWelfare(st.form) ? `<div id="atWfa" class="at-wfa wide" role="group" aria-label="가족 기념일 신청 현황">${wfaHtml()}</div>` : '');
     if (st.form.kind === 'leave' && !st.leaves) loadLeaves();
-    if (isWelfare(st.form) && !st.wfa) loadWfa();
-    el.editCancel.classList.toggle('hidden', !st.edit);
-    el.editNote.classList.toggle('hidden', !st.edit);
-    if (st.edit) el.editNote.textContent = '임시저장 문서를 고치는 중입니다. 종류는 바꿀 수 없습니다.';
+    // 신청 현황은 체크박스가 보이면 읽는다 — 체크박스 오른쪽의 횟수가 켜기 전에도 보이게.
+    if ($('atWfaUsed') && !st.wfa) loadWfa();
+    // 신청 내역에서 연 기념일 지원은 연차를 다시 올리지 않는다 — 결재요청·임시저장을 숨기고, 기념일 상자의 "신청 화면 열기"로만 나간다.
+    el.submit.classList.toggle('hidden', !!st.wfaFor);
+    el.save.classList.toggle('hidden', !!st.wfaFor);
+    el.editCancel.classList.toggle('hidden', !st.edit && !st.wfaFor);
+    el.editCancel.textContent = st.wfaFor ? '기념일 지원 그만두기' : '수정 그만두기';
+    el.editNote.classList.toggle('hidden', !st.edit && !st.wfaFor);
+    if (st.wfaFor) {
+      el.editNote.textContent = `이미 올린 ${st.wfaFor.summary} 에 가족 기념일 지원만 신청합니다 — 연차는 HR 에 다시 올리지 않습니다. `
+        + '기념일 칸을 채우고 아래 상자의 "신청 화면 열기"를 누르세요(연차휴가 사용일은 위 날짜가 들어갑니다).';
+    } else if (st.edit) el.editNote.textContent = '임시저장 문서를 고치는 중입니다. 종류는 바꿀 수 없습니다.';
     paintNeed();
   }
 
@@ -531,9 +550,9 @@ export function createAttendPanel({
     // 출근이 정시가 아닌 날의 반차는 알람이 뜨고 올리지 못한다(구분 칸 아래 — paintHalfNote). "유연근무를 먼저 올리고 반차 쓰기"를 고르면 풀린다.
     const ready = !miss.size && !bad.size && !!KINDS[st.form.kind] && !halfBlocked();
     el.need.className = 'at-need';
-    el.need.textContent = ready ? `올릴 내용 — ${sendSummary()}` : '';
-    el.submit.disabled = !ready || st.busy;
-    el.save.disabled = !ready || st.busy;
+    el.need.textContent = ready ? `${st.wfaFor ? '열 내용' : '올릴 내용'} — ${sendSummary()}` : '';
+    el.submit.disabled = !ready || st.busy || !!st.wfaFor;
+    el.save.disabled = !ready || st.busy || !!st.wfaFor;
     // 기념일 상자의 "신청 화면만 열기" — 연차를 이미 올렸을 때 쓴다. 칸이 다 맞으면 반차 알람과 상관없이 열 수 있다(HR 에 올리지 않는다).
     const wfaOnly = $('atWfaOpen');
     if (wfaOnly) wfaOnly.disabled = !!miss.size || !!bad.size || st.busy;
@@ -738,6 +757,7 @@ export function createAttendPanel({
   /** 올릴 것을 한 줄로. 반차 앞에 유연근무를 올려야 하면 그것부터 적는다. */
   function sendSummary() {
     const head = docSummary();
+    if (st.wfaFor) return `기념일 지원 신청 화면(채워서): ${describeWelfare(st.form)} · 연차 ${md(st.form.dateFrom)}${st.form.dateTo && st.form.dateTo !== st.form.dateFrom ? `~${md(st.form.dateTo)}` : ''} (이미 올림)`;
     if (isWelfare(st.form)) return `${head} → 결재요청 뒤 기념일 지원 신청 화면(채워서): ${describeWelfare(st.form)}`;
     return wantsTrip(st.form) ? `${head} → 결재요청 뒤 여비계산서(사전정산): ${describePlan(settlePlan(st.form, memoOf(st.form)))}` : head;
   }
@@ -814,32 +834,54 @@ export function createAttendPanel({
   }
 
   /**
-   * 기념일 지원 — 기념일 칸 아래의 신청 현황(올해 몇 번째인지·지난 신청 몇 줄), 하는 법, 준비할 증빙, "신청 화면만 열기"(연차를 이미 올렸을 때).
+   * 기념일 지원 체크박스 오른쪽의 올해 쓴 횟수 — "올해 2/5번 사용"(연 최대 다섯 번, 2026-10-09 사용자 지정: "몇번 사용했는지 체크 박스
+   * 후측에 … 5번까지 선택할 수 있거든"). 신청일 기준으로 센다(welfareYearCount). 다 썼으면 붉게, 못 읽었으면 ? 로 적고 까닭은 풍선말에.
+   */
+  function wfaUsedHtml() {
+    const year = attendToday().slice(0, 4);
+    const n = st.wfa?.rows ? welfareYearCount(st.wfa.rows, year) : null;
+    const cls = !st.wfa ? ' wait' : st.wfa.error ? ' err' : n >= WFA_PER_YEAR ? ' full' : '';
+    const tip = !st.wfa ? '신청 현황을 읽는 중...'
+      : st.wfa.error ? `신청 현황을 읽지 못했습니다 — ${st.wfa.error}`
+        : `${year}년 ${n}번 신청 — 연 ${WFA_PER_YEAR}번까지${n >= WFA_PER_YEAR ? '(올해는 다 썼습니다)' : ''}`;
+    return `<span id="atWfaUsed" class="at-wfa-used${cls}" title="${escapeHtml(tip)}">올해 ${n ?? '?'}/${WFA_PER_YEAR}번 사용</span>`;
+  }
+
+  /**
+   * 기념일 지원 — 기념일 칸 아래의 지난 신청 몇 줄(올해 몇 번 썼는지는 체크박스 오른쪽 — wfaUsedHtml), 하는 법, 준비할 증빙,
+   * "신청 화면만 열기"(연차를 이미 올렸을 때 — 신청 내역의 연차 카드에서 열었으면 그것이 이 폼의 나가는 길이라 "신청 화면 열기").
    * 목록·소개 화면은 링크로 연다.
    */
   function wfaHtml() {
-    const year = attendToday().slice(0, 4);
     const links = `<a href="${WFA_LIST_URL}" target="_blank" rel="noopener">신청 현황</a><a href="${WFA_INTRO_URL}" target="_blank" rel="noopener">지원 소개</a>`;
     let rows;
     if (!st.wfa) rows = '<span class="at-wfa-wait">신청 현황을 읽는 중...</span>';
     else if (st.wfa.error) rows = `<span class="at-wfa-err">신청 현황을 읽지 못했습니다 — ${escapeHtml(st.wfa.error)}</span>`;
     else {
-      const n = welfareYearCount(st.wfa.rows, year);
       const recent = st.wfa.rows.slice(0, 4).map((r) => `<li><span>${escapeHtml(r.applied ? md(r.applied) : '?')}</span>`
         + `<span>${escapeHtml(`${r.reason}${r.date ? ` ${md(r.date)}` : ''} · ${r.name}(${r.relation})`)}</span>`
         + `<span>${r.asked != null ? escapeHtml(`${r.asked.toLocaleString('ko-KR')}원`) : ''}</span><span>${escapeHtml(r.status)}</span></li>`).join('');
-      rows = `<span class="at-wfa-count">${year}년 ${n}번 신청 — 연 ${WFA_PER_YEAR}번까지</span>${recent ? `<ul class="at-wfa-rows">${recent}</ul>` : ''}`;
+      rows = recent ? `<ul class="at-wfa-rows" aria-label="지난 신청">${recent}</ul>` : '';
     }
     const files = WFA_FILES.map((f) => `<li${f.need ? ' class="need"' : ''}>${escapeHtml(f.label)}</li>`).join('');
+    const how = st.wfaFor
+      ? '"신청 화면 열기"를 누르면 eclass 의 기념일 지원 신청 화면이 새 탭에 열리고 위 칸이 채워집니다(연차는 HR 에 다시 올리지 않습니다). '
+      : '결재요청을 누르면 연차를 HR 에 올린 뒤 eclass 의 기념일 지원 신청 화면이 새 탭에 열리고 위 칸이 채워집니다. ';
+    const open = st.wfaFor
+      ? '<button type="button" id="atWfaOpen" class="small at-request at-wfa-open" data-act="wfaOpen" '
+        + 'title="HR 에 올리지 않고 기념일 지원 신청 화면만 열어 위 칸을 채웁니다">신청 화면 열기</button>'
+      : '<button type="button" id="atWfaOpen" class="ghost small at-wfa-open" data-act="wfaOpen" '
+        + 'title="연차를 이미 올렸으면 — HR 에 올리지 않고 기념일 지원 신청 화면만 열어 위 칸을 채웁니다">신청 화면만 열기 (연차는 이미 올림)</button>';
     return `<div class="at-wfa-head"><strong>가족 기념일 지원</strong>${links}</div>${rows}`
-      + '<p class="at-wfa-how">결재요청을 누르면 연차를 HR 에 올린 뒤 eclass 의 기념일 지원 신청 화면이 새 탭에 열리고 위 칸이 채워집니다. 그 화면에서 증빙 파일을 붙이고 '
+      + `<p class="at-wfa-how">${how}그 화면에서 증빙 파일을 붙이고 `
       + '<b>저장 및 상신</b>을 누르세요 — 이용일당 150,000원까지, 이용일로부터 20일 안에. 금액·사용구분은 비워 두면 그 화면에서 적습니다.</p>'
-      + `<ul class="at-wfa-files" aria-label="붙일 파일">${files}</ul>`
-      + '<button type="button" id="atWfaOpen" class="ghost small at-wfa-open" data-act="wfaOpen" '
-      + 'title="연차를 이미 올렸으면 — HR 에 올리지 않고 기념일 지원 신청 화면만 열어 위 칸을 채웁니다">신청 화면만 열기 (연차는 이미 올림)</button>';
+      + `<ul class="at-wfa-files" aria-label="붙일 파일">${files}</ul>${open}`;
   }
 
   function paintWfa() {
+    // 체크박스 오른쪽의 횟수는 켜기 전에도 있다 — 상자보다 먼저 맞춘다.
+    const used = $('atWfaUsed');
+    if (used) used.outerHTML = wfaUsedHtml();
     const box = $('atWfa');
     if (!box) return;
     box.innerHTML = wfaHtml();
@@ -1027,11 +1069,14 @@ export function createAttendPanel({
 
   function resetForm() {
     disarm();
+    const marked = !!st.wfaFor;
     st.edit = null;
+    st.wfaFor = null;
     st.filled.clear();
     st.form = blank(st.form.kind);
     paintKinds();
     paintForm();
+    if (marked) paintList();   // 기념일 지원을 붙이던 연차 카드의 표시(editing)를 걷는다
   }
 
   function readFile(file) {
@@ -1310,7 +1355,8 @@ export function createAttendPanel({
    * (2026-10-02 사용자 지정. 두 번 누르기는 신청 내역의 삭제·회수·변경·취소신청에만 남아 있다).
    */
   async function send(action) {
-    if (st.busy) return;
+    // 신청 내역에서 연 기념일 지원 폼은 연차를 올리지 않는다(버튼도 숨어 있다).
+    if (st.busy || st.wfaFor) return;
     disarm();
     const verb = action === 'request' ? '결재요청' : '임시저장';
     // 반차면 그 날 근무시간부터 본다. 출근이 정시가 아니면 유연근무(09:00~18:00)를 먼저 올려야 한다.
@@ -1440,10 +1486,11 @@ export function createAttendPanel({
         + `<span class="at-sum">${escapeHtml(it.summary)}</span>${chip}</span>`
         + `<span class="at-reason">${escapeHtml(it.reason || it.formName || '')}</span></button>`;
       // 지난 건은 상태 딱지를 회색으로 가라앉힌다(스타일이 결재완료에만 건다).
-      const cls = `st-${escapeHtml(it.status)}${off === 'done' ? ' cancelled' : off ? ' cancelling' : ''}${isPast(it, today) ? ' past' : ''}${st.edit?.docNo === it.docNo ? ' editing' : ''}`;
+      const cls = `st-${escapeHtml(it.status)}${off === 'done' ? ' cancelled' : off ? ' cancelling' : ''}${isPast(it, today) ? ' past' : ''}`
+        + `${st.edit?.docNo === it.docNo || st.wfaFor?.docNo === it.docNo ? ' editing' : ''}`;
       if (!open) return `<li data-i="${i}" class="${cls}">${head}</li>`;
-      // 취소신청을 이미 올린 건은 다시 무를 수 없다 — 변경·취소신청 버튼을 걷는다.
-      const acts = it.actions.filter((a) => !off || (a !== 'cancel' && a !== 'change')).map((a) =>
+      // 취소신청을 이미 올린 건은 다시 무를 수 없다 — 변경·취소신청 버튼을 걷는다. 무르는 연차에 기념일 지원도 붙이지 않는다.
+      const acts = it.actions.filter((a) => !off || (a !== 'cancel' && a !== 'change' && a !== 'wfa')).map((a) =>
         `<button type="button" class="small ${a === 'delete' || a === 'cancel' || a === 'recall' ? 'at-warn' : a === 'request' || a === 'change' ? 'at-request' : 'ghost'}" data-act="${a}" `
         + `title="${escapeHtml(ACTION_TITLE[a])}"${st.busy ? ' disabled' : ''}>${ACTION_LABEL[a]}</button>`).join('')
         // 이 문서를 HR 웹 화면에서 본다(제목 줄의 "HR 열기"와 같은 아이콘). 보내는 것이 없어 한 번만 누르면 된다.
@@ -3161,6 +3208,21 @@ export function createAttendPanel({
     el.form.scrollIntoView?.({ block: 'nearest' });
   }
 
+  /**
+   * 신청 내역의 연차 카드의 "기념일 지원"(2026-10-09 사용자 지정: "연차사용의 경우 승인 전후 신청 내역에서 추가로 신청할 수 있도록") —
+   * 그 연차의 날짜로 폼을 열고 기념일 체크박스를 켠다. 연차는 이미 올라가 있어 결재요청·임시저장은 숨고(st.wfaFor),
+   * 기념일 칸을 채운 뒤 기념일 상자의 "신청 화면 열기"(openWelfare)로 eclass 신청 화면만 채워 연다. HR 에는 아무것도 가지 않는다.
+   */
+  function wfaFromList(it) {
+    const form = welfareFormFor(it, attendToday());
+    if (!form) return;
+    disarm();
+    st.wfaFor = { docNo: it.docNo, summary: it.summary };
+    seatForm(form, null);
+    paintList();   // 어느 연차에 붙이는지 그 카드에 표시한다(editing)
+    setStatus(`${it.summary} 에 기념일 지원을 붙입니다 — 기념일 칸을 채우고 "신청 화면 열기"를 누르세요.`);
+  }
+
   /** 임시저장 문서를 폼으로 불러와 고친다. */
   async function loadIntoForm(it) {
     setBusy(true);
@@ -3204,7 +3266,7 @@ export function createAttendPanel({
           : !!after && after.status !== it.status;
       st.cancelFor = null;
       st.cancelThen = null;
-      if (st.edit?.docNo === it.docNo) resetForm();
+      if (st.edit?.docNo === it.docNo || st.wfaFor?.docNo === it.docNo) resetForm();
       if (done && again) seatForm(again, null);
       // 취소신청을 올렸으면 그 건은 결재될 때까지 "취소 중"이다 — 적어 두고, 출장이면 여비계산서(사전정산까지)를 지운다.
       const dropped = action === 'cancel' && done ? await afterCancel(it, detail.newDocNo, { keepTrip: !!again }) : '';
@@ -3505,6 +3567,7 @@ export function createAttendPanel({
       return runAfter(row.seq, []);
     }
     if (a === 'edit') return loadIntoForm(it);
+    if (a === 'wfa') return wfaFromList(it);
     const approved = it.status === STATUS.APPROVED;
     if (a === 'cancel' || (a === 'change' && approved)) {
       // 사유를 받아야 한다. 줄 아래에 칸을 펴고, 올리는 것은 그 칸 옆의 버튼이 한다.

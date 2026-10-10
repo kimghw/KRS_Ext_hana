@@ -1,0 +1,7 @@
+# 연구업무추진품의(연구공문) — 폼 하나(KR_EA_Research_Task) 안에서 목적(purpose)마다 다른 품의를 쓴다.
+# 원본: krs-web-agents ea_approval/ea_recipes/research-form/forms/research_form/manifest.yaml
+working_unit_id: research-form
+label: 연구업무추진품의
+form_id: KR_EA_Research_Task   # eclass 전자결재 FORMID
+# 패널의 갈래 차례 — purposes/<목적>/ 폴더 이름이다.
+purposes: [purchase, edu, trip, outside]

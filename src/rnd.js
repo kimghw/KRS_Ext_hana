@@ -7,7 +7,7 @@
 // 예산 **계획**을 고치거나 비목을 빼면, 과제의 책임자·연구기간을 고치면 변경이력에 저절로 한 줄이 남는다(auto) — 사유만 사람이 적는다.
 // 집행액은 쓰는 대로 바뀌는 값이라 변경이 아니다.
 //
-// 과제 목록은 공문 탭의 사전 설정(gongmunProjects — 과제명·별명·과제번호·책임자·연구기간 글)에서 가져올 수 있다.
+// 과제 목록은 공문 탭의 공문 설정(gongmunProjects — 과제명·별명·과제번호·책임자·연구기간 글)에서 가져올 수 있다.
 // 과제번호(없으면 과제명)가 같으면 같은 과제로 보고 빈 칸만 채운다(mergeProjects). 여기 담은 것은 이 브라우저에만 남으니
 // JSON 으로 내보내고(exportJson) 들여올(importJson) 수 있다.
 
@@ -288,7 +288,7 @@ export const newestFirst = (list) => [...(list || [])].map((x, i) => [x, i]).sor
 
 /* ------------------------------------------------------------ 가져오기·내보내기 */
 
-/** 공문 탭의 사전 설정 과제(gongmunProjects)를 이 모양으로. 연구기간 글은 시작일·종료일로 읽는다. */
+/** 공문 탭의 공문 설정 과제(gongmunProjects)를 이 모양으로. 연구기간 글은 시작일·종료일로 읽는다. */
 export function fromGongmun(list) {
   return (Array.isArray(list) ? list : [])
     .filter((p) => text(p?.name))

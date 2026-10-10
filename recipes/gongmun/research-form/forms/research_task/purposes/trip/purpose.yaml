@@ -1,0 +1,97 @@
+# 출장 품의 — 행사·회의·학회 안내문·초청장(출장지·기간·목적)과 교통·숙박 견적서(예상경비)를 읽는다(2026-10-08 사용자 지정).
+# 칸의 꼴과 from 의 뜻은 purchase/purpose.yaml 머리말과 같다. read·write·rules·example·context 는 그대로 Claude 에게 가는 지시문이다(# 주석은 사람만 본다).
+# Claude 가 받는 지시문 전문은 `node tools/gen-gongmun.mjs --prompt trip`(사유 쓰기는 --prompt trip reason).
+purpose_id: trip
+label: 출장
+title: 출장품의
+rule_key: 출장               # 국내 팀장 · 해외 본부장 — 구분은 아래 division 칸
+amount_field: cost
+document_setting: 연구품의
+limit: null
+account: 연구활동비(국내여비)
+
+reading:
+  docs: 행사·회의·학회 안내문·초청장·출장 일정표·교통/숙박 견적서
+  rules: []
+
+fields:
+  - key: place
+    label: 출장지
+    wide: true
+    from: document
+    need: 출장지
+    read: 행사·회의가 열리는 도시와 기관 — "도시(기관)" 꼴로 적습니다.
+    example: 대전(한국기계연구원)
+
+  # 본문의 {출장기간} 은 시작일·종료일로 "2026. 10. 20. ~ 2026. 10. 21. (2일)", 하루면 "2026. 10. 20. (1일)" 이 된다(body_spec.yaml).
+  - key: from
+    label: 시작일
+    type: date
+    from: document
+    need: 출장기간
+    read: >-
+      출장 시작일 — 행사·회의의 첫날. 참가 신청·등록 마감일과 헷갈리지 않습니다. 연도가 적혀 있지 않으면 문서 발행일(없으면 오늘)의
+      연도를 붙입니다.
+    example: 2026-10-20
+
+  - key: to
+    label: 종료일
+    type: date
+    from: document
+    not_before: from
+    read: 출장 종료일 — 행사·회의의 마지막 날. 하루짜리면 시작일과 같은 날입니다.
+    example: 2026-10-21
+
+  - key: who
+    label: 출장자
+    wide: true
+    from: me                  # 여러 명이면 칸에서 더 적는다
+
+  - key: cost
+    label: 예상경비 (원)
+    type: money
+    from: document
+    need: 예상경비
+    read: 교통·숙박 견적서가 함께 있으면 그 합계(부가세 포함)입니다. 행사 안내문·초청장만 있으면 null 입니다.
+    example: 300000
+
+  - key: division
+    label: 출장 구분 (위임전결)
+    type: choice
+    options: [국내, 해외]
+    from: user                # 처음엔 국내 — 해외면 위임전결이 본부장까지 오른다(registries/delegation.yaml 의 출장)
+
+  - key: purpose
+    label: 출장목적
+    wide: true
+    open: true
+    from: document
+    need: 출장목적
+    read: >-
+      무엇을 하러 가는지 짧은 구절로. 문서에 적혀 있으면 그대로, 없으면 행사·회의명으로 "○○ 참석" 처럼 적습니다 — 비워 두지 않습니다.
+    write: 무엇을 하러 가는지 짧은 구절로(끝에 마침표 없이). 지금 적힌 출장목적이 있으면 그것을 다듬어 씁니다.
+    example: 2026 한국조선해양기자재 학회 참석 및 발표
+
+  - key: reason
+    label: 출장사유
+    wide: true
+    area: true
+    open: true
+    placeholder: 과제와 이어지는 필요성 — 비워 두지 않습니다
+    from: write
+    need: 출장사유
+    write: 이 출장이 과제 수행에 왜 필요한지 — 과제 내용과 이어지는 필요성을 1~2문장으로, "…필요함" 처럼 명사형으로 끝맺습니다.
+    example: 과제의 실증 시험 결과를 확인하고 시험 조건을 협의하기 위해 필요함
+
+  - key: account
+    label: 예산계정
+    wide: true
+    from: setup               # 비워 두면 과제의 계정, 그것도 없으면 위의 account
+
+# 사유 쓰기 — 꼴은 purchase/purpose.yaml 의 writing 과 같다. 예상경비는 넣지 않는다.
+writing:
+  context: |-
+    출장지: {출장지}
+    출장기간: {출장기간?}
+    지금 적힌 출장목적: {출장목적?}
+  rules: []

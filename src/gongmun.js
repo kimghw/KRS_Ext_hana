@@ -3,16 +3,17 @@
 // src/llm.js 의 gongmunSmart 가 한다.
 //
 // 원본은 krs-web-agents 의 ea_approval(연구업무추진품의 — eclass 전자결재 RealEANet 의 FORMID KR_EA_Research_Task)이다.
-// 거기서는 Playwright 가 전자결재 화면에 직접 넣지만, 확장은 아직 넣지 않는다(2026-10-07) — 패널에서 제목·본문·결재선을 다 만들어
-// 보여 주고, 새 공문 창을 열어 붙여 넣게 한다. 본문 편집기(DEXT5)는 실제 키 입력·붙여넣기만 저장한다(스크립트로 넣은 것은
-// 저장되지 않는다 — 원본 KRS_ECLASS_APPROVAL.md §4). 사용자의 Ctrl+V 는 저장된다.
+// 갈래(목적)마다의 이름·칸·제목·본문 틀·첨부, 폼의 칸 지도, 위임전결·문서설정은 원본처럼 레시피(recipes/gongmun — 유닛 → forms/<폼> →
+// purposes/<목적>)에 두고, 생성기(tools/gen-gongmun.mjs)가 옮긴 src/gmrecipe.js 를 여기서 읽는다(2026-10-08 사용자 지정: "레시피구조로").
+// 새 공문 창에 실제로 쓰는 것은 src/gmwrite.js 다 — 여기서는 무엇을 쓸지(writePlan)만 정한다.
 //
 // 갈래는 구매·교육·출장 셋이다(2026-10-07 사용자 지정). 셋 다 같은 문서 넣기(캡처·끌어다 놓기·붙여넣기·웹페이지 캡처)로 읽는다(2026-10-08 사용자 지정) —
 // 출장은 행사·회의·학회 안내문·초청장(출장지·기간·목적)과 교통·숙박 견적서(예상경비)를 읽는다.
 // 갈래마다 양식(eclass 양식·제목 틀·본문 틀)은 패널에서 보고 고친다(2026-10-07 사용자 지정 — "어떤 양식으로 할지는 거기서 보고 수정").
 
 import { ORIGIN } from './config.js';
-import { currentYear, fileLog, noteLogs, logLines, periodText, yearLabel } from './rnd.js';
+import { RECIPE } from './gmrecipe.js';
+import { currentYear, fileLog, noteLogs, logLines, periodText, yearLabel, MAX_PROJECTS as RND_MAX_PROJECTS } from './rnd.js';
 
 /* ------------------------------------------------------------ 저장소 키 */
 
@@ -21,65 +22,49 @@ export const PRESET_KEY = 'gongmunPreset';
 export const PROJECTS_KEY = 'gongmunProjects';
 export const TEMPLATES_KEY = 'gongmunTemplates';
 export const DRAFT_KEY = 'gongmunDraft';
-
-/** 과제는 다섯 개까지 등록해 두고 고른다(2026-10-07 사용자 지정). */
-export const MAX_PROJECTS = 5;
-
-/**
- * 부서 구매 품의는 100만원 이하(부가세 포함 합계)만 작성한다(2026-10-07 사용자 지정). 넘으면 본문을 만들지 않는다 —
- * 그보다 큰 구매는 결재선(원본 ea_rules.yaml 의 구매 구간)과 첨부(500만원 이상 비교견적서)가 달라 이 틀로 올리면 안 된다.
- */
-export const PURCHASE_LIMIT = 1_000_000;
+/** R&D 과제마다 공문에만 쓰는 값(과제 개요·계정) — normalizeRndExtra. */
+export const RND_EXTRA_KEY = 'gongmunRndExtra';
 
 /**
- * 갈래. limit 는 합계 한도(원, 없으면 null), account 는 계정의 기본값이다(과제에 계정을 적어 두면 그것이 이긴다).
- * 세 갈래 모두 같은 문서 넣기로 읽는다(2026-10-08 사용자 지정: "구매, 교육, 출장 모두 동일한 캡처/파일 넣기 기능을 사용하도록").
+ * 과제 한도 — R&D 탭과 같다(열 개). 처음에는 다섯 개였는데(2026-10-07 사용자 지정) 2026-10-10 사용자 지정("꼭 5개일 필요는 없어. 가끔 연장되거나
+ * 겹치는 경우 몇개 더 있더라")으로 R&D 탭의 한도(src/rnd.js 의 MAX_PROJECTS)에 맞췄다 — 공문 설정의 과제는 R&D 탭이 처음 열릴 때 그대로 가져간다.
  */
-// doc 은 문서 없이 쓸 때의 첨부 한 줄, ask 는 문서 넣는 곳의 말, more 는 이미 읽은 초안에 더 넣을 때의 말이다.
-// 교육은 교육 견적서와 교육 내용(커리큘럼) 캡처를 같이 넣어 둘 다 첨부한다(2026-10-07 사용자 지정).
-// 첨부에 꼭 드는 문서(needDocs)는 본문 ※ 첨부에 늘 적고, 읽은 파일에 빠졌으면 "남은 것"과 넣는 곳의 말(more)이 그것을 짚는다
-// (2026-10-08 사용자 지정: "교육은 첨부로 '견적서' 그리고 '교육내용' 의 첨부가 들어 가야함").
-// 출장은 행사·회의·학회 안내문이나 초청장(출장지·기간·목적)에 교통·숙박 견적서(예상경비)를 더 넣는다.
-export const KINDS = {
-  purchase: {
-    label: '구매', title: '구매품의', limit: PURCHASE_LIMIT, account: '연구활동비(연구실운용비)',
-    doc: '견적서', ask: '견적서를 넣으세요', more: '견적서 다음 쪽·거래명세서 더 넣기',
-  },
-  edu: {
-    label: '교육', title: '교육품의', limit: null, account: '연구활동비(교육훈련비)',
-    doc: '교육 견적서', ask: '교육 견적서·교육 내용을 넣으세요', more: '교육 내용(커리큘럼) 캡처 더 넣기',
-    needDocs: [
-      { label: '교육 견적서', more: '교육 견적서(수강료 화면) 더 넣기' },
-      { label: '교육 내용', more: '교육 내용(커리큘럼) 캡처 더 넣기' },
-    ],
-  },
-  trip: {
-    label: '출장', title: '출장품의', limit: null, account: '연구활동비(국내여비)',
-    doc: '행사 안내문', ask: '행사·회의 안내문이나 초청장을 넣으세요', more: '교통·숙박 견적서 더 넣기',
-  },
-  // 외부활동 허가 신청서 — 강의·자문·심사·발표·위원 활동 같은 외부활동을 하기 전에 허가를 받는 글(2026-10-08 사용자 지정 "출장 옆에 외부활동 허가 신청서").
-  // 요청 공문·초청장·위촉 요청 메일을 넣으면 요청 기관·활동명·기간·장소·사례비를 읽는다. 예산을 쓰지 않아 계정은 없다.
-  outside: {
-    label: '외부활동', title: '외부활동 허가 신청서', limit: null, account: '',
-    doc: '요청 공문', ask: '외부활동 요청 공문·메일(강의·자문·심사·발표 의뢰)을 넣으세요', more: '행사 안내·일정표 더 넣기',
-  },
-};
-export const KIND_ORDER = ['purchase', 'edu', 'trip', 'outside'];
+export const MAX_PROJECTS = RND_MAX_PROJECTS;
 
-/** 외부활동 구분 — 제목과 본문의 활동구분 칸. 읽기(input.yaml gongmun 의 activityType)의 코드를 이 이름으로 바꾼다(outsideTypeOf). */
-export const OUTSIDE_TYPES = ['강의', '자문', '심사·평가', '발표', '위원 활동', '집필', '기타'];
+/**
+ * 갈래(목적) — 레시피의 purposes/<목적>/ 이다(recipes/gongmun/research-form/forms/research_task). 차례는 manifest 의 purposes 차례다.
+ * limit 는 합계 한도(원, 없으면 null), account 는 계정의 기본값이다(과제에 계정을 적어 두면 그것이 이긴다).
+ * doc 은 문서 없이 쓸 때의 첨부 한 줄, ask 는 문서 넣는 곳의 말, more 는 이미 읽은 초안에 더 넣을 때의 말이고(attach_rules.yaml),
+ * needDocs 는 꼭 드는 첨부다 — 본문 ※ 첨부에 늘 적고, 읽은 파일에 빠졌으면 "남은 것"과 넣는 곳의 말이 그것을 짚는다(교육 — 견적서·교육 내용).
+ */
+export const KIND_ORDER = [...RECIPE.order];
+/** cut 은 견적서를 오리는 갈래다(레시피 purpose.yaml 에 quote_crop 이 있다 — 구매의 쇼핑몰 화면, 교육의 온라인 강의 페이지). */
+export const KINDS = Object.fromEntries(KIND_ORDER.map((k) => {
+  const p = RECIPE.purposes[k];
+  const kind = { label: p.label, title: p.title, limit: p.limit, account: p.account, doc: p.attach.doc, ask: p.attach.ask, more: p.attach.more, cut: !!p.quote_crop };
+  return [k, p.attach.need.length ? { ...kind, needDocs: p.attach.need } : kind];
+}));
+
+/**
+ * 부서 구매 품의는 100만원 이하(부가세 포함 합계)만 작성한다(2026-10-07 사용자 지정 — 레시피 purchase/purpose.yaml 의 limit). 넘으면 본문을
+ * 만들지 않는다 — 그보다 큰 구매는 결재선(원본 ea_rules.yaml 의 구매 구간)과 첨부(500만원 이상 비교견적서)가 달라 이 틀로 올리면 안 된다.
+ */
+export const PURCHASE_LIMIT = KINDS.purchase.limit;
+
+/**
+ * 외부활동 구분 — 제목과 본문의 활동구분 칸(레시피 outside/purpose.yaml 의 type 칸 options). 읽기는 이 이름 그대로 돌려준다.
+ * outsideTypeOf 는 예전 읽기의 코드(lecture …)나 이름을 이 이름으로 바꾼다(모르면 빈 글).
+ */
+export const OUTSIDE_TYPES = [...RECIPE.purposes.outside.fields.find((f) => f.key === 'type').options];
 const OUTSIDE_OF = { lecture: '강의', advisory: '자문', review: '심사·평가', talk: '발표', committee: '위원 활동', writing: '집필', other: '기타' };
 export const outsideTypeOf = (code) => OUTSIDE_OF[String(code ?? '').trim()] || (OUTSIDE_TYPES.includes(code) ? code : '');
 
 /**
- * eclass 전자결재 양식. 본문을 붙여 넣는 양식만 둔다 — 구매요청서(KR_Purchase_Order)는 칸이 정해진 폼이라 이 틀로 채울 수 없다.
- * 목록에 없는 양식은 양식 ID 를 직접 적는다.
+ * eclass 전자결재 양식 — 레시피의 forms/<폼>/manifest.yaml. 본문을 넣는 양식만 둔다 — 구매요청서(KR_Purchase_Order)는 칸이 정해진 폼이라
+ * 이 틀로 채울 수 없다. 목록에 없는 양식은 양식 ID 를 직접 적는다(그 양식은 칸 지도가 없어 새 공문 창을 열기만 한다).
  */
-export const FORMS = [
-  { id: 'KR_EA_Research_Task', label: '연구업무추진품의' },
-  { id: 'KR_EA_Form2', label: '기안문' },
-];
-export const DEFAULT_FORM = 'KR_EA_Research_Task';
+export const FORMS = Object.values(RECIPE.forms).map((f) => ({ id: f.id, label: f.label }));
+export const DEFAULT_FORM = RECIPE.purposes[KIND_ORDER[0]].form;
 
 /* ------------------------------------------------------------ 양식(틀) */
 
@@ -90,148 +75,24 @@ export const DEFAULT_FORM = 'KR_EA_Research_Task';
 // 첨부 목록(`{첨부}`)은 읽은 파일마다 무슨 문서인지로 만든다(교육이면 교육 견적서·교육 내용 — 2026-10-07 사용자 지정).
 //
 // 교육·출장의 제목은 "[과제 별명] 수행을 위한 [교육|온라인교육|출장] 품의" 다(2026-10-07 사용자 지정). 본문은 원본 연구공문처럼
-// '가. 과제 개요'(과제명·번호·연구기간·책임자 — 사전 설정의 과제 기본 내용)를 앞에 두고 '나.' 에 품의할 내용을 적는다.
+// '가. 과제 개요'(과제명·번호·연구기간·책임자 — 공문 설정의 과제 기본 내용)를 앞에 두고 '나.' 에 품의할 내용을 적는다.
 // 구매는 원본에서도 과제 개요를 빼는 lean 목적이라(body_spec.yaml 의 skip) 제목·본문을 그대로 둔다.
-const SEP = '------------ 아   래 ------------';
+// 틀의 원본은 레시피의 purposes/<목적>/body_spec.yaml 이다 — 패널의 '양식' 칸에서 고친 것은 브라우저에 따로 남는다(templatePatch).
+export const DEFAULT_TEMPLATES = Object.fromEntries(KIND_ORDER.map((k) => {
+  const p = RECIPE.purposes[k];
+  return [k, { form: p.form, title: p.template.title, body: p.template.body }];
+}));
 
-/** 본문의 '가. 과제 개요' — 교육·출장이 같이 쓴다. 값이 빈 줄(번호·기간·책임자)은 빠진다. */
-const OVERVIEW = [
-  '{차례}. 과제 개요',
-  '    {세부차례} 과 제 명 : {과제명}',
-  '    {세부차례} 과제번호 : {과제번호?}',
-  '    {세부차례} 연구기간 : {연구기간?}',
-  '    {세부차례} 과제책임자 : {과제책임자?}',
+/**
+ * 틀에 쓸 수 있는 이름 — 양식 칸 아래에 [적는 꼴, 뜻] 으로 보여 준다. 공통 이름(레시피 registries/vars.yaml)은 갈래마다 앞에 붙고, 갈래의 이름과
+ * 목록은 body_spec.yaml 의 vars·lists 다.
+ */
+const COMMON_VARS = Object.entries(RECIPE.vars).map(([k, desc]) => [`{${k}}`, desc]);
+const purposeVars = (p) => [
+  ...Object.entries(p.vars).map(([k, v]) => [`{${k}}`, v.desc]),
+  ...Object.entries(p.lists).map(([k, l]) => [`{{#${k}}} … {{/${k}}}`, `${l.desc} — 안에서 ${['번호', ...Object.keys(l.vars)].map((n) => `{${n}}`).join('·')}`]),
 ];
-
-export const DEFAULT_TEMPLATES = {
-  purchase: {
-    form: DEFAULT_FORM,
-    title: '{품목요지} 구매 품의',
-    body: [
-      '1. {부서:은} {과제개요}.',
-      '2. 이와 관련하여 {요약} 아래와 같이 품의하오니 재가하여 주시기 바랍니다.',
-      '',
-      SEP,
-      '',
-      '{차례}. 구매 내역',
-      '{{#품목}}',
-      '    ({번호}) 구매품 : {품목명}',
-      '        - 사양 : {사양?}',
-      '        - 수량 : {수량?}',
-      '        - 금액 : {금액?}',
-      '{{/품목}}',
-      '{차례}. 구매금액 : {합계} (VAT 포함)',
-      '{차례}. 구매처 : {업체}',
-      '{차례}. 구매계정 : {계정}',
-      '{차례}. 용도 : {용도}',
-      '{차례}. 구매사유 : {구매사유}',
-      '',
-      '※ 첨 부',
-      '{첨부}',
-    ].join('\n'),
-  },
-  edu: {
-    form: DEFAULT_FORM,
-    title: '{과제별명} 수행을 위한 {교육구분} 품의',
-    body: [
-      '1. {부서:은} {과제개요}.',
-      '2. 이와 관련하여 {교육목적:을} 위하여 아래와 같이 {교육구분:에} 참가하고자 하오니 재가하여 주시기 바랍니다.',
-      '',
-      SEP,
-      '',
-      ...OVERVIEW,
-      '{차례}. 교육 내용',
-      '    {세부차례} 교 육 명 : {교육명}',
-      '    {세부차례} 교육기관 : {교육기관}',
-      '    {세부차례} 교육기간 : {교육기간}',
-      '    {세부차례} 교육시간 : {교육시간?}',
-      '    {세부차례} 교육장소 : {교육장소}',
-      '    {세부차례} 교육내용 : {교육내용?}',
-      '    {세부차례} 참 석 자 : {참석자}',
-      '    {세부차례} 교 육 비 : {교육비} (VAT 포함)',
-      '    {세부차례} 예산계정 : {계정}',
-      '    {세부차례} 교육사유 : {교육사유}',
-      '',
-      '※ 첨 부',
-      '{첨부}',
-    ].join('\n'),
-  },
-  trip: {
-    form: DEFAULT_FORM,
-    title: '{과제별명} 수행을 위한 출장 품의',
-    body: [
-      '1. {부서:은} {과제개요}.',
-      '2. 이와 관련하여 {출장목적:을} 위하여 아래와 같이 출장하고자 하오니 재가하여 주시기 바랍니다.',
-      '',
-      SEP,
-      '',
-      ...OVERVIEW,
-      '{차례}. 출장 내용',
-      '    {세부차례} 출 장 지 : {출장지}',
-      '    {세부차례} 출장기간 : {출장기간}',
-      '    {세부차례} 출 장 자 : {출장자}',
-      '    {세부차례} 출장목적 : {출장목적}',
-      '    {세부차례} 출장사유 : {출장사유}',
-      '    {세부차례} 예상경비 : {예상경비}',
-      '    {세부차례} 예산계정 : {계정}',
-      '',
-      '※ 첨 부',
-      '{첨부}',
-    ].join('\n'),
-  },
-  // 외부활동 허가 신청서 — 제목은 "[요청 기관] [활동구분] 외부활동 허가 신청"(과제 별명을 쓰지 않는다 — 활동이 과제 수행 자체는 아니다).
-  // 본문은 과제 개요 뒤에 '나. 외부활동 내용'(구분·요청기관·활동명·기간·시간·장소·내용·활동자·사례비·목적·사유)이다. 사례비가 없으면 그 줄은 빠진다.
-  outside: {
-    form: DEFAULT_FORM,
-    title: '{요청기관} {활동구분} 외부활동 허가 신청',
-    body: [
-      '1. {부서:은} {과제개요}.',
-      '2. 이와 관련하여 {요청기관}의 요청으로 아래와 같이 외부활동({활동구분})을 하고자 하오니 허가하여 주시기 바랍니다.',
-      '',
-      SEP,
-      '',
-      ...OVERVIEW,
-      '{차례}. 외부활동 내용',
-      '    {세부차례} 활동구분 : {활동구분}',
-      '    {세부차례} 요청기관 : {요청기관}',
-      '    {세부차례} 활 동 명 : {활동명}',
-      '    {세부차례} 활동기간 : {활동기간}',
-      '    {세부차례} 활동시간 : {활동시간?}',
-      '    {세부차례} 활동장소 : {활동장소}',
-      '    {세부차례} 활동내용 : {활동내용?}',
-      '    {세부차례} 활 동 자 : {활동자}',
-      '    {세부차례} 사 례 비 : {사례비?}',
-      '    {세부차례} 활동목적 : {활동목적}',
-      '    {세부차례} 신청사유 : {신청사유}',
-      '',
-      '※ 첨 부',
-      '{첨부}',
-    ].join('\n'),
-  },
-};
-
-/** 틀에 쓸 수 있는 이름 — 양식 칸 아래에 [적는 꼴, 뜻] 으로 보여 준다. 공통 이름은 갈래마다 앞에 붙는다. */
-const tokens = (pairs) => pairs.map(([k, desc]) => [`{${k}}`, desc]);
-const COMMON_VARS = tokens([
-  ['부서', '사전 설정의 부서'], ['기안자', '내 이름'], ['과제명', '고른 과제'], ['과제별명', '고른 과제의 별명 — 제목에 쓴다(비면 과제명)'],
-  ['과제번호', '고른 과제의 번호'], ['연구기간', '고른 과제의 연구기간'],
-  ['과제책임자', '고른 과제의 책임자(합의자)'], ['과제개요', '과제 개요(비면 「과제명」 과제를 수행하고 있습니다)'], ['계정', '계정'], ['오늘', '오늘 날짜'],
-  ['첨부', '첨부 목록 — 읽은 문서마다 한 줄, 마지막 줄에 끝.'],
-]);
-export const VARS = {
-  purchase: [...COMMON_VARS, ...tokens([['품목요지', '제목에 쓸 품목 이름'], ['요약', '…을 구매하고자'], ['업체', '구매처'], ['견적일', '견적일'],
-    ['합계', '합계(원)'], ['용도', '용도'], ['구매사유', '구매사유(과제 내용으로 쓴다)'], ['품목수', '품목 수']]),
-  ['{{#품목}} … {{/품목}}', '품목마다 되풀이 — 안에서 {번호}·{품목명}·{사양}·{수량}·{단가}·{금액}']],
-  edu: [...COMMON_VARS, ...tokens([['교육구분', '교육 또는 온라인교육 — 교육 구분 칸(교육장소가 온라인이면 저절로)'], ['교육명', '교육명'],
-    ['교육기관', '교육기관'], ['교육기간', '시작 ~ 끝(며칠)'], ['교육시간', '교육시간'],
-    ['교육장소', '교육장소'], ['교육내용', '교육 내용(커리큘럼)'], ['참석자', '참석자'], ['교육비', '교육비(원)'], ['교육목적', '교육목적'],
-    ['교육사유', '교육사유(과제 내용으로 쓴다)']])],
-  trip: [...COMMON_VARS, ...tokens([['출장지', '출장지'], ['출장기간', '시작 ~ 끝(며칠)'], ['출장자', '출장자'], ['출장목적', '출장목적'],
-    ['출장사유', '출장사유(과제 내용으로 쓴다)'], ['예상경비', '예상경비(원)']])],
-  outside: [...COMMON_VARS, ...tokens([['활동구분', '강의·자문·심사·평가·발표·위원 활동·집필·기타 — 활동 구분 칸'], ['요청기관', '요청 기관'],
-    ['활동명', '활동명(강의 제목·자문 주제)'], ['활동기간', '시작 ~ 끝(며칠)'], ['활동시간', '활동시간'], ['활동장소', '활동장소'],
-    ['활동내용', '활동 내용'], ['활동자', '활동자'], ['사례비', '사례비(원)'], ['활동목적', '활동목적'], ['신청사유', '신청사유(과제 내용으로 쓴다)']])],
-};
+export const VARS = Object.fromEntries(KIND_ORDER.map((k) => [k, [...COMMON_VARS, ...purposeVars(RECIPE.purposes[k])]]));
 /** 틀의 꾸밈 — 이름 뒤에 붙인다. */
 export const VAR_MARKS = [
   ['{이름:은}', '받침에 맞춰 은/는 — 이/가·을/를·과/와·으로/로도 된다'], ['{이름?}', '값이 비면 그 줄을 뺀다'],
@@ -239,15 +100,21 @@ export const VAR_MARKS = [
   ['{세부차례}', '(1)·(2)… 를 차례로 — {차례} 줄마다 새로 세고, 빠진 줄은 건너뛴다'],
 ];
 
-/** 교육 구분 — 제목의 "… 수행을 위한 교육 품의 / 온라인교육 품의"(2026-10-07 사용자 지정). */
-export const EDU_MODES = ['교육', '온라인교육'];
-const ONLINE_RE = /온라인|online|비대면|원격|이러닝|e-?learning|웨비나|webinar|인터넷\s*강의|인강|동영상\s*강의|\bVOD\b|인프런|inflearn|유데미|udemy|코세라|coursera|패스트캠퍼스|클래스101|K-?MOOC/i;
+/**
+ * 교육 구분 — 제목의 "… 수행을 위한 교육 품의 / 온라인교육 품의"(2026-10-07 사용자 지정). 레시피 edu/purpose.yaml 의 mode 칸 options(첫째가 대면,
+ * 둘째가 온라인)이고, 온라인으로 보는 말은 그 칸의 online 이다(대소문자·띄어쓰기는 보지 않는다).
+ */
+const EDU_MODE = RECIPE.purposes.edu?.fields.find((f) => f.key === 'mode');
+export const EDU_MODES = [...(EDU_MODE?.options || ['교육', '온라인교육'])];
+const squash = (s) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
+const ONLINE_WORDS = (EDU_MODE?.online || []).map(squash).filter(Boolean);
 
-/** 교육 구분을 정한다 — 칸에 고른 것이 먼저, 없으면 교육장소·교육기관이 온라인이면 온라인교육. */
+/** 교육 구분을 정한다 — 칸에 고른 것이 먼저, 없으면 교육장소·교육기관에 온라인으로 보는 말이 있으면 온라인교육. */
 export function eduModeOf(draft) {
   const picked = String(draft?.mode ?? '').trim();
   if (EDU_MODES.includes(picked)) return picked;
-  return ONLINE_RE.test(`${draft?.place ?? ''} ${draft?.provider ?? ''}`) ? '온라인교육' : '교육';
+  const text = squash(`${draft?.place ?? ''} ${draft?.provider ?? ''}`);
+  return ONLINE_WORDS.some((w) => text.includes(w)) ? EDU_MODES[1] : EDU_MODES[0];
 }
 
 const text = (v, max = 4000) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').slice(0, max) : '');
@@ -278,7 +145,7 @@ export function templatePatch(kind, edited) {
   return out;
 }
 
-/* ------------------------------------------------------------ 사전 설정·과제 */
+/* ------------------------------------------------------------ 공문 설정·과제 */
 
 /** 이름 목록 — 쉼표·가운뎃점·줄바꿈으로 나눈다. 같은 이름은 한 번만. */
 export function namesOf(value) {
@@ -286,14 +153,20 @@ export function namesOf(value) {
   return [...new Set(list.map((s) => String(s ?? '').trim()).filter(Boolean))].slice(0, 20);
 }
 
-/** 사전 설정 — 부서(본문 첫 줄), 부서장(결재), 참조자. */
+/**
+ * 공문 설정 — 부서(본문 첫 줄), 부서장(결재 — 위임전결의 팀장), 참조자, 소장·본부장(전결권자가 그 위일 때 결재선에 선다), 문서번호 부서
+ * (문서설정의 Doc No. 코드 — 비면 레시피 settings.yaml 의 teams 표에서 부서 이름으로 찾는다). 실명은 공개 저장소(레시피)에 두지 않고 여기에만 둔다.
+ */
 export function normalizePreset(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
-  return { dept: text(r.dept, 100).trim(), head: text(r.head, 40).trim(), refs: namesOf(r.refs) };
+  return {
+    dept: text(r.dept, 100).trim(), head: text(r.head, 40).trim(), refs: namesOf(r.refs),
+    director: text(r.director, 40).trim(), chief: text(r.chief, 40).trim(), docNo: text(r.docNo, 8).replace(/\D/g, ''),
+  };
 }
 
 /**
- * 과제 — 이름은 반드시, 나머지(별명·번호·책임자(합의자)·연구기간·개요·내용·계정)는 있으면. 다섯 개까지.
+ * 과제 — 이름은 반드시, 나머지(별명·번호·책임자(합의자)·연구기간·개요·내용·계정)는 있으면. MAX_PROJECTS 개까지.
  * 내용(content)은 연구목표·연구내용이다 — 품의의 사유(구매사유·교육사유)를 쓰는 근거가 된다(2026-10-07 사용자 지정).
  * 별명(alias)은 교육·출장 품의 제목("[과제 별명] 수행을 위한 … 품의")에, 연구기간(period)은 본문 '과제 개요'에 들어간다.
  */
@@ -308,6 +181,24 @@ export function normalizeProjects(raw) {
     .filter((p) => p.name)
     .slice(0, MAX_PROJECTS);
 }
+
+/**
+ * R&D 과제마다 공문에만 쓰는 값 — 과제 개요(본문 첫 줄)·계정. { [R&D 과제 id]: { about, account } }.
+ * R&D 탭에 과제가 있으면 공문 설정의 과제는 그 과제들이다(2026-10-10 사용자 지정: "rnd 에 과제 들어가 있는거 추가하면되잖아. 그거랑 연동되어야") —
+ * 과제명·별칭·번호·책임자·연구기간·연구 내용은 R&D 탭이 원본이라 공문 설정에서는 이 둘만 적는다. 과제 id 로 묶어 과제명을 고쳐도 따라간다.
+ */
+export function normalizeRndExtra(raw) {
+  const out = {};
+  for (const [id, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+    if (!id || !v || typeof v !== 'object') continue;
+    out[id] = { about: text(v.about, 300).trim().replace(/[.。]+$/, ''), account: text(v.account, 60).trim() };
+  }
+  return out;
+}
+
+/** 공문 설정의 과제 줄(x)이 R&D 과제(p)와 같은 과제인가 — 과제번호·과제명·별칭 가운데 하나가 같으면(공백·대소문자는 보지 않는다). */
+export const sameProject = (p, x) => !!p && !!x
+  && ((p.code && keyOf(x.code) === keyOf(p.code)) || keyOf(x.name) === keyOf(p.name) || (!!p.alias && keyOf(x.alias) === keyOf(p.alias)));
 
 /** 사유를 쓰는 근거로 넘기는 R&D 연구 내용의 한도 — 다리는 입력을 2만 자에서 자른다(native/host.mjs). */
 const RND_CONTENT_MAX = 6000;
@@ -334,20 +225,24 @@ export function rndContent(project, today = '') {
 
 /**
  * R&D 탭의 과제를 공문의 과제로(2026-10-08 사용자 지정: "rnd 탭에 있는 어떤 과제로 할건지 … 대상 rnd 의 연구 내용을 보고 자동으로 입력").
- * 별칭(제목)·과제번호·책임자(합의자)·연구기간(과제 개요)은 그 과제의 것이고, 과제 내용은 연구 내용(rndContent)이다. 공문 사전 설정에 같은 과제
- * (과제번호·과제명·별칭)가 있으면 거기 적어 둔 개요·계정을 쓰고, R&D 쪽에 비어 있는 별칭·번호·책임자·연구기간·내용도 거기서 채운다.
- * rnd 는 화면이 보여 줄 근거의 형편(과제 id·올해 차년도·계획을 가져온 차년도·진행 기록 수)이다.
+ * 별칭(제목)·과제번호·책임자(합의자)·연구기간(과제 개요)은 그 과제의 것이고, 과제 내용은 연구 내용(rndContent)이다. 개요·계정은 공문 설정에서
+ * 그 과제 몫으로 적은 것(extra — normalizeRndExtra)이고, 적은 적이 없으면 공문 설정의 같은 과제(sameProject) 줄의 것이다. R&D 쪽에 비어 있는
+ * 별칭·번호·책임자·연구기간·내용도 그 줄에서 채운다. rnd 는 화면이 보여 줄 근거의 형편(과제 id·올해 차년도·계획을 가져온 차년도·진행 기록 수)이다.
  * @param {{projects?: object[]}} book src/rnd.js 의 normalizeBook 을 지난 장부
- * @param {object[]} [preset] 공문 사전 설정의 과제(gongmunProjects)
+ * @param {object[]} [preset] 공문 공문 설정의 과제(gongmunProjects)
+ * @param {object} [extra] R&D 과제마다 공문에만 쓰는 값(gongmunRndExtra)
  */
-export function rndProjects(book, preset = [], today = '') {
+export function rndProjects(book, preset = [], today = '', extra = {}) {
   const pre = normalizeProjects(preset);
+  const ex = normalizeRndExtra(extra);
   return (book?.projects || []).filter((p) => p?.name).map((p) => {
-    const same = pre.find((x) => (p.code && keyOf(x.code) === keyOf(p.code)) || keyOf(x.name) === keyOf(p.name) || (p.alias && keyOf(x.alias) === keyOf(p.alias)));
+    const same = pre.find((x) => sameProject(p, x));
+    const own = p.id ? ex[p.id] : null;
     const got = rndContent(p, today);
     return {
       name: p.name, alias: p.alias || same?.alias || '', code: p.code || same?.code || '', lead: p.lead || same?.lead || '',
-      period: periodText(p) || same?.period || '', about: same?.about || '', content: got.text || same?.content || '', account: same?.account || '',
+      period: periodText(p) || same?.period || '', about: own ? own.about : same?.about || '', content: got.text || same?.content || '',
+      account: own ? own.account : same?.account || '',
       rnd: { id: p.id, year: got.year, plan: got.plan, logs: got.logs },
     };
   });
@@ -460,63 +355,13 @@ const ORDER = [...'가나다라마바사아자차카타파하'];
 /* ------------------------------------------------------------ 초안의 칸 */
 
 /**
- * 초안의 칸 — 화면이 이 차례로 그린다. type: money(원, 쉼표로 보인다)·date·choice(options 중 하나), 그 밖은 글.
- * area 는 여러 줄, wide 는 한 줄을 다 쓴다.
+ * 초안의 칸 — 화면이 이 차례로 그린다. 원본은 레시피의 purposes/<목적>/purpose.yaml 의 fields 다.
+ * type: money(원, 쉼표로 보인다)·date·choice(options 중 하나), 그 밖은 글. area 는 여러 줄, wide 는 한 줄을 다 쓴다.
+ * from 은 값이 어디서 오는지(document 면 read 가 읽는 법 — 문서 읽기의 지시문이 된다), need 는 비면 '남은 것'에 뜨는 이름이다.
  * open 은 펼쳐 두는 칸이다 — 용도(교육목적)·사유만 늘 보이고, 읽은 칸은 "읽은 문서" 아래에 접혀 있다(2026-10-08 사용자 지정:
  * "이건 접힌 상태로 두고, 용도, 구매사유, 결재선.. 그리고 rnd 탭에 있는 어떤 과제로 할건지에 대해서만 펼쳐서 작성/선택").
  */
-export const FIELDS = {
-  purchase: [
-    { key: 'gist', label: '품목 요지 (제목)', wide: true },
-    { key: 'vendor', label: '구매처' },
-    { key: 'total', label: '합계 (VAT 포함, 원)', type: 'money' },
-    { key: 'use', label: '용도', wide: true, open: true },
-    { key: 'reason', label: '구매사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
-    { key: 'summary', label: '요약 (2. 이와 관련하여 …)', wide: true },
-    { key: 'account', label: '구매계정', wide: true },
-  ],
-  edu: [
-    { key: 'course', label: '교육명', wide: true },
-    { key: 'provider', label: '교육기관' },
-    { key: 'fee', label: '교육비 (VAT 포함, 원)', type: 'money' },
-    { key: 'from', label: '시작일', type: 'date' },
-    { key: 'to', label: '종료일', type: 'date' },
-    { key: 'place', label: '교육장소' },
-    // 제목의 교육·온라인교육. 읽을 때 교육장소·교육기관으로 정하고, 손대지 않았으면 교육장소를 고칠 때 따라간다(eduModeOf).
-    { key: 'mode', label: '교육 구분 (제목)', type: 'choice', options: EDU_MODES },
-    { key: 'hours', label: '교육시간', wide: true },
-    { key: 'topics', label: '교육내용', wide: true, area: true },
-    { key: 'attendees', label: '참석자', wide: true },
-    { key: 'purpose', label: '교육목적', wide: true, open: true },
-    { key: 'reason', label: '교육사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
-    { key: 'account', label: '예산계정', wide: true },
-  ],
-  trip: [
-    { key: 'place', label: '출장지', wide: true },
-    { key: 'from', label: '시작일', type: 'date' },
-    { key: 'to', label: '종료일', type: 'date' },
-    { key: 'who', label: '출장자', wide: true },
-    { key: 'cost', label: '예상경비 (원)', type: 'money' },
-    { key: 'purpose', label: '출장목적', wide: true, open: true },
-    { key: 'reason', label: '출장사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
-    { key: 'account', label: '예산계정', wide: true },
-  ],
-  // 외부활동 허가 신청서 — 예산 계정이 없다. 활동 구분은 제목에 들어간다.
-  outside: [
-    { key: 'type', label: '활동 구분 (제목)', type: 'choice', options: OUTSIDE_TYPES },
-    { key: 'org', label: '요청 기관' },
-    { key: 'subject', label: '활동명 (주제)', wide: true },
-    { key: 'from', label: '시작일', type: 'date' },
-    { key: 'to', label: '종료일', type: 'date' },
-    { key: 'hours', label: '활동시간' },
-    { key: 'place', label: '활동장소' },
-    { key: 'fee', label: '사례비 (원, 없으면 비움)', type: 'money' },
-    { key: 'topics', label: '활동내용', wide: true, area: true },
-    { key: 'who', label: '활동자', wide: true },
-    { key: 'purpose', label: '활동목적', wide: true, open: true },
-    { key: 'reason', label: '신청사유', wide: true, area: true, open: true, placeholder: '과제와 이어지는 필요성 — 비워 두지 않습니다' },
-  ],
-};
+export const FIELDS = Object.fromEntries(KIND_ORDER.map((k) => [k, RECIPE.purposes[k].fields.map((f) => ({ ...f }))]));
 
 /** 구매의 요약 줄 — "모니터 외 1건을 구매하고자". 품목 요지를 고치면 요약도 따라간다(요약을 손대지 않았을 때). */
 export const summaryOf = (gist) => (String(gist ?? '').trim() ? `${josa(String(gist).trim(), '을')} 구매하고자` : '');
@@ -524,7 +369,6 @@ export const summaryOf = (gist) => (String(gist ?? '').trim() ? `${josa(String(g
 /* ------------------------------------------------------------ 읽은 문서 → 초안 */
 
 const sum = (list) => list.reduce((a, b) => a + b, 0);
-const qtyText = (it) => (it.qty != null ? `${Number(it.qty).toLocaleString('ko-KR')}${it.unit || ''}` : '');
 
 /** 구매의 합계. 문서의 최종 금액이 먼저고, 없으면 공급가액+부가세, 그것도 없으면 품목 금액을 더한다(부가세 포함인지 모른다). */
 export function totalOf(rec) {
@@ -545,17 +389,13 @@ export function gistOf(items, fallback = '') {
 }
 
 /**
- * 첨부 목록에 적는 문서 이름 — 읽은 파일의 종류(input.yaml gongmun 의 parts.kind)마다. 구매로 강의(인프런 같은 교육 상품)를 사면 강의 소개·커리큘럼
+ * 첨부 목록에 적는 문서 이름 — 읽은 파일의 종류(레시피 registries/reading.yaml 의 parts.kind)마다. 구매로 강의(인프런 같은 교육 상품)를 사면 강의 소개·커리큘럼
  * 화면은 강의 내용이다 — 오린 견적서와 함께 첨부한다(2026-10-08 사용자 지정: "공문에는 견적서 랑,, 강의 내용도 첨부파일로").
  * 교육의 첨부는 교육 견적서와 교육 내용 둘이다(2026-10-08 사용자 지정) — 금액이 든 문서(견적서·청구서·신청·결제 화면)는 교육 견적서, 그 밖의
  * 장(교육 안내문·커리큘럼·강의 소개)은 교육 내용이다.
  */
-const PART_LABEL = {
-  purchase: { quote: '견적서', statement: '거래명세서', order: '주문 내역', course: '강의 내용', content: '강의 내용', other: '참고 자료' },
-  edu: { quote: '교육 견적서', statement: '교육 견적서', order: '교육 견적서', course: '교육 내용', content: '교육 내용', event: '교육 내용', other: '교육 내용' },
-  trip: { event: '행사 안내문', course: '행사 안내문', content: '행사 일정', quote: '견적서', statement: '청구서', order: '예약 내역', other: '참고 자료' },
-  outside: { request: '요청 공문', event: '행사 안내문', course: '행사 안내문', content: '활동 자료', quote: '견적서', statement: '청구서', order: '예약 내역', other: '참고 자료' },
-};
+/** 읽기가 가린 파일 종류 → 첨부 목록의 문서 이름(레시피 attach_rules.yaml 의 parts). */
+const PART_LABEL = Object.fromEntries(KIND_ORDER.map((k) => [k, RECIPE.purposes[k].attach.parts]));
 
 /**
  * 첨부 목록 — 읽은 파일을 문서 종류로 묶는다. 교육이면 교육 견적서·교육 내용이 따로 한 줄씩이 된다(2026-10-07 사용자 지정).
@@ -632,62 +472,59 @@ export function attachBlock(attach) {
 }
 
 /**
- * 읽은 문서(input.yaml 의 gongmun 기록)로 갈래의 초안을 만든다. 화면의 칸이 이것을 들고, 사용자가 고친다.
- * @param {'purchase'|'edu'|'trip'} kind
+ * 칸의 처음 값 — 레시피 purpose.yaml 의 from 대로. document 는 읽은 값(읽기의 키가 칸의 key 와 같다), me 는 내 이름,
+ * 고르는 칸(choice)은 읽은 값이 없으면 options 의 첫째, 그 밖(write·setup·auto)은 빈 값이다.
+ */
+function startValue(f, rec, me) {
+  if (f.from === 'me') return me;
+  const v = f.from === 'document' ? rec[f.key] : null;
+  if (f.type === 'money') return Number.isFinite(v) ? v : null;
+  if (f.type === 'choice') return f.options.includes(v) ? v : f.options[0];
+  return v == null ? '' : String(v);
+}
+
+/**
+ * 갈래마다 칸끼리 정하는 것 — 레시피에서 from: auto 이거나, 비어 왔을 때 채우는 법을 주석에 적은 칸.
+ * 구매는 품목 표·견적일(reads)을 옮기고, 합계가 비면 공급가액+부가세·품목 금액의 합으로, 품목 요지가 비면 첫 품목으로 채운다.
+ * 교육은 교육비가 비면 공급가액+부가세로 채우고, 교육 구분(제목)을 교육장소·교육기관으로 정한다.
+ */
+const FILL = {
+  purchase(d, r, notes) {
+    d.items = (r.items || []).map((it) => ({
+      name: it.name || '', spec: it.spec || '', qty: it.qty ?? null, unit: it.unit || '', unitPrice: it.unitPrice ?? null, amount: it.amount ?? null,
+    }));
+    d.quoteDate = r.quoteDate || '';
+    const { total, note } = totalOf(r);
+    d.total = total;
+    if (note) notes.push(note);
+    d.gist = d.gist.trim() || gistOf(d.items);
+    d.summary = summaryOf(d.gist);
+  },
+  edu(d, r, notes) {
+    if (d.fee == null && Number.isFinite(r.supply) && Number.isFinite(r.vat)) d.fee = r.supply + r.vat;
+    if (d.fee == null) notes.push('교육비를 읽지 못했습니다 — 직접 적어 주세요');
+    d.mode = eduModeOf({ ...d, mode: '' });
+  },
+};
+
+/**
+ * 읽은 문서(레시피가 만든 읽기 작업 gongmun.<갈래>의 답)로 갈래의 초안을 만든다. 화면의 칸이 이것을 들고, 사용자가 고친다.
+ * 칸마다 어디서 오는지는 레시피 purpose.yaml 의 from 이다 — 문서에서 읽는 칸은 읽기의 키가 칸의 key 와 같다.
+ * @param {'purchase'|'edu'|'trip'|'outside'} kind
  * @param {object} rec 관문(src/input.js structure)을 지난 기록
  * @param {{me?: string, files?: string[], cut?: object|null}} [ctx] files 는 읽은 파일 이름 — 첨부 목록이 된다. cut 은 오린 견적서(attachWithCut)
  * @returns {{draft: object, notes: string[]}}
  */
 export function fromRecord(kind, rec, { me = '', files = [], cut = null } = {}) {
+  const k = FIELDS[kind] ? kind : 'purchase';
   const r = rec && typeof rec === 'object' ? rec : {};
   const notes = [];
-  const krw = !r.currency || r.currency === 'KRW';
-  if (!krw) notes.push(`${r.currency} 문서입니다 — 합계를 원화로 고쳐 주세요`);
-  const attach = attachWithCut(kind, r.parts, files, cut);
-  if (kind === 'edu') {
-    const fee = Number.isFinite(r.total) ? r.total : Number.isFinite(r.supply) && Number.isFinite(r.vat) ? r.supply + r.vat : null;
-    if (fee == null) notes.push('교육비를 읽지 못했습니다 — 직접 적어 주세요');
-    const draft = {
-      course: r.courseName || r.gist || '', provider: r.vendor || '', from: r.courseFrom || '', to: r.courseTo || '',
-      hours: r.courseHours || '', place: r.place || '', topics: r.topics || '', fee, currency: r.currency || 'KRW', attendees: me,
-      purpose: r.use || '', reason: '', account: '', attach,
-    };
-    return { draft: { ...draft, mode: eduModeOf(draft) }, notes };
-  }
-  if (kind === 'trip') {
-    // 출장 — 행사·회의 안내문·초청장에서 출장지·기간·목적(없으면 행사명)을, 교통·숙박 견적서에서 예상경비(total)를 읽는다. 출장자는 나.
-    return {
-      draft: {
-        place: r.tripPlace || '', from: r.tripFrom || '', to: r.tripTo || '', who: me, purpose: r.use || r.gist || '', reason: '',
-        cost: Number.isFinite(r.total) ? r.total : null, currency: r.currency || 'KRW', account: '', attach,
-      },
-      notes,
-    };
-  }
-  if (kind === 'outside') {
-    // 외부활동 — 요청 공문·초청장·위촉 요청 메일에서 요청 기관(vendor)·활동명(gist)·구분(activityType)·기간·시간·장소·내용·사례비(total)를 읽는다. 활동자는 나.
-    return {
-      draft: {
-        type: outsideTypeOf(r.activityType) || OUTSIDE_TYPES[0], org: r.vendor || '', subject: r.gist || '', from: r.actFrom || '', to: r.actTo || '',
-        hours: r.actHours || '', place: r.place || '', topics: r.topics || '', who: me, fee: Number.isFinite(r.total) ? r.total : null,
-        currency: r.currency || 'KRW', purpose: r.use || '', reason: '', attach,
-      },
-      notes,
-    };
-  }
-  const items = (r.items || []).map((it) => ({
-    name: it.name || '', spec: it.spec || '', qty: it.qty ?? null, unit: it.unit || '', unitPrice: it.unitPrice ?? null, amount: it.amount ?? null,
-  }));
-  const { total, note } = totalOf(r);
-  if (note) notes.push(note);
-  const gist = String(r.gist || '').trim() || gistOf(items);
-  return {
-    draft: {
-      gist, summary: summaryOf(gist), vendor: r.vendor || '', quoteDate: r.quoteDate || '',
-      items, total, currency: r.currency || 'KRW', use: r.use || '', reason: '', account: '', attach,
-    },
-    notes,
-  };
+  if (r.currency && r.currency !== 'KRW') notes.push(`${r.currency} 문서입니다 — 합계를 원화로 고쳐 주세요`);
+  const draft = Object.fromEntries(FIELDS[k].map((f) => [f.key, startValue(f, r, me)]));
+  draft.currency = r.currency || 'KRW';
+  draft.attach = attachWithCut(k, r.parts, files, cut);
+  FILL[k]?.(draft, r, notes);
+  return { draft, notes };
 }
 
 const blank = (v) => v == null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
@@ -714,8 +551,11 @@ export function blankDraft(kind, { me = '' } = {}) {
   return fromRecord(kind, {}, { me }).draft;
 }
 
-/** 초안의 합계(원). 구매는 total, 교육은 fee, 출장은 cost(예상경비). */
-export const amountOf = (kind, draft) => (kind === 'edu' ? draft?.fee : kind === 'trip' ? draft?.cost : kind === 'purchase' ? draft?.total : null);
+/** 초안의 합계(원) — 레시피 purpose.yaml 의 amount_field 칸. 구매는 total, 교육은 fee, 출장은 cost(예상경비), 외부활동은 없다. */
+export const amountOf = (kind, draft) => {
+  const key = RECIPE.purposes[kind]?.amount_field;
+  return key ? draft?.[key] : null;
+};
 
 /**
  * 한도를 넘었는가. 원화가 아니면 가리지 못한다(unknown) — 합계를 원화로 고치면 다시 본다.
@@ -729,7 +569,7 @@ export function overLimit(kind, draft) {
   return { over: amount > limit, unknown: false, limit, amount };
 }
 
-/* ------------------------------------------------------------ 채팅으로 사전 설정 채우기 */
+/* ------------------------------------------------------------ 채팅으로 공문 설정 채우기 */
 
 const TITLE_RE = /\s*(수석|책임|선임|원급|연구원|연구위원|위원|팀장|부장|본부장|소장|박사|PI|님)\.?$/i;
 const PERSON_RE = /^[가-힣]{2,4}$/;
@@ -740,7 +580,7 @@ const HEADER_RE = /^(no\.?|순번|과제명?|과제\s*이름|과제\s*번호|번
 const personOf = (s) => String(s ?? '').trim().replace(TITLE_RE, '').replace(TITLE_RE, '').trim();
 
 /**
- * 붙여 넣은 글에서 사전 설정 조각을 규칙으로 읽는다 — Claude 가 닿지 않을 때(input.yaml 의 gongmunSetup 과 같은 모양).
+ * 붙여 넣은 글에서 공문 설정 조각을 규칙으로 읽는다 — Claude 가 닿지 않을 때(레시피 registries/setup.yaml 의 gongmunSetup 과 같은 모양).
  * 읽는 꼴: 표를 복사한 줄(탭·| 로 나뉜 과제명·과제번호·책임자), "과제: …, 책임자 ○○○", "부서장 ○○○", "참조 ○○○, ○○○", "부서 …",
  * 그리고 과제 줄 뒤의 "내용: …"(연구목표·연구내용 — 사유를 만드는 근거)·"개요: …"(본문 첫 줄). 과제로 볼 근거(번호·책임자·"과제" 표시·
  * 표의 여러 칸)가 없는 글은 과제로 받지 않는다 — 인사말이 과제가 되면 안 된다.
@@ -802,16 +642,16 @@ export function parseSetupLocal(text) {
 }
 
 const keyOf = (s) => String(s ?? '').replace(/\s/g, '').toLowerCase();
-/** 사전 설정 칸의 과제 한 줄. */
+/** 공문 설정 칸의 과제 한 줄. */
 export const EMPTY_ROW = Object.freeze({ name: '', alias: '', code: '', lead: '', period: '', about: '', content: '', account: '' });
 /** 과제 없이 와도 지금 고른 과제 몫으로 넣는 칸 — [칸, 사람에게 부르는 이름]. */
 const CURRENT_KEYS = [['lead', '합의자'], ['alias', '과제 별명'], ['period', '연구기간'], ['content', '과제 내용']];
 
 /**
- * 채팅으로 받은 조각(input.yaml 의 gongmunSetup)을 사전 설정에 얹는다. 과제는 이름이나 번호가 같은 것을 고치고, 없으면 빈 줄에
- * 넣거나 더한다(다섯 개까지 — 넘치는 것은 skipped). 조각에 없는 칸은 그대로 둔다. 참조자는 조각의 목록으로 바꾼다.
+ * 채팅으로 받은 조각(레시피 registries/setup.yaml 의 gongmunSetup)을 공문 설정에 얹는다. 과제는 이름이나 번호가 같은 것을 고치고, 없으면 빈 줄에
+ * 넣거나 더한다(MAX_PROJECTS 개까지 — 넘치는 것은 skipped). 조각에 없는 칸은 그대로 둔다. 참조자는 조각의 목록으로 바꾼다.
  * 과제 없이 사람만 왔으면(patch.lead) 지금 고른 과제(current)의 합의자로 넣는다 — 고른 과제가 없으면 skipped 에 적는다.
- * @param {object[]} rows 사전 설정 칸의 과제 줄(이름을 아직 적지 않은 줄도 있다)
+ * @param {object[]} rows 공문 설정 칸의 과제 줄(이름을 아직 적지 않은 줄도 있다)
  * @param {{current?: string}} [opts] current 는 초안에서 고른 과제의 이름
  * @returns {{rows: object[], preset: object, done: string[], skipped: string[]}}
  */
@@ -859,9 +699,13 @@ const same = (a, b) => !!a && !!b && String(a).replace(/\s/g, '') === String(b).
  * 합의는 마지막 자리에 둘 수 없다(전자결재 결재선 화면의 제약 — 원본 appline.py) — 그래서 기안 → 합의 → 결재 순이다.
  * 과제책임자가 기안자 본인이면 합의는 뺀다. 본인이 아니면 언제나 합의자다 — 부서장이 과제책임자여도 합의에 넣고 그렇다고 적는다
  * (2026-10-08 사용자 지정: "과제 책임자가 본인이 아니면 과제 책임자 합의로 들어가야 함". 원본 rules.py 의 resolve_internal_agreement 는 부서장이면 뺐다).
- * @returns {{steps: {role:string, name:string, why?:string}[], refs: string[], notes: string[]}}
+ *
+ * 결재는 부서장(팀장)부터 위임전결의 전결권자까지 아래에서 위로 선다 — 마지막 결재자가 전결이다(delegationOf, 2026-10-08 사용자 지정
+ * "위임전결도 같이 입력"). 갈래(kind)를 주지 않으면 부서장 전결이다. 공문 설정에 이름이 없는 직책은 missing 에 남는다 — 화면이 채우라고 보인다.
+ * @param {{kind?: string, draft?: object, rank?: string}} [opts] rank 는 이 공문에서 고른 전결권자(비면 규정대로)
+ * @returns {{steps: {role:string, name:string, why?:string}[], refs: string[], notes: string[], missing: string[], delegation: object|null}}
  */
-export function approvalLine({ me = '', preset = {}, project = null } = {}) {
+export function approvalLine({ me = '', preset = {}, project = null, kind = '', draft = {}, rank = '' } = {}) {
   const p = normalizePreset(preset);
   const notes = [];
   const steps = [{ role: '기안', name: me || '나' }];
@@ -871,8 +715,134 @@ export function approvalLine({ me = '', preset = {}, project = null } = {}) {
     steps.push({ role: '합의', name: lead, why: '과제책임자' });
     if (same(lead, p.head)) notes.push('과제책임자가 부서장이라 합의와 결재가 같은 사람입니다');
   }
-  if (p.head) steps.push({ role: '결재', name: p.head, why: '부서장' });
-  return { steps, refs: p.refs.filter((n) => !steps.some((s) => same(s.name, n))), notes };
+  const delegation = kind ? delegationOf(kind, draft, { rank }) : null;
+  const missing = [];
+  for (const r of RANKS.slice(0, RANKS.indexOf(delegation?.rank || RANKS[0]) + 1)) {
+    const name = p[RANK_KEY[r]];
+    if (name) steps.push({ role: '결재', name, why: RANK_WHY[r] || r });
+    else missing.push(r);
+  }
+  return { steps, refs: p.refs.filter((n) => !steps.some((s) => same(s.name, n))), notes, missing, delegation };
+}
+
+/* ------------------------------------------------------------ 위임전결 */
+
+/** 전결권자의 직책 — 아래에서 위로(레시피 registries/delegation.yaml 의 ranks). */
+export const RANKS = [...RECIPE.delegation.ranks];
+/** 직책 → 공문 설정의 이름 칸. 팀장은 부서장 칸이다. */
+const RANK_KEY = { 팀장: 'head', 소장: 'director', 본부장: 'chief' };
+/** 결재선 화면에서 직책을 부르는 이름 — 팀장은 이 확장이 처음부터 '부서장'이라 불렀다. */
+export const RANK_WHY = { 팀장: '부서장' };
+
+/**
+ * 이 공문의 전결권자 — 레시피의 rule_key 가 가리키는 위임전결 규정(금액 구간·국내/해외 구분·고정)으로 정한다. rank 를 주면 그것이 이긴다(사용자가 고른 것).
+ * 금액 기준인데 금액을 모르면 맨 아래 구간으로 두고 unknown 으로 알린다.
+ * @returns {{rank:string, auto:string, overridden:boolean, rule:string, label:string, source:string, basis:string, unknown:boolean}|null}
+ */
+export function delegationOf(kind, draft = {}, { rank = '' } = {}) {
+  const p = RECIPE.purposes[kind];
+  const rule = p && RECIPE.delegation.rules[p.rule_key];
+  if (!rule) return null;
+  let auto = '';
+  let basis = '';
+  let unknown = false;
+  if (rule.basis === 'amount') {
+    const amount = moneyOf(draft?.[p.amount_field]);
+    unknown = amount == null;
+    auto = (unknown ? rule.steps[0] : rule.steps.find((s) => s.max == null || amount <= s.max)).approver;
+    basis = unknown ? '금액 모름' : won(amount);
+  } else if (rule.basis === 'division') {
+    const keys = Object.keys(rule.divisions);
+    basis = keys.includes(draft?.[rule.division_field]) ? draft[rule.division_field] : keys[0];
+    auto = rule.divisions[basis];
+  } else auto = rule.approver;
+  const chosen = RANKS.includes(rank) ? rank : auto;
+  return { rank: chosen, auto, overridden: chosen !== auto, rule: p.rule_key, label: rule.label, source: rule.source, basis, unknown };
+}
+
+/* ------------------------------------------------------------ 문서설정 */
+
+const DS_KEYS = ['retention', 'docNo', 'receiver', 'scope', 'emergency', 'approvingOpen', 'drm', 'tag'];
+/** 문서설정의 선택지 — 보존년한(코드 → 이름)·공개범위(이름 → 코드)·수신처(레시피 settings.yaml 의 options). */
+export const SETTING_OPTIONS = RECIPE.settings.options;
+
+/** 이 공문에서 바꾼 문서설정만 — 아는 칸·아는 값만 남긴다(패널이 초안에 담아 둔다). */
+export function settingPatch(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const out = {};
+  for (const k of DS_KEYS) {
+    if (!(k in r) || r[k] == null) continue;
+    if (['emergency', 'approvingOpen', 'drm'].includes(k)) out[k] = !!r[k];
+    else if (k === 'docNo') out[k] = String(r[k]).replace(/\D/g, '').slice(0, 8);
+    else out[k] = String(r[k]).trim().slice(0, 60);
+  }
+  if (out.retention && !(out.retention in SETTING_OPTIONS.retention)) delete out.retention;
+  if (out.scope && !(out.scope in SETTING_OPTIONS.scope)) delete out.scope;
+  if (out.receiver && !SETTING_OPTIONS.receiver.includes(out.receiver)) delete out.receiver;
+  return out;
+}
+
+/**
+ * 문서설정 — 레시피의 defaults < 갈래의 프로파일(purpose.yaml 의 document_setting) < 이 공문에서 바꾼 것(override). 문서번호(Doc No.)는
+ * 기안 팀 채번이다 — 공문 설정의 문서번호 부서, 비면 부서 이름으로 teams 표에서 찾는다(부서 칸에 '연구본부 …' 처럼 앞말이 붙어도 찾는다).
+ * @returns {{profile:string, retention:string, retentionText:string, docNo:string, docNoFrom:string, receiver:string, scope:string, scopeCode:string,
+ *   emergency:boolean, approvingOpen:boolean, drm:boolean, tag:string}}
+ */
+/**
+ * 공문 설정의 부서에서 팀 이름 — 레시피 settings.yaml 의 teams 표에 있는 팀('연구본부 수소전기추진연구팀' 처럼 앞말이 붙어도 찾는다), 없으면 부서 칸의 마지막 말.
+ * 문서설정의 Doc No. 찾기와, 결재선 조직도에서 이름이 같은 사람을 가르는 기준('이름[팀]' 의 팀)이 같이 쓴다.
+ */
+export function teamOf(preset = {}) {
+  const pre = normalizePreset(preset);
+  const known = Object.keys(RECIPE.settings.teams || {}).find((t) => keyOf(pre.dept).includes(keyOf(t)));
+  return known || pre.dept.trim().split(/\s+/).pop() || '';
+}
+
+/**
+ * 문서번호 코드(문서설정 Doc No.) 후보 — 레시피 settings.yaml 의 doc_no_options(문서설정 창 ddlDocNo 의 코드와 영문 팀 이름 전부, 2026-10-08 캡처)와
+ * teams(한글 팀 이름 → 코드)로 부서 칸의 글에 맞는 코드를 찾는다(2026-10-09 사용자 지정: "부서는 내 부서를 입력하면 되고 2개면 선택하라고").
+ * 코드가 적혀 있으면 그 코드가 목록에 있는지만 본다(set | unknown). 비어 있으면 부서로 찾는다 — 한글 팀 이름이 부서 글에 들어 있거나, 영문 이름이 부서 글에
+ * 들어 있거나(영문으로 적었을 때), 부서 글(넉 자 이상)이 영문 이름에 들어 있으면 후보다: one | many | none, 부서도 비면 empty.
+ * @returns {{state:'set'|'unknown'|'one'|'many'|'none'|'empty', code:string, name:string, matches:{code:string,name:string,team:string}[], all:{code:string,name:string,team:string}[]}}
+ */
+export function docNoCandidates(dept = '', docNo = '') {
+  const S = RECIPE.settings;
+  const koOf = Object.fromEntries(Object.entries(S.teams || {}).map(([ko, code]) => [String(code), ko]));
+  const all = Object.entries(S.doc_no_options || {}).map(([code, name]) => ({ code: String(code), name: String(name), team: koOf[String(code)] || '' }));
+  const code = String(docNo || '').trim();
+  if (code) {
+    const hit = all.find((o) => o.code === code);
+    return { state: hit ? 'set' : 'unknown', code, name: hit?.name || '', matches: hit ? [hit] : [], all };
+  }
+  const key = keyOf(dept);
+  if (!key) return { state: 'empty', code: '', name: '', matches: [], all };
+  const matches = all.filter((o) => (o.team && key.includes(keyOf(o.team))) || key.includes(keyOf(o.name)) || (key.length >= 4 && keyOf(o.name).includes(key)));
+  const one = matches.length === 1 ? matches[0] : null;
+  return { state: one ? 'one' : matches.length ? 'many' : 'none', code: one?.code || '', name: one?.name || '', matches, all };
+}
+
+export function docSettingOf(kind, preset = {}, override = {}) {
+  const S = RECIPE.settings;
+  const profile = RECIPE.purposes[kind]?.document_setting || Object.keys(S.profiles)[0];
+  const base = { ...S.defaults, ...(S.profiles[profile] || {}) };
+  const pre = normalizePreset(preset);
+  const team = Object.keys(S.teams || {}).find((t) => keyOf(pre.dept).includes(keyOf(t)));
+  const auto = base.doc_no === 'team' ? (pre.docNo || (team ? String(S.teams[team]) : '')) : String(base.doc_no || '');
+  const o = settingPatch(override);
+  const out = {
+    profile, retention: String(base.retention), docNo: auto, receiver: base.receiver, scope: base.scope,
+    emergency: !!base.emergency, approvingOpen: !!base.approving_open, drm: !!base.drm, tag: String(base.tag || ''), ...o,
+  };
+  out.docNoFrom = o.docNo ? '이 공문' : pre.docNo ? '공문 설정' : team ? `부서(${team})` : '';
+  out.retentionText = S.options.retention[out.retention] || out.retention;
+  out.scopeCode = S.options.scope[out.scope] || '';
+  return out;
+}
+
+/** 문서설정을 한 줄로 — 보존 10년 · Doc No. 8100 · 수신 내부결재 · 공개 결재선 */
+export function settingText(s) {
+  const flags = [s.emergency ? '긴급' : '', s.approvingOpen ? '진행공개' : '', s.drm ? 'DRM' : ''].filter(Boolean);
+  return [`보존 ${s.retentionText}`, `Doc No. ${s.docNo || '없음'}`, `수신 ${s.receiver}`, `공개 ${s.scope}`, ...flags].join(' · ');
 }
 
 /** 결재선 자리를 사람에게 부르는 이름. 과제책임자는 '합의자'로 넣는다(2026-10-07 사용자 지정). 전자결재 결재선 화면의 단추는 결재·합의·참조다. */
@@ -893,7 +863,31 @@ const span = (from, to) => {
   return `${dotDate(from)} ~ ${dotDate(to)} (${days}일)`;
 };
 
-/** 틀에 넣을 값. 갈래마다 다른 이름은 VARS 와 같다. */
+/** 틀 자리의 꼴 — 레시피 body_spec.yaml 의 show. period·qty 는 두 칸([시작, 끝]·[수량, 단위])을 받는다. */
+const SHOW = {
+  text: (v) => (v == null ? '' : String(v)),
+  won: (v) => won(moneyOf(v)),
+  date: (v) => dotDate(v),
+  period: (from, to) => span(from, to),
+  count: (v) => (Array.isArray(v) && v.length ? String(v.length) : ''),
+  qty: (qty, unit) => (qty != null && qty !== '' ? `${Number(qty).toLocaleString('ko-KR')}${unit || ''}` : ''),
+};
+
+/** 틀 자리 하나의 값 — row 는 초안(목록 자리면 그 줄)이다. 비었고 or: me 이면 내 이름. */
+const slotValue = (slot, row, me) => {
+  const out = SHOW[slot.show || 'text'](...[].concat(slot.from).map((k) => row?.[k]));
+  return !String(out).trim() && slot.or === 'me' ? me : out;
+};
+
+/** 틀의 목록({{#이름}} … {{/이름}})마다 줄의 값 — 레시피 body_spec.yaml 의 lists. */
+const listsFor = (kind, draft = {}, me = '') => Object.fromEntries(Object.entries((RECIPE.purposes[kind] || RECIPE.purposes.purchase).lists)
+  .map(([name, l]) => [name, (Array.isArray(draft?.[l.from]) ? draft[l.from] : [])
+    .map((row) => Object.fromEntries(Object.entries(l.vars).map(([n, slot]) => [n, slotValue(slot, row, me)])))]));
+
+/**
+ * 틀에 넣을 값. 공통 자리(부서·과제·계정·첨부 — 레시피 registries/vars.yaml)는 여기서 채우고, 갈래의 자리는 레시피 body_spec.yaml 의 vars
+ * (어느 칸을 어떤 꼴로)대로 채운다.
+ */
 export function varsFor(kind, draft = {}, { me = '', preset = {}, project = null, today = '' } = {}) {
   const p = normalizePreset(preset);
   const name = project?.name || '';
@@ -905,38 +899,11 @@ export function varsFor(kind, draft = {}, { me = '', preset = {}, project = null
     오늘: dotDate(today),
     첨부: attachBlock(draft.attach?.length ? draft.attach : attachList(kind)),
   };
-  if (kind === 'purchase') {
-    Object.assign(vars, {
-      품목요지: draft.gist || '', 요약: draft.summary || '', 업체: draft.vendor || '', 견적일: dotDate(draft.quoteDate),
-      합계: won(moneyOf(draft.total)), 용도: draft.use || '', 구매사유: draft.reason || '', 품목수: String(draft.items?.length || ''),
-    });
-  } else if (kind === 'edu') {
-    Object.assign(vars, {
-      교육구분: eduModeOf(draft),
-      교육명: draft.course || '', 교육기관: draft.provider || '', 교육기간: span(draft.from, draft.to), 교육시간: draft.hours || '',
-      교육장소: draft.place || '', 교육내용: draft.topics || '', 참석자: draft.attendees || me, 교육비: won(moneyOf(draft.fee)),
-      교육목적: draft.purpose || '', 교육사유: draft.reason || '',
-    });
-  } else if (kind === 'outside') {
-    Object.assign(vars, {
-      활동구분: draft.type || '', 요청기관: draft.org || '', 활동명: draft.subject || '', 활동기간: span(draft.from, draft.to), 활동시간: draft.hours || '',
-      활동장소: draft.place || '', 활동내용: draft.topics || '', 활동자: draft.who || me, 사례비: won(moneyOf(draft.fee)),
-      활동목적: draft.purpose || '', 신청사유: draft.reason || '',
-    });
-  } else {
-    Object.assign(vars, {
-      출장지: draft.place || '', 출장기간: span(draft.from, draft.to), 출장자: draft.who || me, 출장목적: draft.purpose || '',
-      출장사유: draft.reason || '', 예상경비: won(moneyOf(draft.cost)),
-    });
-  }
+  // 교육 구분(제목)은 칸이 비었거나 예전 초안이어도 교육장소·교육기관으로 정한다(eduModeOf — 고른 것이 먼저).
+  const d = kind === 'edu' ? { ...draft, mode: eduModeOf(draft) } : draft;
+  for (const [name, slot] of Object.entries((RECIPE.purposes[kind] || RECIPE.purposes.purchase).vars)) vars[name] = slotValue(slot, d, me);
   return vars;
 }
-
-/** 품목 줄 — 틀의 {{#품목}} 안에서 쓴다. */
-const itemRows = (items = []) => items.map((it) => ({
-  품목명: it.name || '', 사양: it.spec || '', 수량: qtyText(it), 단위: it.unit || '',
-  단가: won(it.unitPrice), 금액: won(it.amount),
-}));
 
 /**
  * 제목과 본문을 만든다. 비어 있는 값은 [이름] 으로 남고 missing 에 적힌다.
@@ -944,7 +911,7 @@ const itemRows = (items = []) => items.map((it) => ({
  */
 export function compose(kind, draft, ctx = {}, tpl = templateOf(kind, null)) {
   const vars = varsFor(kind, draft, ctx);
-  const lists = { 품목: itemRows(draft?.items) };
+  const lists = listsFor(kind, draft, ctx.me);
   const title = fillTemplate(tpl.title, vars, lists);
   const body = fillTemplate(tpl.body, vars, lists);
   return { title: title.text.trim(), body: body.text, form: tpl.form, missing: [...new Set([...title.missing, ...body.missing])] };
@@ -954,75 +921,55 @@ export function compose(kind, draft, ctx = {}, tpl = templateOf(kind, null)) {
  * 올리기 전에 채워야 할 것. 화면의 "남은 것" 줄에 적는다 — 막지는 않는다(본문은 사용자가 고칠 수 있다). 한도는 따로 막는다.
  * @returns {string[]}
  */
-export function needs(kind, draft, { preset = {}, project = null, projects = [] } = {}) {
+export function needs(kind, draft, { preset = {}, project = null, projects = [], rank = '', setting = {} } = {}) {
   const out = [];
   if (!projects.length) out.push('과제 등록(R&D 탭)');
   else if (!project) out.push('과제 선택');
   else {
     if (!String(project.lead || '').trim()) out.push('합의자(과제책임자)');
-    // 교육·출장 제목은 과제 별명으로 쓴다 — 비면 과제명이 그대로 들어가 길어진다(막지는 않는다). 구매·외부활동 제목에는 별명이 없다.
-    if (['edu', 'trip'].includes(kind) && !String(project.alias || '').trim()) out.push('과제 별명(사전 설정 — 제목)');
+    // 제목 틀에 {과제별명} 이 있는 갈래(교육·출장)는 과제 별명으로 쓴다 — 비면 과제명이 그대로 들어가 길어진다(막지는 않는다).
+    if (DEFAULT_TEMPLATES[kind]?.title.includes('{과제별명}') && !String(project.alias || '').trim()) out.push('과제 별명(공문 설정 — 제목)');
   }
-  if (!normalizePreset(preset).head) out.push('부서장(사전 설정)');
-  if (!normalizePreset(preset).dept) out.push('부서(사전 설정)');
+  if (!normalizePreset(preset).head) out.push('부서장(공문 설정)');
+  if (!normalizePreset(preset).dept) out.push('부서(공문 설정)');
+  // 전결권자가 부서장보다 위면(소장·본부장) 그 이름도 있어야 결재선을 세운다. 부서 이름으로 문서번호 부서를 찾지 못하면 적어 달라고 한다.
+  for (const r of approvalLine({ preset, kind, draft, rank }).missing) if (r !== RANKS[0]) out.push(`${r}(공문 설정 — 위임전결)`);
+  if (normalizePreset(preset).dept && !docSettingOf(kind, preset, setting).docNo) out.push('문서번호 부서(공문 설정)');
+  // 꼭 채울 칸 — 레시피 purpose.yaml 에 need 를 적은 칸이 비면 그 이름으로. 꼭 드는 첨부(교육 — 교육 견적서·교육 내용)가 빠졌으면 그것도.
   const d = draft || {};
-  if (kind === 'purchase') {
-    if (!String(d.gist || '').trim()) out.push('품목');
-    if (moneyOf(d.total) == null) out.push('합계');
-    if (!String(d.use || '').trim()) out.push('용도');
-    if (!String(d.reason || '').trim()) out.push('구매사유');
-  } else if (kind === 'edu') {
-    if (!String(d.course || '').trim()) out.push('교육명');
-    if (!d.from) out.push('교육기간');
-    if (moneyOf(d.fee) == null) out.push('교육비');
-    if (!String(d.purpose || '').trim()) out.push('교육목적');
-    if (!String(d.reason || '').trim()) out.push('교육사유');
-    for (const doc of missingDocs(kind, d.attach)) out.push(`${doc.label}(첨부)`);
-  } else if (kind === 'trip') {
-    if (!String(d.place || '').trim()) out.push('출장지');
-    if (!d.from) out.push('출장기간');
-    if (moneyOf(d.cost) == null) out.push('예상경비');
-    if (!String(d.purpose || '').trim()) out.push('출장목적');
-    if (!String(d.reason || '').trim()) out.push('출장사유');
-  } else if (kind === 'outside') {
-    if (!String(d.org || '').trim()) out.push('요청 기관');
-    if (!String(d.subject || '').trim()) out.push('활동명');
-    if (!d.from) out.push('활동기간');
-    if (!String(d.place || '').trim()) out.push('활동장소');
-    if (!String(d.purpose || '').trim()) out.push('활동목적');
-    if (!String(d.reason || '').trim()) out.push('신청사유');
+  for (const f of FIELDS[kind] || []) {
+    if (f.need && (f.type === 'money' ? moneyOf(d[f.key]) == null : !String(d[f.key] ?? '').trim())) out.push(f.need);
   }
+  for (const doc of missingDocs(kind, d.attach)) out.push(`${doc.label}(첨부)`);
   return out;
 }
 
 /* ------------------------------------------------------------ 과제 내용으로 사유 쓰기 */
 
-/** 사유 칸과 용도(교육목적·출장목적·활동목적) 칸 — 갈래마다 이름이 다르다. */
-export const REASON_KEYS = {
-  purchase: { reason: 'reason', use: 'use' }, edu: { reason: 'reason', use: 'purpose' }, trip: { reason: 'reason', use: 'purpose' }, outside: { reason: 'reason', use: 'purpose' },
-};
-/** 사유 칸을 사람에게 부르는 이름. */
-export const REASON_LABEL = { purchase: '구매사유', edu: '교육사유', trip: '출장사유', outside: '신청사유' };
+/**
+ * 사유 쓰기가 쓰는 칸 — 레시피 purpose.yaml 에서 write 가 있는 칸이다. 사유(from: write)는 하나이고, 용도(교육목적·출장목적·활동목적)는 문서에서
+ * 읽은 칸을 다듬어 쓴다. 사유 쓰기가 없는 갈래(write 가 있는 칸이 없다)는 빠진다.
+ */
+const WRITES = Object.fromEntries(KIND_ORDER.map((k) => [k, FIELDS[k].filter((f) => f.write)]).filter(([, list]) => list.length));
+/** 사유 칸과 용도 칸의 key — 갈래마다 이름이 다르다(구매는 use, 교육·출장·외부활동은 purpose). */
+export const REASON_KEYS = Object.fromEntries(Object.entries(WRITES).map(([k, list]) => [k, {
+  reason: list.find((f) => f.from === 'write').key, use: list.find((f) => f.from !== 'write')?.key,
+}]));
+/** 사유 칸을 사람에게 부르는 이름(그 칸의 label). */
+export const REASON_LABEL = Object.fromEntries(Object.entries(WRITES).map(([k, list]) => [k, list.find((f) => f.from === 'write').label]));
 
 /**
- * 사유를 쓰라고 Claude 에 줄 글(input.yaml 의 gongmunReason). 과제 내용이 근거이고(R&D 탭의 과제면 연구 내용 — rndProjects), 품의할 것은 품목·교육·출장이다.
- * 금액·업체는 넣지 않는다 — 사유에 쓰지 말라는 것을 굳이 보여 주지 않는다.
+ * 사유를 쓰라고 Claude 에 줄 글(레시피가 만든 작업 gongmunReason.<갈래>의 입력). 과제 내용이 근거이고(R&D 탭의 과제면 연구 내용 — rndProjects),
+ * 품의할 것은 레시피 purpose.yaml 의 writing.context(틀과 같은 꼴 — 금액·업체는 넣지 않는다)를 초안으로 채운 줄이다.
  * ask 는 초안의 에이전트 칸에 사용자가 적은 말이다("사유를 시험 장비 쪽으로 다시") — 있으면 지금 적힌 사유와 함께 넘겨 그 말대로 고쳐 쓰게 한다.
  */
 export function reasonInput(kind, draft = {}, project = null, { ask = '' } = {}) {
   const p = project || {};
-  const keys = REASON_KEYS[kind] || REASON_KEYS.purchase;
+  const k = REASON_KEYS[kind] ? kind : 'purchase';
+  const keys = REASON_KEYS[k];
   const said = String(ask || '').trim().slice(0, 1000);
-  const what = kind === 'edu'
-    ? [`교육명: ${draft.course || '?'}`, draft.provider ? `교육기관: ${draft.provider}` : '', draft.topics ? `교육 내용: ${draft.topics}` : '',
-      draft.purpose ? `지금 적힌 교육목적: ${draft.purpose}` : '']
-    : kind === 'trip'
-      ? [`출장지: ${draft.place || '?'}`, draft.from ? `출장기간: ${span(draft.from, draft.to)}` : '', draft.purpose ? `지금 적힌 출장목적: ${draft.purpose}` : '']
-      : kind === 'outside'
-        ? [`외부활동: ${draft.type || '?'} — ${draft.subject || '?'}`, draft.org ? `요청 기관: ${draft.org}` : '', draft.from ? `활동기간: ${span(draft.from, draft.to)}` : '',
-          draft.topics ? `활동 내용: ${draft.topics}` : '', draft.purpose ? `지금 적힌 활동목적: ${draft.purpose}` : '']
-        : [...(draft.items || []).map((it) => `품목: ${it.name}${it.spec ? ` (${it.spec})` : ''}${it.qty != null ? ` × ${it.qty}${it.unit || ''}` : ''}`),
-          !draft.items?.length && draft.gist ? `품목: ${draft.gist}` : '', draft.use ? `지금 적힌 용도: ${draft.use}` : ''];
+  const context = RECIPE.purposes[k].writing.context;
+  const what = fillTemplate(context, varsFor(k, draft, { project }), listsFor(k, draft)).text.split('\n');
   return [
     `품의 종류: ${KINDS[kind]?.title || kind}`,
     `과제명: ${p.name || '(없음)'}`,
@@ -1031,27 +978,27 @@ export function reasonInput(kind, draft = {}, project = null, { ask = '' } = {})
     `과제 내용${p.rnd ? '(R&D 탭의 연구 내용 — 연구개발 계획·진행 기록)' : ''}:\n<<<\n${p.content || '(없음)'}\n>>>`,
     '',
     '품의할 것:',
-    ...what.filter(Boolean),
+    ...what.filter((l) => l.trim()),
     ...(said ? [
-      draft[keys.reason] ? `지금 적힌 ${REASON_LABEL[kind] || '구매사유'}: ${draft[keys.reason]}` : '',
+      draft[keys.reason] ? `지금 적힌 ${REASON_LABEL[k]}: ${draft[keys.reason]}` : '',
       `사용자의 말:\n<<<\n${said}\n>>>`,
     ] : []),
   ].filter((l) => l !== '').join('\n');
 }
 
 /**
- * 써 온 사유·용도를 초안에 넣는다. 사유는 넣고(누른 사람이 원한 것이다), 용도(교육목적)는 사용자가 고치지 않았을 때만 바꾼다.
- * 에이전트 칸에 적은 말로 쓴 것(asked)이면 용도도 넣는다 — 고쳐 달라고 한 사람이 원한 것이다.
- * @param {{reason: string, use?: string|null}} data 관문을 지난 답
+ * 써 온 사유·용도를 초안에 넣는다 — 답의 키는 칸의 key 다(레시피 purpose.yaml 에서 write 가 있는 칸). 사유(from: write)는 넣고(누른 사람이 원한 것이다),
+ * 문서에서 읽은 칸(용도·교육목적…)은 사용자가 고치지 않았을 때만 바꾼다. 에이전트 칸에 적은 말로 쓴 것(asked)이면 그 칸도 넣는다 — 고쳐 달라고 한 사람이 원한 것이다.
+ * @param {object} data 관문을 지난 답(gongmunReason.<갈래>)
  * @param {{touched?: string[], asked?: boolean}} [opts] touched 는 사용자가 고친 칸
  */
 export function applyReason(kind, draft, data, { touched = [], asked = false } = {}) {
-  const keys = REASON_KEYS[kind];
-  if (!keys) return { ...draft };
   const out = { ...draft };
-  if (String(data?.reason || '').trim()) out[keys.reason] = String(data.reason).trim();
-  const kept = !asked && touched.includes(keys.use) && String(draft?.[keys.use] || '').trim();
-  if (String(data?.use || '').trim() && !kept) out[keys.use] = String(data.use).trim();
+  for (const f of WRITES[kind] || []) {
+    const value = String(data?.[f.key] || '').trim();
+    const kept = f.from !== 'write' && !asked && touched.includes(f.key) && String(draft?.[f.key] || '').trim();
+    if (value && !kept) out[f.key] = value;
+  }
   return out;
 }
 
@@ -1060,17 +1007,63 @@ export function applyReason(kind, draft, data, { touched = [], asked = false } =
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 /**
- * 본문을 편집기(DEXT5)에 붙여 넣을 HTML 로. 줄마다 문단이고, 앞의 빈칸은 &nbsp; 로 지킨다(들여쓰기가 공문의 꼴이다).
- * '아 래' 줄은 가운데에 둔다(원본 body.py 의 _CENTER_JS 와 같은 판정).
+ * 본문을 편집기(DEXT5)에 넣을 HTML 로. 줄마다 <div> 이고 앞의 빈칸은 &nbsp; 로 지킨다(들여쓰기가 공문의 꼴이다). 빈 줄은 <div><br></div>.
+ * '아 래' 줄은 가운데에 둔다(원본 body.py 의 _CENTER_JS 와 같은 판정). 꼴은 ApprovalInPrinciple fieldfill.py 의 _plain_richtext_html 과 같다 —
+ * <control>_SetHTMLBody 로 넣어 임시저장 뒤에도 그대로 남은 꼴이다(references/realeanet_dext5.md).
  */
 export function bodyHtml(body) {
   const center = /(^|[\s\-─–—])아\s*래([\s\-─–—]|$)/;
   return String(body ?? '').split('\n').map((line) => {
     const lead = line.match(/^ */)[0].length;
-    const inner = line.trim() ? `${'&nbsp;'.repeat(lead)}${esc(line.slice(lead))}` : '&nbsp;';
-    const style = center.test(line) ? 'margin:0;text-align:center' : 'margin:0';
-    return `<p style="${style}">${inner}</p>`;
+    if (!line.trim()) return '<div><br></div>';
+    const inner = `${'&nbsp;'.repeat(lead)}${esc(line.slice(lead))}`;
+    return center.test(line) ? `<div style="text-align:center;">${inner}</div>` : `<div>${inner}</div>`;
   }).join('');
+}
+
+/**
+ * 전자결재에 넣을 글 — 긴 줄표(—·–)는 '-' 로 바꾼다. 저장할 때 "@Resources.Message.EncodingError" 창이 뜬다(ApprovalInPrinciple 실측,
+ * U+2014 — 저장은 되지만 사용자를 멈춰 세운다). 사유를 쓰는 Claude 가 줄표를 자주 쓴다.
+ */
+export const eclassText = (s) => String(s ?? '').replace(/[–—―]/g, '-');
+
+/** 제목의 길이 한도 — 전자결재가 99자에서 자른다(ApprovalInPrinciple 실측). 레시피 fieldmap 의 title.max. */
+export const TITLE_MAX = 99;
+
+/**
+ * 차수(년차) — R&D 탭 과제면 오늘이 든 차년도(1차년도 = 1, 단년도 과제도 1). 공문 설정의 과제만 고른 것이면 모른다(빈 글 — 그때는
+ * 새 공문 창의 과제 목록이 알려 주는 차수를 쓴다, src/gmwrite.js).
+ */
+export const degreeOf = (project) => (project?.rnd?.year > 0 ? String(project.rnd.year) : '');
+
+/**
+ * 새 공문 창에 쓸 것 — src/gmwrite.js 가 이것만 보고 쓴다. 폼의 칸 지도(레시피 fieldmap)·값·문서설정·결재선을 한데 묶는다.
+ * 레시피에 칸 지도가 없는 양식(양식 ID 를 직접 적은 것)은 fields 가 비어 있다 — 창을 열기만 한다.
+ * @param {{title:string, body:string, draft:object, form?:string, setting?:object, rank?:string}} doc 화면의 제목·본문(직접 고친 것이면 그 글)과 초안
+ * @param {{me?:string, preset?:object, project?:object|null}} ctx
+ */
+export function writePlan(kind, { title = '', body = '', draft = {}, form = DEFAULT_FORM, setting = {}, rank = '' } = {}, ctx = {}) {
+  const fm = RECIPE.forms[form] || null;
+  const project = ctx.project || null;
+  const line = approvalLine({ ...ctx, kind, draft, rank });
+  const text = eclassText(body);
+  return {
+    kind, form: fm ? fm.id : form, url: draftUrl(form), known: !!fm,
+    anchor: fm?.anchor || '', fields: fm?.fields || {},
+    values: {
+      title: eclassText(title).replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX), body: text, html: bodyHtml(text),
+      recipient: '', reference: '', degree: degreeOf(project),
+      job: { name: project?.name || '', code: project?.code || '' },
+    },
+    setting: docSettingOf(kind, ctx.preset, setting),
+    line: {
+      approvers: line.steps.filter((s) => s.role === '결재').map((s) => s.name),
+      agree: line.steps.filter((s) => s.role === '합의').map((s) => s.name),
+      refs: line.refs, missing: line.missing, rank: line.delegation?.rank || RANKS[0],
+      // 조직도에 이름이 같은 사람이 여럿이면 이 팀('이름[팀]')인 사람 하나만 고른다(2026-10-09 실측 — 참조자 한 명이 네 팀에 있었다).
+      team: teamOf(ctx.preset),
+    },
+  };
 }
 
 /**
@@ -1085,10 +1078,15 @@ export function draftUrl(formId = DEFAULT_FORM) {
   return `${ORIGIN}/RealEANET/loginbyname.aspx?ReturnUrl=${encodeURIComponent(doc)}`;
 }
 
+/** 누구의 문서인가 — 레시피 attach_rules.yaml 의 who 칸(구매처·교육기관·출장지·요청 기관)의 값. 첨부 파일 이름과 읽은 문서의 머리에 붙는다. */
+export const whoOf = (kind, draft) => String(draft?.[(RECIPE.purposes[kind] || RECIPE.purposes.purchase).attach.who] || '').trim();
+
+/** 읽은 문서의 종류(docType)를 화면이 부르는 이름 — 레시피 registries/reading.yaml 의 docType names. */
+export const DOC_NAMES = { ...RECIPE.docNames };
+
 /** 첨부로 저장할 파일 이름 — 견적서_업체_2026-10-07.pdf. label 은 첨부 목록의 문서 이름(교육 견적서·교육 내용 …). */
 export function attachName(kind, draft, today, label = '') {
-  const who = String((kind === 'edu' ? draft?.provider : kind === 'trip' ? draft?.place : kind === 'outside' ? draft?.org : draft?.vendor) || '')
-    .replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 30);
+  const who = whoOf(kind, draft).replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 30);
   const doc = (label || KINDS[kind]?.doc || '첨부').replace(/[\\/:*?"<>|\s]+/g, '');
   return `${doc}${who ? `_${who}` : ''}_${today || ''}.pdf`.replace(/_\.pdf$/, '.pdf');
 }

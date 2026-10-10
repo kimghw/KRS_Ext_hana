@@ -1,0 +1,36 @@
+# 위임전결 — 품의 목적(rule_key)마다 누가 전결하는가. 레시피의 purpose.yaml 이 rule_key 로 이 표를 가리킨다.
+#
+# 원본: QI-01K 위임전결기준 Rev164(2026-06-22) 45. 수소전기추진연구팀 — krs-web-agents·ApprovalInPrinciple 의 ea_rules·delegation 과 같은 근거다.
+# 전결권자(approver)는 직책이다. 결재선은 부서장(팀장)부터 전결권자까지 아래에서 위로 서고, 마지막이 전결이다(ranks 의 차례).
+# 직책의 실명은 공개 저장소에 두지 않는다 — 패널의 공문 설정(부서장·소장·본부장)에 적는다.
+#
+# basis: amount   — 금액(원, VAT 포함) 구간. steps 를 위에서 아래로 보아 처음 맞는 줄. max 는 그 금액 이하, null 은 끝없음.
+#        division — 구분(국내·해외)마다 전결권자. 구분은 초안의 칸(division_field)에서 읽는다.
+#        none     — 금액과 무관하게 한 사람.
+# source 가 없는 줄은 생성기가 막는다 — 규정에서 찾지 못한 값을 지어 넣지 않는다.
+
+ranks: [팀장, 소장, 본부장]
+
+rules:
+  연구비집행:
+    label: 국가R&D 연구비 집행
+    basis: amount
+    steps:
+      - { max: 20000000, approver: 팀장 }
+      - { max: null, approver: 소장 }
+    source: "QI-01K Rev164 45절 연구수행 — 국가R&D 연구비 집행 : 2천만원 이하 팀장 · 2천만원 초과 소장"
+
+  출장:
+    label: 출장
+    basis: division
+    division_field: division
+    divisions:
+      국내: 팀장
+      해외: 본부장
+    source: "구본 ea_rules.yaml 출장(국내 팀장 · 해외 본부장, 확정) — krs-web-agents ea_approval 규정 키 출장"
+
+  외부활동:
+    label: 외부활동 허가
+    basis: none
+    approver: 팀장
+    source: "QI-01K 45절에 행 없음 — 부서장 결재(이 확장의 기존 결재선, 2026-10-08). 규정 행을 찾으면 여기를 고친다"

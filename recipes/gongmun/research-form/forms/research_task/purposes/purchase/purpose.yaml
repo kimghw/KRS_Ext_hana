@@ -1,0 +1,149 @@
+# 구매 품의 — 부서 구매(100만원 이하, 부가세 포함 합계). 원본: krs-web-agents research_form/purposes/purchase
+#
+# 이 파일의 값 가운데 read·write·rules·example·context 는 그대로 Claude 에게 가는 지시문이다(인라인 프롬프트). # 주석은 사람만 본다.
+# 고친 뒤 `npm run gen` 을 돌리면 확장이 새 지시문으로 읽는다. Claude 가 받는 지시문 전문은 `node tools/gen-gongmun.mjs --prompt purchase`(사유 쓰기는 `--prompt purchase reason`).
+# 모든 갈래에 같이 가는 읽기 규칙(문서 종류·첨부 파일 종류·한 줄 요약)은 registries/reading.yaml 에 있다.
+purpose_id: purchase
+label: 구매
+title: 구매품의
+rule_key: 연구비집행         # registries/delegation.yaml — 과제 예산으로 사는 것이라 연구비 집행이다
+amount_field: total          # 위임전결의 기준 금액을 읽는 초안 칸
+document_setting: 연구품의    # registries/settings.yaml 의 프로파일
+# 합계 한도(원) — 넘으면 본문을 만들지 않는다. 그보다 큰 구매는 결재선·첨부(500만원 이상 비교견적서)가 달라 이 틀로 올리지 않는다(2026-10-07 사용자 지정).
+limit: 1000000
+account: 연구활동비(연구실운용비)   # 계정의 기본값 — 과제에 계정을 적어 두면 그것이 이긴다
+
+# 문서 읽기 — docs 는 이 갈래에 넣는 문서(지시문 첫머리와 '품의 종류' 줄에 들어간다), rules 는 키 하나로 말할 수 없는 이 갈래만의 규칙.
+reading:
+  docs: 견적서·거래명세서·쇼핑몰 주문 화면
+  rules:
+    # 2026-10-08 사용자 지정: "공문에는 견적서 랑,, 강의 내용도 첨부파일로"
+    - 구매라도 강의(온라인 강의·교육 상품)를 사는 화면이면 parts 에서 강의 소개·커리큘럼·수업 목록이 든 장은 content 입니다 — 오린 견적서와 함께 강의 내용으로 첨부합니다. 가격·결제 칸만 있는 장은 order 입니다.
+
+# 견적서 오리기(2026-10-08 사용자 지정: "데이터를 넣어주면 견적서 부분을 추출 … 가격부분과 주변 내용을 캡쳐") — 넣은 그림이 견적서 양식이 아니라
+# 쇼핑몰 화면 캡처이면 가격과 그 둘레만 오려(src/quotecut.js) 견적서 한 장으로 첨부하고, 오려 낸 화면 장들은 첨부에서 뺀다.
+# 이 블록이 있으면 읽기에 quoteArea(오릴 칸 — 그림마다 % 좌표, registries/reading.yaml 의 quote_area) 키가 더해진다. 지우면 이 갈래는 오리지 않는다.
+#   when  오리는 때 · keep  오린 칸에 꼭 들어갈 것(견적서의 필수 내용) · drop  넣지 않을 것 · read  그 밖에 칸을 잡는 법
+quote_crop:
+  when: 첨부한 그림이 견적서·거래명세서 양식이 아니라 쇼핑몰 상품·장바구니·주문 화면처럼 가격이 화면 일부에만 있는 캡처일 때
+  keep: [상품명, 모델·옵션, 수량, 단가, 할인, 배송비, 합계, 판매자]
+  drop: [추천 상품, 광고, 리뷰, 상품 상세 설명, 메뉴]
+  read: 가격 글자가 잘리지 않게 넉넉히 잡습니다. 그 칸이 두 장에 걸쳐 있으면 장마다 한 줄씩 위에서 아래 차례로 적습니다.
+
+# 초안의 칸 — 화면이 이 차례로 그리고, 칸마다 값이 어디서 오는지 적는다. (다른 갈래의 purpose.yaml 도 이 꼴이다)
+#   key     초안의 이름 — 코드·틀(body_spec.yaml 의 vars)이 이 이름으로 가리킨다. 바꾸면 그쪽도 고친다(생성기가 짚는다)
+#   label   화면에 보이는 이름
+#   type    text(글, 기본) · money(원 — 숫자만, 예: 989000) · date(YYYY-MM-DD, 예: 2026-10-01) · choice(options 가운데 하나)
+#   from    document  넣은 문서에서 읽는다 — read 가 Claude 에게 가는 지시문이고, example 이 값의 모양이다
+#           write     문서에서 읽지 않는다 — 과제를 고르면 과제 내용으로 Claude 가 쓴다. write 가 그 지시문이다(공통 부분은 registries/writing.yaml)
+#           me        내 이름으로 시작한다
+#           user      사용자가 고른다 — 처음 값은 options 의 첫째
+#           auto      코드가 다른 칸으로 정한다(무엇으로 정하는지는 그 줄의 주석)
+#           setup     비워 두면 과제·공문 설정의 값이 들어간다
+#   write   과제 내용으로 쓰는 법 — from: write 칸에는 꼭, 문서에서 읽은 칸(용도·목적)에는 사유와 함께 다듬어 쓸 때만 적는다.
+#           사유 쓰기는 사유 칸은 늘 넣고, 문서에서 읽은 칸은 사용자가 고쳤으면 두고(에이전트 칸에 말해 고쳐 쓴 것이면 넣는다)
+#   need    올리기 전에 꼭 채워야 하는 칸 — 비면 화면의 '남은 것'에 이 이름으로 뜬다
+#   not_before  날짜 칸이 이 칸보다 앞서면 읽은 값을 버린다(종료일 < 시작일)
+#   max     글 길이 한도(넘치면 자른다) — 없으면 200자, area 칸은 1000자
+#   wide · area · open · placeholder  화면 꼴 — wide 는 한 줄을 다 쓰고, area 는 여러 줄, open 은 접지 않고 펼쳐 둔다
+#           (용도·사유만 늘 보이고 읽은 칸은 "읽은 문서" 아래에 접혀 있다 — 2026-10-08 사용자 지정)
+fields:
+  - key: gist
+    label: 품목 요지 (제목)
+    wide: true
+    from: document            # 비어 오면 첫 품목 이름으로 "… 외 N건"(src/gongmun.js gistOf)
+    need: 품목
+    read: 공문 제목에 들어갈 짧은 품목 이름. 대표 품목을 짧게 적고(모델 번호는 빼도 됩니다), 품목이 둘 이상이면 "대표 품목 외 N건" 으로 적습니다.
+    example: 34인치 모니터 외 1건
+
+  - key: vendor
+    label: 구매처
+    from: document
+    read: 견적을 낸 업체·판매처 — 상호 그대로. 쇼핑몰 화면이면 판매자이고, 판매자가 없으면 쇼핑몰 이름입니다.
+    example: (주)OO상사
+
+  - key: total
+    label: '합계 (VAT 포함, 원)'
+    type: money
+    from: document            # 비어 오면 공급가액+부가세, 그것도 없으면 품목 금액의 합(그때는 알린다 — src/gongmun.js totalOf)
+    need: 합계
+    read: >-
+      부가세를 포함한 최종 합계(결제·청구할 금액). 할인이 있으면 할인을 뺀 금액입니다. 문서에 "부가세 별도" 이고 합계가 공급가액뿐이면
+      null 로 두고 supply 에 적습니다 — 셈해 넣지 않습니다.
+    example: 989000
+
+  - key: use
+    label: 용도
+    wide: true
+    open: true
+    from: document
+    need: 용도
+    read: >-
+      공문 용도 칸의 초안 — 품목의 쓰임을 짧은 구절로. 문서에 적혀 있으면 그대로, 없으면 품목으로 보아 연구부서에서 흔히 쓰는 쓰임을 적습니다
+      (사용자가 고칩니다). 사유는 여기서 쓰지 않습니다.
+    write: 품목의 쓰임을 짧은 구절로(끝에 마침표 없이). 지금 적힌 용도가 있으면 그것을 다듬어 씁니다.
+    example: 연구 데이터 저장·백업용
+
+  - key: reason
+    label: 구매사유
+    wide: true
+    area: true
+    open: true
+    placeholder: 과제와 이어지는 필요성 — 비워 두지 않습니다
+    from: write
+    need: 구매사유
+    write: 이 품목이 과제 수행에 왜 필요한지 — 과제 내용과 이어지는 필요성을 1~2문장으로, "…필요함" 처럼 명사형으로 끝맺습니다.
+    example: 과제의 MVDC 차단기 시험 데이터 저장·분석에 필요함
+
+  - key: summary
+    label: '요약 (2. 이와 관련하여 …)'
+    wide: true
+    from: auto                # 품목 요지 + "을 구매하고자"(src/gongmun.js summaryOf) — 손대지 않았으면 품목 요지를 고칠 때 따라간다
+
+  - key: account
+    label: 구매계정
+    wide: true
+    from: setup               # 비워 두면 과제의 계정, 그것도 없으면 위의 account
+
+# 사유 쓰기 — context 는 Claude 에게 보여 줄 '품의할 것' 줄이다. 꼴은 body_spec.yaml 의 틀과 같고 자리 이름도 그 vars·lists 다({이름?} 는 비면 줄째 빠진다).
+# 금액·업체는 넣지 않는다 — 사유에 쓰지 말라는 것을 굳이 보여 주지 않는다. rules 는 이 갈래만의 사유 쓰기 규칙(공통은 registries/writing.yaml).
+writing:
+  context: |-
+    {{#품목}}
+    품목: {품목명}
+      사양: {사양?}
+      수량: {수량?}
+    {{/품목}}
+    품목 요지: {품목요지?}
+    지금 적힌 용도: {용도?}
+  rules: []
+
+# 칸에는 없지만 문서에서 더 읽는 것 — 본문의 품목 줄({{#품목}})과 합계·품목 요지를 만드는 재료. 꼴은 fields 와 같고, type 에 list(줄마다 item 의 키)와
+# number(수)가 더 있다. required 는 줄의 필수 키다 — 없으면 그 줄을 뺀다.
+reads:
+  - key: items
+    type: list
+    max: 30
+    read: 품목. 문서의 품목 표를 적힌 차례대로 한 줄씩 옮깁니다. 배송비·설치비처럼 따로 적힌 줄도 품목으로 넣습니다.
+    item:
+      - { key: name, required: true, max: 200, read: 품목명·모델명 — 문서에 적힌 그대로(요약하지 않습니다), example: LG 34WQ75C 34인치 모니터 }
+      - { key: spec, max: 300, read: "규격·사양 — 문서에 적힌 핵심을 ' · ' 로 나열", example: WQHD · 커브드 · USB-C }
+      - { key: qty, type: number, read: 수량, example: 1 }
+      - { key: unit, max: 10, read: 단위(개·대·EA·식 등), example: 대 }
+      - { key: unitPrice, type: money, read: 단가, example: 890000 }
+      - { key: amount, type: money, read: 그 줄의 금액 — 문서에 적힌 그대로, example: 890000 }
+
+  - key: quoteDate
+    type: date
+    read: 견적일·발행일·주문일. 쇼핑몰 화면이면 주문일이고, 주문 전 장바구니·상품 화면이면 null 입니다.
+    example: 2026-10-01
+
+  - key: supply
+    type: money
+    read: 공급가액 합계(부가세를 뺀 금액) — 문서에 따로 적혀 있을 때만
+    example: 899091
+
+  - key: vat
+    type: money
+    read: 부가세 합계 — 문서에 따로 적혀 있을 때만
+    example: 89909
